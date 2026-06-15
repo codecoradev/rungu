@@ -53,9 +53,7 @@ pub async fn create_project(
     CurrentUser(user): CurrentUser,
     Json(body): Json<CreateProjectBody>,
 ) -> Result<(StatusCode, impl IntoResponse), ApiError> {
-    if user.role != rungu_proto::UserRole::Admin {
-        return Err(ApiError::forbidden("Admin access required"));
-    }
+    ApiError::require_admin(&user)?;
 
     let name = body.name.trim();
     if name.is_empty() {
@@ -134,9 +132,7 @@ pub async fn update_project(
     CurrentUser(user): CurrentUser,
     Json(body): Json<UpdateProjectBody>,
 ) -> Result<impl IntoResponse, ApiError> {
-    if user.role != rungu_proto::UserRole::Admin {
-        return Err(ApiError::forbidden("Admin access required"));
-    }
+    ApiError::require_admin(&user)?;
 
     if !body.has_updates() {
         return Err(ApiError::bad_request("No fields to update"));
@@ -171,9 +167,7 @@ pub async fn delete_project(
     Path(slug): Path<String>,
     CurrentUser(user): CurrentUser,
 ) -> Result<StatusCode, ApiError> {
-    if user.role != rungu_proto::UserRole::Admin {
-        return Err(ApiError::forbidden("Admin access required"));
-    }
+    ApiError::require_admin(&user)?;
 
     let project =
         state.store.get_project_by_slug(&slug).await?.ok_or_else(|| ApiError::not_found("Project not found"))?;

@@ -113,11 +113,7 @@ pub async fn delete_comment(
     let existing =
         state.store.get_comment(&comment_id).await?.ok_or_else(|| ApiError::not_found("Comment not found"))?;
 
-    let is_author = existing.created_by == user.id;
-    let is_admin = user.role == rungu_proto::UserRole::Admin;
-    if !is_author && !is_admin {
-        return Err(ApiError::forbidden("You can only delete your own comments"));
-    }
+    ApiError::check_owner_or_admin(&user, &existing.created_by, "You can only delete your own comments")?;
 
     state.store.delete_comment(&comment_id).await?;
 

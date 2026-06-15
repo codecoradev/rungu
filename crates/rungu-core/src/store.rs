@@ -7,12 +7,18 @@ use chrono::{DateTime, Utc};
 use rungu_proto::*;
 use sqlx::{Row, SqlitePool};
 
-/// Parse RFC3339 timestamp from SQLite TEXT column with fallback to datetime('now') format.
+/// Parse a timestamp string from the DB (with fallback).
 fn parse_ts(s: &str) -> DateTime<Utc> {
     DateTime::parse_from_rfc3339(s)
         .or_else(|_| DateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S"))
         .map(|d| d.with_timezone(&Utc))
         .unwrap_or_else(|_| Utc::now())
+}
+
+/// Parse a just-generated RFC3339 timestamp (infallible for our own `to_rfc3339()`).
+fn parse_now(s: &str) -> DateTime<Utc> {
+    // now_ts() always produces valid RFC3339, so this is truly infallible.
+    DateTime::parse_from_rfc3339(s).map(|d| d.with_timezone(&Utc)).unwrap_or_else(|_| Utc::now())
 }
 
 /// Parse UserRole from SQLite TEXT column.
@@ -186,7 +192,7 @@ impl Store {
             slug: slug.to_string(),
             name: name.to_string(),
             description: description.to_string(),
-            created_at: now.parse().unwrap(),
+            created_at: parse_now(&now),
         })
     }
 
@@ -378,8 +384,8 @@ impl Store {
             vote_count: 0,
             comment_count: 0,
             created_by: created_by.to_string(),
-            created_at: now.parse().unwrap(),
-            updated_at: now.parse().unwrap(),
+            created_at: parse_now(&now),
+            updated_at: parse_now(&now),
         })
     }
 
@@ -524,7 +530,7 @@ impl Store {
             parent_id: parent_id.map(String::from),
             content: content.to_string(),
             created_by: created_by.to_string(),
-            created_at: now.parse().unwrap(),
+            created_at: parse_now(&now),
         })
     }
 
@@ -582,8 +588,8 @@ impl Store {
                 name: name.unwrap_or("").to_string(),
                 avatar_url: avatar_url.unwrap_or("").to_string(),
                 role: UserRole::Member,
-                created_at: now.parse().unwrap(),
-                last_login: now.parse().unwrap(),
+                created_at: parse_now(&now),
+                last_login: parse_now(&now),
             })
         }
     }
