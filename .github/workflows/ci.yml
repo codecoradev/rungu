@@ -72,15 +72,21 @@ jobs:
     name: Cora Review
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+      pull-requests: write
+      security-events: write
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
       - name: Fetch base branch
         run: git fetch origin develop:develop
-      - uses: ./.github/actions/cora-review
+      - uses: codecoradev/cora-review-action@v1
         with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
           cora-api-key: ${{ secrets.CORA_API_KEY }}
           cora-base-url: ${{ secrets.CORA_BASE_URL }}
           base-branch: develop
-          format: compact
+          severity: major
+          upload-sarif: "true"

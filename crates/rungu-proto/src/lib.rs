@@ -245,6 +245,18 @@ pub struct ListPostsQuery {
     pub limit: Option<i64>,
 }
 
+/// Resolved parameters for store-level list_posts (borrowed, for internal use).
+#[derive(Debug, Clone)]
+pub struct ListPostsParams<'a> {
+    pub project_id: &'a str,
+    pub sort: PostSort,
+    pub status: Option<PostStatus>,
+    pub category: Option<PostCategory>,
+    pub query: Option<&'a str>,
+    pub offset: i64,
+    pub limit: i64,
+}
+
 // ── Stats ───────────────────────────────────────────────────────────────
 
 /// Project statistics.

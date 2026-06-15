@@ -2,17 +2,17 @@
 
 use anyhow::{Context, Result};
 use chrono::{Duration, Utc};
-use jsonwebtoken::{DecodingKey, EncodingKey, Header, Validation, encode, decode};
+use jsonwebtoken::{DecodingKey, EncodingKey, Header, Validation, decode, encode};
 use rungu_proto::CurrentUser;
 
 /// JWT claims for session tokens.
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct Claims {
-    pub sub: String,     // user_id
+    pub sub: String, // user_id
     pub email: String,
-    pub role: String,    // "admin" or "member"
-    pub exp: i64,        // expiry timestamp
-    pub iat: i64,        // issued at
+    pub role: String, // "admin" or "member"
+    pub exp: i64,     // expiry timestamp
+    pub iat: i64,     // issued at
 }
 
 /// Issue a JWT session token (7-day expiry).
@@ -26,24 +26,16 @@ pub fn issue_jwt(user: &CurrentUser, app_secret: &str) -> Result<String> {
         iat: now.timestamp(),
     };
 
-    let token = encode(
-        &Header::default(),
-        &claims,
-        &EncodingKey::from_secret(app_secret.as_bytes()),
-    )
-    .context("Failed to issue JWT")?;
+    let token = encode(&Header::default(), &claims, &EncodingKey::from_secret(app_secret.as_bytes()))
+        .context("Failed to issue JWT")?;
 
     Ok(token)
 }
 
 /// Validate a JWT and extract current user.
 pub fn validate_jwt(token: &str, app_secret: &str) -> Result<CurrentUser> {
-    let data = decode::<Claims>(
-        token,
-        &DecodingKey::from_secret(app_secret.as_bytes()),
-        &Validation::default(),
-    )
-    .context("Invalid JWT")?;
+    let data = decode::<Claims>(token, &DecodingKey::from_secret(app_secret.as_bytes()), &Validation::default())
+        .context("Invalid JWT")?;
 
     let claims = data.claims;
     Ok(CurrentUser {

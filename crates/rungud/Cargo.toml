@@ -26,3 +26,5 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 anyhow = { workspace = true }
 tower-http = { workspace = true }
+rust-embed = { workspace = true }
+mime_guess = { workspace = true }

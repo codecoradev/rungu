@@ -3,11 +3,8 @@
 //! Core logic — storage, business logic, SQLite queries.
 
 use anyhow::Result;
-use chrono::Utc;
-use sqlx::sqlite::{
-    SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous,
-};
 use sqlx::SqlitePool;
+use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
 use std::str::FromStr;
 use uuid::Uuid;
 
@@ -28,8 +25,7 @@ pub async fn open_pool(db_path: &str) -> Result<SqlitePool> {
 
 /// Run all database migrations.
 pub async fn run_migrations(pool: &SqlitePool) -> Result<()> {
-    let now = Utc::now().to_rfc3339();
-    sqlx::query(include_str!("../../crates/rungud/migrations/001_initial.sql")).execute(pool).await?;
+    sqlx::query(include_str!("../migrations/001_initial.sql")).execute(pool).await?;
     Ok(())
 }
 

@@ -60,8 +60,7 @@ async fn main() -> Result<()> {
     // Init tracing
     tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| cli.log_level.clone().into()),
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| cli.log_level.clone().into()),
         )
         .init();
 
@@ -87,11 +86,7 @@ async fn main() -> Result<()> {
                 }
             }
         }
-        Some(Commands::ProjectAdd {
-            name,
-            slug,
-            description,
-        }) => {
+        Some(Commands::ProjectAdd { name, slug, description }) => {
             let store = rungu_core::Store::new(pool);
             let slug = slug.unwrap_or_else(|| name.to_lowercase().replace(' ', "-"));
             let project = store.create_project(&name, &slug, &description).await?;
