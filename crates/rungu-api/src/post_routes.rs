@@ -187,11 +187,7 @@ pub async fn update_post(
 
     let existing = state.store.get_post(&id, None).await?.ok_or_else(|| ApiError::not_found("Post not found"))?;
 
-    let is_author = existing.post.created_by == user.id;
-    let is_admin = user.role == rungu_proto::UserRole::Admin;
-    if !is_author && !is_admin {
-        return Err(ApiError::forbidden("You can only update your own posts"));
-    }
+    ApiError::check_owner_or_admin(&user, &existing.post.created_by, "You can only update your own posts")?;
 
     if let Some(status_str) = &body.status {
         let status = parse_status(status_str).ok_or_else(|| ApiError::bad_request("Invalid status"))?;
@@ -226,11 +222,7 @@ pub async fn delete_post(
 ) -> Result<StatusCode, ApiError> {
     let existing = state.store.get_post(&id, None).await?.ok_or_else(|| ApiError::not_found("Post not found"))?;
 
-    let is_author = existing.post.created_by == user.id;
-    let is_admin = user.role == rungu_proto::UserRole::Admin;
-    if !is_author && !is_admin {
-        return Err(ApiError::forbidden("You can only delete your own posts"));
-    }
+    ApiError::check_owner_or_admin(&user, &existing.post.created_by, "You can only delete your own posts")?;
 
     state.store.delete_post(&id).await?;
 

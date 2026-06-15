@@ -18,6 +18,8 @@ use axum::Json;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 
+use rungu_proto::{CurrentUser, UserRole};
+
 /// Standard API error.
 #[derive(Debug)]
 pub struct ApiError {
@@ -40,6 +42,17 @@ impl ApiError {
 
     pub fn internal(msg: impl Into<String>) -> Self {
         Self { status: StatusCode::INTERNAL_SERVER_ERROR, message: msg.into() }
+    }
+
+    /// Check if the current user is the owner of a resource or an admin.
+    /// Returns 403 Forbidden if neither.
+    pub fn check_owner_or_admin(user: &CurrentUser, owner_id: &str, msg: &str) -> Result<(), Self> {
+        if user.id == owner_id || user.role == UserRole::Admin { Ok(()) } else { Err(Self::forbidden(msg)) }
+    }
+
+    /// Require admin role. Returns 403 Forbidden if not admin.
+    pub fn require_admin(user: &CurrentUser) -> Result<(), Self> {
+        if user.role == UserRole::Admin { Ok(()) } else { Err(Self::forbidden("Admin access required")) }
     }
 }
 
