@@ -190,30 +190,83 @@ impl Store {
         })
     }
 
-    // ── Posts ───────────────────────────────────────────────────────
+    /// Update a project's name and/or description.
+    pub async fn update_project(
+        &self,
+        project_id: &str,
+        name: Option<&str>,
+        description: Option<&str>,
+    ) -> Result<Project> {
+        if name.is_none() && description.is_none() {
+            anyhow::bail!("At least one of name or description must be provided");
+        }
+
+        if let Some(n) = name {
+            let n = n.trim();
+            if n.is_empty() {
+                anyhow::bail!("Project name cannot be empty");
+            }
+            sqlx::query("UPDATE projects SET name = ? WHERE id = ?")
+                .bind(n)
+                .bind(project_id)
+                .execute(&self.pool)
+                .await
+                .context("Failed to update project name")?;
+        }
+
+        if let Some(d) = description {
+            sqlx::query("UPDATE projects SET description = ? WHERE id = ?")
+                .bind(d)
+                .bind(project_id)
+                .execute(&self.pool)
+                .await
+                .context("Failed to update project description")?;
+        }
+
+        // Fetch and return the updated row
+        self.get_project_by_id(project_id).await?.context("Project disappeared after update")
+    }
+
+    /// Delete a project by ID.
+    ///
+    /// Cascading deletes (posts, votes, comments) are handled by FK constraints.
+    pub async fn delete_project(&self, project_id: &str) -> Result<()> {
+        sqlx::query("DELETE FROM projects WHERE id = ?")
+            .bind(project_id)
+            .execute(&self.pool)
+            .await
+            .context("Failed to delete project")?;
+        Ok(())
+    }
+
+    // ── Posts ───────────────────────────────────────────────────────────
 
     /// List posts for a project with filters and sorting.
+    ///
+    /// Uses parameterized queries throughout — no string interpolation of user input.
     pub async fn list_posts(&self, params: ListPostsParams<'_>) -> Result<(Vec<PostDetail>, i64)> {
-        let mut where_clauses = vec!["project_id = ?1".to_string()];
+        // Build WHERE clause with parameterized placeholders to prevent SQL injection.
+        // User-supplied search query (q) is passed as a bind parameter, never interpolated.
+        let mut conditions = vec!["project_id = ?".to_string()];
+        let mut bind_idx = 1u32; // SQLite parameter index (1-based for first param)
 
-        if let Some(s) = &params.status {
-            where_clauses.push(format!("status = '{:?}'", s));
+        if params.status.is_some() {
+            bind_idx += 1;
+            conditions.push(format!("status = ?{}", bind_idx));
         }
-        if let Some(c) = &params.category {
-            where_clauses.push(format!("category = '{:?}'", c));
+        if params.category.is_some() {
+            bind_idx += 1;
+            conditions.push(format!("category = ?{}", bind_idx));
         }
-        if let Some(q) = &params.query {
-            where_clauses.push(format!("(title LIKE '%{q}%' OR description LIKE '%{q}%')"));
+        if params.query.is_some() {
+            // Two LIKE params for title + description
+            bind_idx += 1;
+            conditions.push(format!("(title LIKE ?{} OR description LIKE ?{})", bind_idx, bind_idx));
         }
 
-        let where_sql = where_clauses.join(" AND ");
+        let where_sql = conditions.join(" AND ");
 
-        // Total count
-        let count_sql = format!("SELECT COUNT(*) as cnt FROM posts WHERE {where_sql}");
-        let total: i64 =
-            sqlx::query_scalar(&count_sql).bind(params.project_id).fetch_one(&self.pool).await.unwrap_or(0);
-
-        // Sort
+        // Sort — safe because it's a hardcoded match, not user input
         let order = match params.sort {
             PostSort::Newest => "created_at DESC",
             PostSort::Oldest => "created_at ASC",
@@ -222,22 +275,55 @@ impl Store {
             PostSort::RecentlyUpdated => "updated_at DESC",
         };
 
+        // Build count query with same WHERE clause (no LIMIT/OFFSET)
+        let count_sql = format!("SELECT COUNT(*) as cnt FROM posts WHERE {where_sql}");
+        let mut count_query = sqlx::query_scalar::<_, i64>(&count_sql).bind(params.project_id);
+        let mut next_idx = 2u32;
+
+        if let Some(ref s) = params.status {
+            count_query = count_query.bind(format!("{:?}", s).to_lowercase());
+            next_idx += 1;
+        }
+        if let Some(ref c) = params.category {
+            count_query = count_query.bind(format!("{:?}", c).to_lowercase());
+            next_idx += 1;
+        }
+        if let Some(q) = params.query {
+            let pattern = format!("%{q}%");
+            count_query = count_query.bind(pattern.clone()).bind(pattern);
+            next_idx += 1;
+        }
+
+        let total = count_query.fetch_one(&self.pool).await.unwrap_or(0);
+
+        // Build main query
+        let limit_idx = next_idx;
+        let offset_idx = next_idx + 1;
         let sql = format!(
             "SELECT p.*, u.id as user_id, u.email as user_email, u.name as user_name, u.avatar_url as user_avatar \
              FROM posts p \
              LEFT JOIN users u ON p.created_by = u.id \
              WHERE {where_sql} \
              ORDER BY {order} \
-             LIMIT ?2 OFFSET ?3"
+             LIMIT ?{limit_idx} OFFSET ?{offset_idx}"
         );
 
-        let rows = sqlx::query(&sql)
-            .bind(params.project_id)
-            .bind(params.limit)
-            .bind(params.offset)
-            .fetch_all(&self.pool)
-            .await
-            .context("Failed to list posts")?;
+        let mut query = sqlx::query(&sql).bind(params.project_id);
+
+        if let Some(ref s) = params.status {
+            query = query.bind(format!("{:?}", s).to_lowercase());
+        }
+        if let Some(ref c) = params.category {
+            query = query.bind(format!("{:?}", c).to_lowercase());
+        }
+        if let Some(q) = params.query {
+            let pattern = format!("%{q}%");
+            query = query.bind(pattern.clone()).bind(pattern);
+        }
+
+        query = query.bind(params.limit).bind(params.offset);
+
+        let rows = query.fetch_all(&self.pool).await.context("Failed to list posts")?;
 
         let posts = rows.iter().map(map_post_detail).collect();
         Ok((posts, total))
