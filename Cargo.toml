@@ -1,0 +1,82 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/rungu-proto",
+    "crates/rungu-core",
+    "crates/rungu-auth",
+    "crates/rungu-api",
+    "crates/rungu-mcp",
+    "crates/rungud",
+]
+
+[workspace.package]
+version = "0.0.1"
+edition = "2024"
+license = "Apache-2.0"
+repository = "https://github.com/codecoradev/rungu"
+rust-version = "1.86"
+
+[workspace.dependencies]
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Async
+tokio = { version = "1", features = ["full"] }
+
+# Database
+sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite", "migrate"] }
+
+# Web framework
+axum = { version = "0.8", features = ["ws"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["cors", "trace"] }
+
+# HTTP client
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+
+# Auth / JWT
+jsonwebtoken = "9"
+openidconnect = "3"
+url = "2"
+
+# Crypto
+argon2 = "0.5"
+
+# Embed
+mime_guess = "2"
+rust-embed = { version = "8", features = ["include-exclude"] }
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# MCP
+serde_jsonrpc = "0.2"
+
+# Errors
+thiserror = "2"
+anyhow = "1"
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Time
+chrono = { version = "0.4", features = ["serde"] }
+
+# UUID
+uuid = { version = "1", features = ["v4", "serde"] }
+
+# Internal crates
+rungu_proto = { path = "crates/rungu-proto" }
+rungu_core = { path = "crates/rungu-core" }
+rungu_auth = { path = "crates/rungu-auth" }
+rungu_api = { path = "crates/rungu-api" }
+rungu_mcp = { path = "crates/rungu-mcp" }
+
+[profile.release]
+opt-level = "z"
+lto = "fat"
+panic = "abort"
+strip = true
+codegen-units = 1

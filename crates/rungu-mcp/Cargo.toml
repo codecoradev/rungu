@@ -1,0 +1,17 @@
+# rungu-mcp
+[package]
+name = "rungu_mcp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "MCP server — stdio transport, AI agent tools"
+
+[dependencies]
+rungu_proto = { workspace = true }
+rungu_core = { workspace = true }
+sqlx = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+anyhow = { workspace = true }
+serde_jsonrpc = { workspace = true }

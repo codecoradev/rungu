@@ -1,0 +1,38 @@
+services:
+  rungu:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ghcr.io/codecoradev/rungu:latest
+    container_name: rungu
+    restart: unless-stopped
+    ports:
+      - "${RUNGU_PORT:-3000}:3000"
+    volumes:
+      - rungu-data:/data
+    environment:
+      - RUST_LOG=${RUST_LOG:-rungu=info}
+      - APP_SECRET=${APP_SECRET:-change-me}
+      - APP_URL=${APP_URL:-http://localhost:3000}
+      - RUNGU_SECURE_COOKIE=${RUNGU_SECURE_COOKIE:-false}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}
+      - GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID:-}
+      - GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET:-}
+      - KEYCLOAK_URL=${KEYCLOAK_URL:-}
+      - KEYCLOAK_REALM=${KEYCLOAK_REALM:-}
+      - KEYCLOAK_CLIENT_ID=${KEYCLOAK_CLIENT_ID:-}
+      - KEYCLOAK_CLIENT_SECRET=${KEYCLOAK_CLIENT_SECRET:-}
+    command: >
+      --db /data/rungu.db
+      serve
+      --listen 0.0.0.0:3000
+    healthcheck:
+      test: ["CMD", "/rungu", "--db", "/data/rungu.db", "healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  rungu-data:
