@@ -2,8 +2,8 @@
 
 use axum::{Router, routing::get};
 use rungu_api::AppState;
-use rungu_api::api_routes;
 use rungu_api::openapi::ApiDoc;
+use rungu_api::{api_routes, auth_routes};
 use tower_http::cors::Any;
 use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
@@ -19,8 +19,6 @@ pub async fn serve(config: Config, pool: sqlx::SqlitePool, listen: &str) -> anyh
     let store = rungu_core::Store::new(pool);
     let state = AppState { store, config: config.auth.clone() };
 
-    let api_routes = api_routes();
-
     // CORS
     let cors = if config.cors_origins.is_empty() {
         CorsLayer::new().allow_origin(Any).allow_methods(Any).allow_headers(Any)
@@ -32,7 +30,8 @@ pub async fn serve(config: Config, pool: sqlx::SqlitePool, listen: &str) -> anyh
     };
 
     let app = Router::new()
-        .nest("/api", api_routes)
+        .nest("/api", api_routes())
+        .merge(auth_routes())
         .merge(SwaggerUi::new("/swagger-ui").url("/api-docs/openapi.json", ApiDoc::openapi()))
         .route("/health", get(health_check))
         .fallback(spa_handler)
