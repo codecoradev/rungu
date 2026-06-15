@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { Button } from '$lib/components/ui/button';
     import { api } from '$lib/api/client';
     import type { ProviderInfo } from '$lib/api/types';
     import { onMount } from 'svelte';
@@ -24,16 +25,18 @@
 <div class="flex flex-col gap-3">
     {#each providers as provider (provider.name)}
         {@const meta = providerMeta[provider.name] ?? { label: provider.name, icon: '🔑' }}
-        <button
+        <Button
+            variant="outline"
+            size="lg"
             onclick={() => api.login(provider.name)}
-            class="flex items-center justify-center gap-2 rounded-lg border border-gray-200 bg-white px-4 py-2.5 font-medium text-gray-700 transition-colors hover:bg-gray-50"
+            class="justify-start gap-2"
         >
             <span class="text-lg">{meta.icon}</span>
             <span>Continue with {meta.label}</span>
-        </button>
+        </Button>
     {/each}
 
     {#if providers.length === 0}
-        <p class="text-center text-sm text-gray-400">No auth providers configured.</p>
+        <p class="text-center text-sm text-muted-foreground">No auth providers configured.</p>
     {/if}
 </div>

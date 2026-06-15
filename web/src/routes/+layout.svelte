@@ -1,8 +1,8 @@
 <script lang="ts">
     import { onMount } from 'svelte';
-    import { page } from '$app/stores';
     import { api } from '$lib/api/client';
     import type { CurrentUser } from '$lib/api/types';
+    import { Button } from '$lib/components/ui/button';
 
     let { children } = $props();
     let user = $state<CurrentUser | null>(null);
@@ -26,44 +26,34 @@
 </script>
 
 <div class="min-h-screen">
-    <!-- Navbar -->
-    <nav class="border-b border-gray-200 bg-white">
+    <nav class="border-b border-border bg-background">
         <div class="mx-auto flex max-w-5xl items-center justify-between px-4 py-3">
-            <a href="/" class="flex items-center gap-2 font-bold text-gray-900">
+            <a href="/" class="flex items-center gap-2 font-bold">
                 <span class="text-xl">🛡️</span>
                 <span>Rungu</span>
             </a>
 
-            <div class="flex items-center gap-4">
+            <div class="flex items-center gap-2">
                 {#if loading}
-                    <div class="size-8 animate-pulse rounded-full bg-gray-100"></div>
+                    <div class="size-8 animate-pulse rounded-full bg-muted"></div>
                 {:else if user}
-                    <span class="text-sm text-gray-500">{user.email}</span>
-                    <button
-                        onclick={handleLogout}
-                        class="rounded-lg px-3 py-1.5 text-sm font-medium text-gray-600 hover:bg-gray-50"
-                    >
-                        Logout
-                    </button>
+                    <span class="text-sm text-muted-foreground">{user.email}</span>
+                    {#if user.role === 'admin'}
+                        <Button variant="ghost" size="sm" href="/admin">Admin</Button>
+                    {/if}
+                    <Button variant="outline" size="sm" onclick={handleLogout}>Logout</Button>
                 {:else}
-                    <a
-                        href="/login"
-                        class="rounded-lg bg-brand-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-brand-700"
-                    >
-                        Login
-                    </a>
+                    <Button size="sm" href="/login">Login</Button>
                 {/if}
             </div>
         </div>
     </nav>
 
-    <!-- Page content -->
     <main class="mx-auto max-w-5xl px-4 py-6">
         {@render children()}
     </main>
 
-    <!-- Footer -->
-    <footer class="border-t border-gray-200 py-4 text-center text-xs text-gray-400">
+    <footer class="border-t border-border py-4 text-center text-xs text-muted-foreground">
         <p>Rungu · Lightweight Feedback Board · Apache-2.0</p>
     </footer>
 </div>
