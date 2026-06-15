@@ -166,6 +166,58 @@ impl Store {
         })
     }
 
+    /// Update a project's name and/or description.
+    ///
+    /// At least one of `name` or `description` must be `Some`.
+    /// Returns the updated `Project`.
+    pub async fn update_project(
+        &self,
+        project_id: &str,
+        name: Option<&str>,
+        description: Option<&str>,
+    ) -> Result<Project> {
+        if name.is_none() && description.is_none() {
+            anyhow::bail!("At least one of name or description must be provided");
+        }
+
+        if let Some(n) = name {
+            let n = n.trim();
+            if n.is_empty() {
+                anyhow::bail!("Project name cannot be empty");
+            }
+            sqlx::query("UPDATE projects SET name = ? WHERE id = ?")
+                .bind(n)
+                .bind(project_id)
+                .execute(&self.pool)
+                .await
+                .context("Failed to update project name")?;
+        }
+
+        if let Some(d) = description {
+            sqlx::query("UPDATE projects SET description = ? WHERE id = ?")
+                .bind(d)
+                .bind(project_id)
+                .execute(&self.pool)
+                .await
+                .context("Failed to update project description")?;
+        }
+
+        // Fetch and return the updated row
+        self.get_project_by_id(project_id).await?.context("Project disappeared after update")
+    }
+
+    /// Delete a project by ID.
+    ///
+    /// Cascading deletes (posts, votes, comments) are handled by FK constraints.
+    pub async fn delete_project(&self, project_id: &str) -> Result<()> {
+        sqlx::query("DELETE FROM projects WHERE id = ?")
+            .bind(project_id)
+            .execute(&self.pool)
+            .await
+            .context("Failed to delete project")?;
+        Ok(())
+    }
+
     // ── Posts ───────────────────────────────────────────────────────
 
     /// List posts for a project with filters and sorting.
