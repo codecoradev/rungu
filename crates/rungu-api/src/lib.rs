@@ -3,6 +3,7 @@
 //! REST API routes — Axum handlers for projects, posts, votes, comments, auth.
 
 pub mod auth_routes;
+pub mod oauth;
 
 use axum::extract::FromRef;
 use rungu_core::Store;
