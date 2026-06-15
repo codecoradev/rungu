@@ -243,25 +243,22 @@ impl Store {
 
     /// List posts for a project with filters and sorting.
     ///
-    /// Uses parameterized queries throughout — no string interpolation of user input.
+    /// Uses positional `?` parameter binding — user input is NEVER interpolated into SQL.
+    /// The search query uses `LIKE ?` with the pattern passed as a bind parameter.
     pub async fn list_posts(&self, params: ListPostsParams<'_>) -> Result<(Vec<PostDetail>, i64)> {
-        // Build WHERE clause with parameterized placeholders to prevent SQL injection.
-        // User-supplied search query (q) is passed as a bind parameter, never interpolated.
+        // Build WHERE clause fragments — only add conditions for filters that are present.
+        // Each `?` is a positional placeholder bound later via .bind().
         let mut conditions = vec!["project_id = ?".to_string()];
-        let mut bind_idx = 1u32; // SQLite parameter index (1-based for first param)
 
         if params.status.is_some() {
-            bind_idx += 1;
-            conditions.push(format!("status = ?{}", bind_idx));
+            conditions.push("status = ?".to_string());
         }
         if params.category.is_some() {
-            bind_idx += 1;
-            conditions.push(format!("category = ?{}", bind_idx));
+            conditions.push("category = ?".to_string());
         }
         if params.query.is_some() {
-            // Two LIKE params for title + description
-            bind_idx += 1;
-            conditions.push(format!("(title LIKE ?{} OR description LIKE ?{})", bind_idx, bind_idx));
+            // Same pattern bound twice for title OR description LIKE
+            conditions.push("(title LIKE ? OR description LIKE ?)".to_string());
         }
 
         let where_sql = conditions.join(" AND ");
@@ -275,53 +272,40 @@ impl Store {
             PostSort::RecentlyUpdated => "updated_at DESC",
         };
 
-        // Build count query with same WHERE clause (no LIMIT/OFFSET)
-        let count_sql = format!("SELECT COUNT(*) as cnt FROM posts WHERE {where_sql}");
-        let mut count_query = sqlx::query_scalar::<_, i64>(&count_sql).bind(params.project_id);
-        let mut next_idx = 2u32;
-
-        if let Some(ref s) = params.status {
-            count_query = count_query.bind(format!("{:?}", s).to_lowercase());
-            next_idx += 1;
+        // Helper: bind optional filter values in order (project_id already first)
+        // Returns the next bind index (for limit/offset appended after).
+        macro_rules! bind_filters {
+            ($query:expr) => {{
+                let q = $query.bind(params.project_id);
+                let q = if let Some(ref s) = params.status { q.bind(format!("{:?}", s).to_lowercase()) } else { q };
+                let q = if let Some(ref c) = params.category { q.bind(format!("{:?}", c).to_lowercase()) } else { q };
+                let q = if let Some(query_text) = params.query {
+                    let pattern = format!("%{query_text}%");
+                    // Bind twice: once for title LIKE, once for description LIKE
+                    q.bind(pattern.clone()).bind(pattern)
+                } else {
+                    q
+                };
+                q
+            }};
         }
-        if let Some(ref c) = params.category {
-            count_query = count_query.bind(format!("{:?}", c).to_lowercase());
-            next_idx += 1;
-        }
-        if let Some(q) = params.query {
-            let pattern = format!("%{q}%");
-            count_query = count_query.bind(pattern.clone()).bind(pattern);
-            next_idx += 1;
-        }
 
-        let total = count_query.fetch_one(&self.pool).await.unwrap_or(0);
+        // Count query (same WHERE, no LIMIT/OFFSET)
+        let count_sql = format!("SELECT COUNT(*) FROM posts WHERE {where_sql}");
+        let total: i64 =
+            bind_filters!(sqlx::query_scalar::<_, i64>(&count_sql)).fetch_one(&self.pool).await.unwrap_or(0);
 
-        // Build main query
-        let limit_idx = next_idx;
-        let offset_idx = next_idx + 1;
+        // Main query with LIMIT/OFFSET appended
         let sql = format!(
             "SELECT p.*, u.id as user_id, u.email as user_email, u.name as user_name, u.avatar_url as user_avatar \
              FROM posts p \
              LEFT JOIN users u ON p.created_by = u.id \
              WHERE {where_sql} \
              ORDER BY {order} \
-             LIMIT ?{limit_idx} OFFSET ?{offset_idx}"
+             LIMIT ? OFFSET ?"
         );
 
-        let mut query = sqlx::query(&sql).bind(params.project_id);
-
-        if let Some(ref s) = params.status {
-            query = query.bind(format!("{:?}", s).to_lowercase());
-        }
-        if let Some(ref c) = params.category {
-            query = query.bind(format!("{:?}", c).to_lowercase());
-        }
-        if let Some(q) = params.query {
-            let pattern = format!("%{q}%");
-            query = query.bind(pattern.clone()).bind(pattern);
-        }
-
-        query = query.bind(params.limit).bind(params.offset);
+        let query = bind_filters!(sqlx::query(&sql)).bind(params.limit).bind(params.offset);
 
         let rows = query.fetch_all(&self.pool).await.context("Failed to list posts")?;
 

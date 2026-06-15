@@ -12,7 +12,7 @@ use crate::error::ApiError;
 // ── Routes ─────────────────────────────────────────────────────────────
 
 pub fn router() -> Router<AppState> {
-    Router::new().route("/posts/:id/vote", axum::routing::post(toggle_vote).get(check_voted))
+    Router::new().route("/posts/{id}/vote", axum::routing::post(toggle_vote).get(check_voted))
 }
 
 // ── Handlers ───────────────────────────────────────────────────────────

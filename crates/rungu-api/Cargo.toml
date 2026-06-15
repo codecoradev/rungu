@@ -23,3 +23,9 @@ chrono = { workspace = true }
 url = { workspace = true }
 urlencoding = "2.1"
 utoipa = { workspace = true }
+
+[dev-dependencies]
+tower = { workspace = true }
+tokio = { workspace = true }
+anyhow = { workspace = true }
+rungu_core = { workspace = true }

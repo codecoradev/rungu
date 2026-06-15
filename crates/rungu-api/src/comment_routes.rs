@@ -14,8 +14,8 @@ use crate::error::ApiError;
 
 pub fn router() -> Router<AppState> {
     Router::new()
-        .route("/posts/:id/comments", axum::routing::get(list_comments).post(create_comment))
-        .route("/comments/:id", axum::routing::delete(delete_comment))
+        .route("/posts/{id}/comments", axum::routing::get(list_comments).post(create_comment))
+        .route("/comments/{id}", axum::routing::delete(delete_comment))
 }
 
 // ── Handlers ───────────────────────────────────────────────────────────

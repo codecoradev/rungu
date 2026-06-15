@@ -14,7 +14,7 @@ use crate::error::ApiError;
 
 // ── Request types ──────────────────────────────────────────────────────
 
-/// Query params for `GET /api/projects/:slug/posts`.
+/// Query params for `GET /api/projects/{slug}/posts`.
 #[derive(Debug, Deserialize, IntoParams)]
 #[into_params(parameter_in = Query)]
 pub struct ListPostsQuery {
@@ -33,8 +33,8 @@ pub struct ListPostsQuery {
 
 pub fn router() -> Router<AppState> {
     Router::new()
-        .route("/projects/:slug/posts", axum::routing::get(list_posts).post(create_post))
-        .route("/posts/:id", axum::routing::get(get_post).patch(update_post).delete(delete_post))
+        .route("/projects/{slug}/posts", axum::routing::get(list_posts).post(create_post))
+        .route("/posts/{id}", axum::routing::get(get_post).patch(update_post).delete(delete_post))
 }
 
 // ── Handlers ───────────────────────────────────────────────────────────

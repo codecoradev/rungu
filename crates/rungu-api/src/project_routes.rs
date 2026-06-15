@@ -15,7 +15,7 @@ use crate::error::ApiError;
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/projects", axum::routing::get(list_projects).post(create_project))
-        .route("/projects/:slug", axum::routing::get(get_project).patch(update_project).delete(delete_project))
+        .route("/projects/{slug}", axum::routing::get(get_project).patch(update_project).delete(delete_project))
 }
 
 // ── Handlers ───────────────────────────────────────────────────────────
