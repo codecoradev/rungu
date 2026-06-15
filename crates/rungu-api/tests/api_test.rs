@@ -5,7 +5,7 @@
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use rungu_api::api_routes;
+use rungu_api::{AppState, api_routes, auth_routes};
 use rungu_auth::AuthConfig;
 use rungu_auth::session::issue_jwt;
 use rungu_core::{Store, open_pool, run_migrations};
@@ -28,8 +28,11 @@ async fn setup_app() -> (axum::Router, Store) {
         keycloak: None,
     };
 
-    let state = rungu_api::AppState { store: store.clone(), config };
-    let app = api_routes().with_state(state);
+    let state = AppState { store: store.clone(), config };
+    // Tests use bare paths (e.g. "/projects") — match the production router structure:
+    // API routes under /api, auth routes at root.
+    // For simplicity in tests, mount everything at root.
+    let app = axum::Router::new().merge(api_routes().with_state(state.clone())).merge(auth_routes().with_state(state));
     (app, store)
 }
 

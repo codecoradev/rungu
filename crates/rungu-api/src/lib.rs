@@ -28,10 +28,15 @@ impl FromRef<AppState> for rungu_auth::AuthConfig {
     }
 }
 
-/// Build the complete API router.
+/// Auth routes — mounted at root level (NOT under /api).
+/// OAuth callback URLs need to be at `/auth/:provider/callback` for redirect URIs.
+pub fn auth_routes() -> Router<AppState> {
+    auth_routes::auth_routes()
+}
+
+/// API routes — mounted under `/api`.
 pub fn api_routes() -> Router<AppState> {
     Router::new()
-        .merge(auth_routes::auth_routes())
         .merge(project_routes::router())
         .merge(post_routes::router())
         .merge(vote_routes::router())
