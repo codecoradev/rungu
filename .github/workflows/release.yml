@@ -1,0 +1,270 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  sync-main:
+    name: Sync main branch
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: develop
+      - name: Push to main
+        run: |
+          git push origin HEAD:main --force
+          echo "✅ main synced to develop at ${{ github.sha }}"
+
+  build-release:
+    needs: sync-main
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact: rungu-x86_64-unknown-linux-gnu
+            ext: tar.gz
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            artifact: rungu-aarch64-unknown-linux-gnu
+            ext: tar.gz
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            artifact: rungu-aarch64-apple-darwin
+            ext: tar.gz
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact: rungu-x86_64-pc-windows-msvc
+            ext: zip
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Setup Node.js (for frontend SPA)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: web/package-lock.json
+      - name: Build frontend SPA
+        run: |
+          cd web
+          npm ci
+          npm run build
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - name: Build release binary
+        run: cargo build --release --target ${{ matrix.target }}
+      - name: Strip binary (Unix)
+        if: runner.os != 'Windows'
+        run: strip target/${{ matrix.target }}/release/rungu
+      - name: Extract version
+        id: version
+        shell: bash
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+      - name: Package (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          mkdir -p release
+          cp target/${{ matrix.target }}/release/rungu release/rungu
+          cd release
+          tar czf ${{ matrix.artifact }}-${{ steps.version.outputs.VERSION }}.${{ matrix.ext }} rungu
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          mkdir release
+          cp target/${{ matrix.target }}/release/rungu.exe release/rungu.exe
+          cd release
+          7z a ${{ matrix.artifact }}-${{ steps.version.outputs.VERSION }}.${{ matrix.ext }} rungu.exe
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.artifact }}-${{ steps.version.outputs.VERSION }}
+          path: release/${{ matrix.artifact }}-${{ steps.version.outputs.VERSION }}.${{ matrix.ext }}
+
+  docker-build:
+    needs: sync-main
+    name: Docker ${{ matrix.platform }}
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-latest
+          - platform: linux/arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - name: Extract version
+        id: version
+        run: |
+          TAG_VERSION="${GITHUB_REF#refs/tags/}"
+          SEMVER="${TAG_VERSION#v}"
+          echo "TAG=$TAG_VERSION" >> $GITHUB_OUTPUT
+          echo "SEMVER=$SEMVER" >> $GITHUB_OUTPUT
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: ${{ matrix.platform }}
+          outputs: type=image,name=ghcr.io/${{ github.repository }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=${{ matrix.platform }}
+          cache-to: type=gha,scope=${{ matrix.platform }},mode=max
+      - name: Export digest
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+      - name: Upload digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: digest-${{ matrix.runner }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  docker-merge:
+    needs: docker-build
+    name: Docker merge manifest
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Extract version
+        id: version
+        run: |
+          TAG_VERSION="${GITHUB_REF#refs/tags/}"
+          SEMVER="${TAG_VERSION#v}"
+          echo "TAG=$TAG_VERSION" >> $GITHUB_OUTPUT
+          echo "SEMVER=$SEMVER" >> $GITHUB_OUTPUT
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digest-*
+          merge-multiple: true
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Create manifest list and push
+        working-directory: /tmp/digests
+        run: |
+          docker buildx imagetools create \
+            -t ghcr.io/${{ github.repository }}:${{ steps.version.outputs.SEMVER }} \
+            -t ghcr.io/${{ github.repository }}:latest \
+            $(printf 'ghcr.io/${{ github.repository }}@sha256:%s ' *)
+      - name: Inspect image
+        run: docker buildx imagetools inspect ghcr.io/${{ github.repository }}:${{ steps.version.outputs.SEMVER }}
+
+  release:
+    name: Create GitHub Release
+    needs: [build-release]
+    if: always() && needs.build-release.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+          pattern: rungu-*
+      - name: Generate SHA256 checksums
+        run: |
+          cd release-artifacts
+          find . -mindepth 2 -type f -exec mv {} . \;
+          find . -mindepth 1 -maxdepth 1 -type d -empty -delete
+          sha256sum *.tar.gz *.zip > checksums-sha256.txt 2>/dev/null || true
+          sha256sum * > checksums-sha256.txt
+          cat checksums-sha256.txt
+      - name: Extract version from tag
+        id: version
+        run: |
+          TAG_VERSION="${GITHUB_REF#refs/tags/}"
+          SEMVER="${TAG_VERSION#v}"
+          echo "TAG=$TAG_VERSION" >> $GITHUB_OUTPUT
+          echo "VERSION=$SEMVER" >> $GITHUB_OUTPUT
+      - name: Extract changelog for this version
+        id: changelog
+        run: |
+          CHANGELOG_EXCERPT=$(sed -n '/^## \['"${{ steps.version.outputs.VERSION }}"'\]/,/^## \[/p' CHANGELOG.md | sed '$d' | tail -n +2)
+          {
+            printf '## What'\''s New in %s\n\n' "${{ steps.version.outputs.TAG }}"
+            printf '%s\n\n' "$CHANGELOG_EXCERPT"
+            printf '### 📦 Platforms\n\n'
+            printf '| Platform | File |\n'
+            printf '|----------|------|\n'
+            printf '| Linux (x86_64) | `rungu-x86_64-unknown-linux-gnu-%s.tar.gz` |\n' "${{ steps.version.outputs.TAG }}"
+            printf '| Linux (ARM64) | `rungu-aarch64-unknown-linux-gnu-%s.tar.gz` |\n' "${{ steps.version.outputs.TAG }}"
+            printf '| macOS (Apple Silicon) | `rungu-aarch64-apple-darwin-%s.tar.gz` |\n' "${{ steps.version.outputs.TAG }}"
+            printf '| Windows (x86_64) | `rungu-x86_64-pc-windows-msvc-%s.zip` |\n\n' "${{ steps.version.outputs.TAG }}"
+            printf '### 🐳 Docker\n\n'
+            printf '```bash\n'
+            printf 'docker pull ghcr.io/codecoradev/rungu:%s\n' "${{ steps.version.outputs.VERSION }}"
+            printf '```\n\n'
+            printf '### 🚀 Quick Start\n\n'
+            printf '```bash\n'
+            printf 'docker run -p 3000:3000 ghcr.io/codecoradev/rungu:%s\n\n' "${{ steps.version.outputs.VERSION }}"
+            printf './rungu project add "My App"\n'
+            printf './rungu serve\n'
+            printf '```\n\n'
+            printf '**Full changelog:** https://github.com/codecoradev/rungu/blob/main/CHANGELOG.md\n'
+          } > release-notes.md
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.TAG }}
+          name: Release ${{ steps.version.outputs.TAG }}
+          body_path: release-notes.md
+          files: release-artifacts/*
+          draft: false
+          prerelease: ${{ contains(steps.version.outputs.TAG, '-') }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
