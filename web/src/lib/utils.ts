@@ -1,14 +1,41 @@
-import { clsx, type ClassValue } from 'clsx';
+import { type ClassValue, clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
+import type { Snippet } from 'svelte';
+
+// ── Shadcn UI helpers ─────────────────────────────────────────────────
 
 export function cn(...inputs: ClassValue[]) {
     return twMerge(clsx(inputs));
 }
 
-export function timeAgo(date: string): string {
-    const now = Date.now();
-    const past = new Date(date).getTime();
-    const seconds = Math.floor((now - past) / 1000);
+export type WithoutChildren<T> = T extends { children?: Snippet } ? Omit<T, 'children'> : T;
+export type WithElementRef<T, U extends HTMLElement = HTMLElement> = WithoutChildren<T> & {
+    ref?: U | null;
+    children?: Snippet;
+};
+
+// ── Badge color mapping ───────────────────────────────────────────────
+
+import type { BadgeVariant } from '$lib/components/ui/badge/badge.svelte';
+
+export function statusColor(status: string): BadgeVariant {
+    const map: Record<string, BadgeVariant> = {
+        open: 'secondary',
+        planned: 'default',
+        in_progress: 'default',
+        done: 'outline',
+        declined: 'destructive',
+    };
+    return map[status] ?? 'outline';
+}
+
+// ── Time formatting ───────────────────────────────────────────────────
+
+export function timeAgo(dateStr: string): string {
+    if (!dateStr) return '';
+    const now = new Date();
+    const date = new Date(dateStr);
+    const seconds = Math.floor((now.getTime() - date.getTime()) / 1000);
 
     if (seconds < 60) return 'just now';
     const minutes = Math.floor(seconds / 60);
@@ -22,8 +49,9 @@ export function timeAgo(date: string): string {
     return `${Math.floor(months / 12)}y ago`;
 }
 
-export function formatDate(date: string): string {
-    return new Date(date).toLocaleDateString('en-US', {
+export function formatDate(dateStr: string): string {
+    if (!dateStr) return '';
+    return new Date(dateStr).toLocaleDateString('en-US', {
         year: 'numeric',
         month: 'short',
         day: 'numeric',

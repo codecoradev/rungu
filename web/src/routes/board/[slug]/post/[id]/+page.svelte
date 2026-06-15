@@ -6,7 +6,10 @@
     import CategoryBadge from '$lib/components/CategoryBadge.svelte';
     import VoteButton from '$lib/components/VoteButton.svelte';
     import CommentThread from '$lib/components/CommentThread.svelte';
-    import { timeAgo, cn } from '$lib/utils';
+    import { Button } from '$lib/components/ui/button';
+    import { Textarea } from '$lib/components/ui/textarea';
+    import * as Card from '$lib/components/ui/card';
+    import { timeAgo } from '$lib/utils';
 
     let { params } = $props();
     let slug = $derived(params.slug);
@@ -30,10 +33,7 @@
         loading = true;
         try {
             post = await api.getPost(postId);
-            const [commentList] = await Promise.all([
-                api.listComments(postId),
-            ]);
-            comments = commentList;
+            comments = await api.listComments(postId);
         } catch (e) {
             error = e instanceof ApiError && e.status === 404 ? 'Post not found' : 'Failed to load post';
         } finally {
@@ -62,7 +62,7 @@
             comments = [...comments, newComment];
             commentText = '';
             replyTo = null;
-        } catch (err) {
+        } catch {
             error = 'Failed to post comment';
         } finally {
             commentLoading = false;
@@ -102,20 +102,21 @@
 </svelte:head>
 
 {#if loading}
-    <div class="py-16 text-center">
-        <div class="inline-block size-8 animate-spin rounded-full border-2 border-gray-200 border-t-brand-600"></div>
-    </div>
+    <Card.Root>
+        <Card.Header class="h-48 animate-pulse bg-muted" />
+    </Card.Root>
 {:else if error}
     <div class="py-16 text-center">
-        <p class="text-lg text-gray-500">{error}</p>
-        <a href={`/board/${slug}`} class="mt-3 inline-block text-sm text-brand-600 hover:underline">← Back to board</a>
+        <p class="text-lg text-muted-foreground">{error}</p>
+        <Button variant="link" href={`/board/${slug}`}>← Back to board</Button>
     </div>
 {:else if post}
-    <a href={`/board/${slug}`} class="text-sm text-gray-400 hover:text-gray-600">← Back to board</a>
+    <Button variant="link" size="sm" href={`/board/${slug}`} class="px-0 text-muted-foreground">
+        ← Back to board
+    </Button>
 
-    <article class="mt-3 rounded-xl border border-gray-200 bg-white p-6">
-        <!-- Header -->
-        <div class="flex items-start gap-4">
+    <Card.Root class="mt-3">
+        <Card.Header class="flex-row items-start gap-4">
             <div class="shrink-0">
                 <VoteButton postId={post.id} voted={post.user_voted} count={post.vote_count} onvote={handleVote} />
             </div>
@@ -127,7 +128,7 @@
                         <select
                             value={post.status}
                             onchange={handleStatusChange}
-                            class="rounded-md border border-gray-200 px-2 py-0.5 text-xs text-gray-500"
+                            class="rounded-md border border-input bg-background px-2 py-0.5 text-xs capitalize"
                         >
                             {#each statusOptions as s (s)}
                                 <option value={s} class="capitalize">{s.replace('_', ' ')}</option>
@@ -135,60 +136,53 @@
                         </select>
                     {/if}
                 </div>
-                <h1 class="text-xl font-bold text-gray-900">{post.title}</h1>
-                <div class="mt-2 flex items-center gap-2 text-xs text-gray-400">
+                <Card.Title class="text-xl">{post.title}</Card.Title>
+                <div class="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
                     <span>{post.creator.name || post.creator.email}</span>
                     <span>·</span>
                     <span>{timeAgo(post.created_at)}</span>
                 </div>
             </div>
-        </div>
-
+        </Card.Header>
         {#if post.description}
-            <div class="mt-4 whitespace-pre-wrap text-sm leading-relaxed text-gray-600">
-                {post.description}
-            </div>
+            <Card.Content>
+                <div class="whitespace-pre-wrap text-sm leading-relaxed text-muted-foreground">
+                    {post.description}
+                </div>
+            </Card.Content>
         {/if}
-    </article>
+    </Card.Root>
 
-    <!-- Comments section -->
     <section class="mt-6">
-        <h2 class="mb-4 text-sm font-semibold text-gray-700">
-            Comments ({comments.length})
-        </h2>
+        <h2 class="mb-4 text-sm font-semibold">Comments ({comments.length})</h2>
 
         {#if user}
-            <!-- Comment form -->
             <form onsubmit={handleComment} class="mb-6">
                 {#if replyTo}
-                    <div class="mb-1 text-xs text-gray-400">
+                    <div class="mb-1 text-xs text-muted-foreground">
                         Replying to thread ·
-                        <button type="button" onclick={() => (replyTo = null)} class="text-brand-600">cancel</button>
+                        <button type="button" onclick={() => (replyTo = null)} class="text-primary">cancel</button>
                     </div>
                 {/if}
-                <textarea
+                <Textarea
                     bind:value={commentText}
                     placeholder={replyTo ? 'Write a reply...' : 'Share your thoughts...'}
                     rows="3"
-                    class="w-full resize-none rounded-lg border border-gray-200 px-3 py-2 text-sm outline-none focus:border-brand-400"
-                ></textarea>
+                />
                 <div class="mt-2 flex justify-end">
-                    <button
-                        type="submit"
-                        disabled={!commentText.trim() || commentLoading}
-                        class="rounded-lg bg-brand-600 px-4 py-1.5 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50"
-                    >
+                    <Button type="submit" disabled={!commentText.trim() || commentLoading}>
                         {commentLoading ? 'Posting...' : 'Comment'}
-                    </button>
+                    </Button>
                 </div>
             </form>
         {:else}
-            <div class="mb-6 rounded-lg border border-gray-200 bg-gray-50 p-3 text-center text-sm text-gray-500">
-                <a href="/login" class="font-medium text-brand-600 hover:underline">Login</a> to join the discussion
-            </div>
+            <Card.Root class="mb-6">
+                <Card.Content class="pt-6 text-center text-sm text-muted-foreground">
+                    <a href="/login" class="font-medium text-primary hover:underline">Login</a> to join the discussion
+                </Card.Content>
+            </Card.Root>
         {/if}
 
-        <!-- Threaded comments -->
         <CommentThread
             {comments}
             postId={post.id}
