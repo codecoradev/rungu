@@ -20,6 +20,7 @@ pub mod comment_routes;
 pub mod error;
 pub mod oauth;
 pub mod post_routes;
+pub mod vote_routes;
 
 use axum::Router;
 use axum::extract::FromRef;
@@ -51,9 +52,8 @@ pub fn api_routes() -> Router<AppState> {
         .merge(auth_routes::auth_routes())
         // Posts CRUD
         .merge(post_routes::router())
+        // Votes (toggle + check status)
+        .merge(vote_routes::router())
         // Comments
         .merge(comment_routes::router())
-    // Future routes — just add .merge() here:
-    // .merge(vote_routes::router())    // issue #5
-    // .merge(project_routes::router()) // issue #7
 }
