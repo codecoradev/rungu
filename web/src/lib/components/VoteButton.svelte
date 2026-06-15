@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { api, ApiError } from '$lib/api/api';
+    import { api, ApiError } from '$lib/api/client';
     import { cn } from '$lib/utils';
 
     let {

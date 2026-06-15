@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { api } from '$lib/api/api';
+    import { api } from '$lib/api/client';
     import type { ProviderInfo } from '$lib/api/types';
     import { onMount } from 'svelte';
 

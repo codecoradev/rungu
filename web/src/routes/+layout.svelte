@@ -1,7 +1,7 @@
 <script lang="ts">
     import { onMount } from 'svelte';
     import { page } from '$app/stores';
-    import { api } from '$lib/api/api';
+    import { api } from '$lib/api/client';
     import type { CurrentUser } from '$lib/api/types';
 
     let { children } = $props();
