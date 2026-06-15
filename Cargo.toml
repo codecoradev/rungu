@@ -68,6 +68,10 @@ chrono = { version = "0.4", features = ["serde"] }
 # UUID
 uuid = { version = "1", features = ["v4", "serde"] }
 
+# OpenAPI / Swagger
+utoipa = { version = "5", features = ["axum_extras", "chrono"] }
+utoipa-swagger-ui = { version = "9", features = ["axum"] }
+
 # Internal crates
 rungu_proto = { path = "crates/rungu-proto" }
 rungu_core = { path = "crates/rungu-core" }

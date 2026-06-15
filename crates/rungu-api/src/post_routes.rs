@@ -1,18 +1,13 @@
 //! Post routes — CRUD for feedback posts.
-//!
-//! Pattern: each route module exposes a `router()` function that returns
-//! `Router<AppState>`. Handlers use `CurrentUser` for auth, `State<AppState>`
-//! for DB access, and `Path`/`Query` for params.
-//!
-//! Response envelope: `{ "data": T }` on success, `{ "error": "msg" }` on failure.
 
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::{Json, Router};
 use rungu_auth::CurrentUser;
-use rungu_proto::{PostCategory, PostSort, PostStatus};
+use rungu_proto::{CreatePostBody, PostCategory, PostDetail, PostSort, PostStatus, UpdatePostBody};
 use serde::Deserialize;
+use utoipa::IntoParams;
 
 use crate::AppState;
 use crate::error::ApiError;
@@ -20,48 +15,22 @@ use crate::error::ApiError;
 // ── Request types ──────────────────────────────────────────────────────
 
 /// Query params for `GET /api/projects/:slug/posts`.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
 pub struct ListPostsQuery {
     pub sort: Option<String>,
     pub status: Option<String>,
     pub category: Option<String>,
+    /// Search query string.
     pub q: Option<String>,
+    /// Page number (1-based).
     pub page: Option<i64>,
+    /// Items per page (1-100).
     pub per_page: Option<i64>,
-}
-
-/// Body for `POST /api/projects/:slug/posts`.
-#[derive(Debug, Deserialize)]
-pub struct CreatePostBody {
-    pub title: String,
-    pub description: Option<String>,
-    pub category: Option<String>,
-}
-
-/// Body for `PATCH /api/posts/:id`.
-#[derive(Debug, Deserialize)]
-pub struct UpdatePostBody {
-    pub status: Option<String>,
-}
-
-impl UpdatePostBody {
-    /// Check if at least one field is provided.
-    fn has_updates(&self) -> bool {
-        self.status.is_some()
-    }
 }
 
 // ── Routes ─────────────────────────────────────────────────────────────
 
-/// Build post routes.
-///
-/// ```text
-/// GET    /api/projects/:slug/posts     — list (public)
-/// POST   /api/projects/:slug/posts     — create (auth required)
-/// GET    /api/posts/:id                — get detail (public)
-/// PATCH  /api/posts/:id                — update status (auth, own post or admin)
-/// DELETE /api/posts/:id                — delete (auth, own post or admin)
-/// ```
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/projects/:slug/posts", axum::routing::get(list_posts).post(create_post))
@@ -71,7 +40,20 @@ pub fn router() -> Router<AppState> {
 // ── Handlers ───────────────────────────────────────────────────────────
 
 /// List posts for a project with optional filters.
-async fn list_posts(
+#[utoipa::path(
+    get,
+    path = "/api/projects/{slug}/posts",
+    params(
+        ("slug" = String, Path, description = "Project slug"),
+        ListPostsQuery,
+    ),
+    responses(
+        (status = 200, description = "List of posts with pagination", body = serde_json::Value),
+        (status = 404, description = "Project not found", body = serde_json::Value),
+    ),
+    tag = "posts",
+)]
+pub async fn list_posts(
     State(state): State<AppState>,
     Path(slug): Path<String>,
     Query(query): Query<ListPostsQuery>,
@@ -107,7 +89,23 @@ async fn list_posts(
 }
 
 /// Create a new post in a project.
-async fn create_post(
+#[utoipa::path(
+    post,
+    path = "/api/projects/{slug}/posts",
+    params(
+        ("slug" = String, Path, description = "Project slug"),
+    ),
+    request_body = CreatePostBody,
+    responses(
+        (status = 201, description = "Post created", body = serde_json::Value),
+        (status = 400, description = "Validation error", body = serde_json::Value),
+        (status = 401, description = "Not authenticated", body = serde_json::Value),
+        (status = 404, description = "Project not found", body = serde_json::Value),
+    ),
+    security(("session" = [])),
+    tag = "posts",
+)]
+pub async fn create_post(
     State(state): State<AppState>,
     Path(slug): Path<String>,
     CurrentUser(user): CurrentUser,
@@ -135,7 +133,19 @@ async fn create_post(
 }
 
 /// Get a single post with detail.
-async fn get_post(
+#[utoipa::path(
+    get,
+    path = "/api/posts/{id}",
+    params(
+        ("id" = String, Path, description = "Post ID"),
+    ),
+    responses(
+        (status = 200, description = "Post detail", body = PostDetail),
+        (status = 404, description = "Post not found", body = serde_json::Value),
+    ),
+    tag = "posts",
+)]
+pub async fn get_post(
     State(state): State<AppState>,
     Path(id): Path<String>,
     user: rungu_auth::OptionalCurrentUser,
@@ -148,7 +158,24 @@ async fn get_post(
 }
 
 /// Update a post's status (author or admin only).
-async fn update_post(
+#[utoipa::path(
+    patch,
+    path = "/api/posts/{id}",
+    params(
+        ("id" = String, Path, description = "Post ID"),
+    ),
+    request_body = UpdatePostBody,
+    responses(
+        (status = 200, description = "Post updated", body = serde_json::Value),
+        (status = 400, description = "Validation error", body = serde_json::Value),
+        (status = 401, description = "Not authenticated", body = serde_json::Value),
+        (status = 403, description = "Forbidden", body = serde_json::Value),
+        (status = 404, description = "Post not found", body = serde_json::Value),
+    ),
+    security(("session" = [])),
+    tag = "posts",
+)]
+pub async fn update_post(
     State(state): State<AppState>,
     Path(id): Path<String>,
     CurrentUser(user): CurrentUser,
@@ -158,30 +185,41 @@ async fn update_post(
         return Err(ApiError::bad_request("No fields to update"));
     }
 
-    // Fetch existing post to check ownership
     let existing = state.store.get_post(&id, None).await?.ok_or_else(|| ApiError::not_found("Post not found"))?;
 
-    // Only author or admin can update
     let is_author = existing.post.created_by == user.id;
     let is_admin = user.role == rungu_proto::UserRole::Admin;
     if !is_author && !is_admin {
         return Err(ApiError::forbidden("You can only update your own posts"));
     }
 
-    // Update status if provided
     if let Some(status_str) = &body.status {
         let status = parse_status(status_str).ok_or_else(|| ApiError::bad_request("Invalid status"))?;
         state.store.update_post_status(&id, status).await?;
     }
 
-    // Return updated post
     let updated = state.store.get_post(&id, Some(&user.id)).await?;
 
     Ok(Json(serde_json::json!({ "data": updated })))
 }
 
 /// Delete a post (author or admin only).
-async fn delete_post(
+#[utoipa::path(
+    delete,
+    path = "/api/posts/{id}",
+    params(
+        ("id" = String, Path, description = "Post ID"),
+    ),
+    responses(
+        (status = 204, description = "Post deleted"),
+        (status = 401, description = "Not authenticated", body = serde_json::Value),
+        (status = 403, description = "Forbidden", body = serde_json::Value),
+        (status = 404, description = "Post not found", body = serde_json::Value),
+    ),
+    security(("session" = [])),
+    tag = "posts",
+)]
+pub async fn delete_post(
     State(state): State<AppState>,
     Path(id): Path<String>,
     CurrentUser(user): CurrentUser,
@@ -201,7 +239,7 @@ async fn delete_post(
 
 // ── Parsing helpers ────────────────────────────────────────────────────
 
-fn parse_sort(s: Option<&str>) -> PostSort {
+pub(crate) fn parse_sort(s: Option<&str>) -> PostSort {
     match s {
         Some("oldest") => PostSort::Oldest,
         Some("most_votes") => PostSort::MostVotes,
@@ -211,7 +249,7 @@ fn parse_sort(s: Option<&str>) -> PostSort {
     }
 }
 
-fn parse_status(s: &str) -> Option<PostStatus> {
+pub(crate) fn parse_status(s: &str) -> Option<PostStatus> {
     match s {
         "open" => Some(PostStatus::Open),
         "planned" => Some(PostStatus::Planned),
@@ -222,7 +260,7 @@ fn parse_status(s: &str) -> Option<PostStatus> {
     }
 }
 
-fn parse_category(s: &str) -> Option<PostCategory> {
+pub(crate) fn parse_category(s: &str) -> Option<PostCategory> {
     match s {
         "feedback" => Some(PostCategory::Feedback),
         "bug" => Some(PostCategory::Bug),

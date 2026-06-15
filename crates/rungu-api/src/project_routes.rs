@@ -1,55 +1,17 @@
 //! Project routes — CRUD for projects.
-//!
-//! Follows the same module pattern as `post_routes.rs`:
-//! - `pub fn router() -> Router<AppState>`
-//! - Uses `crate::error::ApiError` for all errors
-//! - Success responses use `Json(serde_json::json!({ "data": ... }))`
-//!
-//! ```text
-//! GET    /api/projects         — list all projects (public)
-//! POST   /api/projects         — create project (admin only)
-//! GET    /api/projects/:slug   — get single project (public)
-//! PATCH  /api/projects/:slug   — update project (admin only)
-//! DELETE /api/projects/:slug   — delete project (admin only)
-//! ```
 
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::{Json, Router};
 use rungu_auth::CurrentUser;
-use serde::Deserialize;
+use rungu_proto::{CreateProjectBody, UpdateProjectBody};
 
 use crate::AppState;
 use crate::error::ApiError;
 
-// ── Request types ──────────────────────────────────────────────────────
-
-/// Body for `POST /api/projects`.
-#[derive(Debug, Deserialize)]
-pub struct CreateProjectBody {
-    pub name: String,
-    pub slug: Option<String>,
-    pub description: Option<String>,
-}
-
-/// Body for `PATCH /api/projects/:slug`.
-#[derive(Debug, Deserialize)]
-pub struct UpdateProjectBody {
-    pub name: Option<String>,
-    pub description: Option<String>,
-}
-
-impl UpdateProjectBody {
-    /// Check if at least one field is provided.
-    fn has_updates(&self) -> bool {
-        self.name.is_some() || self.description.is_some()
-    }
-}
-
 // ── Routes ─────────────────────────────────────────────────────────────
 
-/// Build project routes.
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/projects", axum::routing::get(list_projects).post(create_project))
@@ -59,18 +21,38 @@ pub fn router() -> Router<AppState> {
 // ── Handlers ───────────────────────────────────────────────────────────
 
 /// List all projects.
-async fn list_projects(State(state): State<AppState>) -> Result<impl IntoResponse, ApiError> {
+#[utoipa::path(
+    get,
+    path = "/api/projects",
+    responses(
+        (status = 200, description = "List of projects", body = serde_json::Value),
+    ),
+    tag = "projects",
+)]
+pub async fn list_projects(State(state): State<AppState>) -> Result<impl IntoResponse, ApiError> {
     let projects = state.store.list_projects().await?;
     Ok(Json(serde_json::json!({ "data": projects })))
 }
 
 /// Create a new project (admin only).
-async fn create_project(
+#[utoipa::path(
+    post,
+    path = "/api/projects",
+    request_body = CreateProjectBody,
+    responses(
+        (status = 201, description = "Project created", body = serde_json::Value),
+        (status = 400, description = "Validation error", body = serde_json::Value),
+        (status = 401, description = "Not authenticated", body = serde_json::Value),
+        (status = 403, description = "Admin access required", body = serde_json::Value),
+    ),
+    security(("session" = [])),
+    tag = "projects",
+)]
+pub async fn create_project(
     State(state): State<AppState>,
     CurrentUser(user): CurrentUser,
     Json(body): Json<CreateProjectBody>,
 ) -> Result<(StatusCode, impl IntoResponse), ApiError> {
-    // Admin check
     if user.role != rungu_proto::UserRole::Admin {
         return Err(ApiError::forbidden("Admin access required"));
     }
@@ -83,7 +65,6 @@ async fn create_project(
         return Err(ApiError::bad_request("Project name must be 100 characters or less"));
     }
 
-    // Auto-generate slug from name if not provided
     let slug = match body.slug.as_deref() {
         Some(s) => {
             let s = s.trim();
@@ -95,7 +76,6 @@ async fn create_project(
         None => slugify(name),
     };
 
-    // Validate slug format
     if !is_valid_slug(&slug) {
         return Err(ApiError::bad_request("Slug must contain only lowercase letters, numbers, and hyphens"));
     }
@@ -108,7 +88,22 @@ async fn create_project(
 }
 
 /// Get a single project by slug.
-async fn get_project(State(state): State<AppState>, Path(slug): Path<String>) -> Result<impl IntoResponse, ApiError> {
+#[utoipa::path(
+    get,
+    path = "/api/projects/{slug}",
+    params(
+        ("slug" = String, Path, description = "Project slug"),
+    ),
+    responses(
+        (status = 200, description = "Project detail", body = rungu_proto::Project),
+        (status = 404, description = "Project not found", body = serde_json::Value),
+    ),
+    tag = "projects",
+)]
+pub async fn get_project(
+    State(state): State<AppState>,
+    Path(slug): Path<String>,
+) -> Result<impl IntoResponse, ApiError> {
     let project =
         state.store.get_project_by_slug(&slug).await?.ok_or_else(|| ApiError::not_found("Project not found"))?;
 
@@ -116,13 +111,29 @@ async fn get_project(State(state): State<AppState>, Path(slug): Path<String>) ->
 }
 
 /// Update a project (admin only).
-async fn update_project(
+#[utoipa::path(
+    patch,
+    path = "/api/projects/{slug}",
+    params(
+        ("slug" = String, Path, description = "Project slug"),
+    ),
+    request_body = UpdateProjectBody,
+    responses(
+        (status = 200, description = "Project updated", body = serde_json::Value),
+        (status = 400, description = "Validation error", body = serde_json::Value),
+        (status = 401, description = "Not authenticated", body = serde_json::Value),
+        (status = 403, description = "Admin access required", body = serde_json::Value),
+        (status = 404, description = "Project not found", body = serde_json::Value),
+    ),
+    security(("session" = [])),
+    tag = "projects",
+)]
+pub async fn update_project(
     State(state): State<AppState>,
     Path(slug): Path<String>,
     CurrentUser(user): CurrentUser,
     Json(body): Json<UpdateProjectBody>,
 ) -> Result<impl IntoResponse, ApiError> {
-    // Admin check
     if user.role != rungu_proto::UserRole::Admin {
         return Err(ApiError::forbidden("Admin access required"));
     }
@@ -140,12 +151,26 @@ async fn update_project(
 }
 
 /// Delete a project (admin only).
-async fn delete_project(
+#[utoipa::path(
+    delete,
+    path = "/api/projects/{slug}",
+    params(
+        ("slug" = String, Path, description = "Project slug"),
+    ),
+    responses(
+        (status = 204, description = "Project deleted"),
+        (status = 401, description = "Not authenticated", body = serde_json::Value),
+        (status = 403, description = "Admin access required", body = serde_json::Value),
+        (status = 404, description = "Project not found", body = serde_json::Value),
+    ),
+    security(("session" = [])),
+    tag = "projects",
+)]
+pub async fn delete_project(
     State(state): State<AppState>,
     Path(slug): Path<String>,
     CurrentUser(user): CurrentUser,
 ) -> Result<StatusCode, ApiError> {
-    // Admin check
     if user.role != rungu_proto::UserRole::Admin {
         return Err(ApiError::forbidden("Admin access required"));
     }
@@ -160,15 +185,10 @@ async fn delete_project(
 
 // ── Helpers ────────────────────────────────────────────────────────────
 
-/// Generate a URL-safe slug from a project name.
-///
-/// Rules: lowercase, spaces → hyphens, remove non-alphanumeric (except hyphens),
-/// collapse consecutive hyphens, trim leading/trailing hyphens.
 fn slugify(name: &str) -> String {
     let slug: String =
         name.trim().to_lowercase().chars().map(|c| if c.is_alphanumeric() && c.is_ascii() { c } else { '-' }).collect();
 
-    // Collapse consecutive hyphens and trim
     let mut result = String::with_capacity(slug.len());
     let mut prev_hyphen = false;
     for c in slug.chars() {
@@ -183,7 +203,6 @@ fn slugify(name: &str) -> String {
         }
     }
 
-    // Trim trailing hyphen
     if result.ends_with('-') {
         result.pop();
     }
@@ -191,18 +210,15 @@ fn slugify(name: &str) -> String {
     result
 }
 
-/// Validate slug format: lowercase alphanumeric with hyphens, must start/end with alphanumeric.
 fn is_valid_slug(slug: &str) -> bool {
     if slug.is_empty() || slug.len() > 80 {
         return false;
     }
 
-    // Must be lowercase alphanumeric with hyphens
     if !slug.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-') {
         return false;
     }
 
-    // Must start and end with alphanumeric
     !slug.starts_with('-') && !slug.ends_with('-')
 }
 

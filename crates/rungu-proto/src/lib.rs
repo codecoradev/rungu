@@ -5,11 +5,12 @@
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use utoipa::ToSchema;
 
 // ── Enums ────────────────────────────────────────────────────────────────
 
 /// Post status lifecycle.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum PostStatus {
     Open,
@@ -26,7 +27,7 @@ impl Default for PostStatus {
 }
 
 /// Post category type.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum PostCategory {
     Feedback,
@@ -42,7 +43,7 @@ impl Default for PostCategory {
 }
 
 /// User role.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum UserRole {
     Admin,
@@ -56,7 +57,7 @@ impl Default for UserRole {
 }
 
 /// OAuth provider name.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum AuthProvider {
     Google,
@@ -67,7 +68,7 @@ pub enum AuthProvider {
 // ── User ────────────────────────────────────────────────────────────────
 
 /// User record.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct User {
     pub id: String,
     pub email: String,
@@ -79,7 +80,7 @@ pub struct User {
 }
 
 /// OAuth identity linked to a user.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct UserIdentity {
     pub id: String,
     pub user_id: String,
@@ -89,7 +90,7 @@ pub struct UserIdentity {
 }
 
 /// Current authenticated user (from JWT session).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct CurrentUser {
     pub id: String,
     pub email: String,
@@ -99,7 +100,7 @@ pub struct CurrentUser {
 // ── Project ───────────────────────────────────────────────────────────────
 
 /// Project record.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct Project {
     pub id: String,
     pub slug: String,
@@ -111,7 +112,7 @@ pub struct Project {
 // ── Post ─────────────────────────────────────────────────────────────────
 
 /// Post (feedback/bug/feature/question).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct Post {
     pub id: String,
     pub project_id: String,
@@ -127,7 +128,7 @@ pub struct Post {
 }
 
 /// Post detail (includes creator info).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct PostDetail {
     #[serde(flatten)]
     pub post: Post,
@@ -136,7 +137,7 @@ pub struct PostDetail {
 }
 
 /// Lightweight user info for post creator display.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct UserSummary {
     pub id: String,
     pub email: String,
@@ -147,7 +148,7 @@ pub struct UserSummary {
 // ── Vote ─────────────────────────────────────────────────────────────────
 
 /// Vote record.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct Vote {
     pub user_id: String,
     pub post_id: String,
@@ -157,7 +158,7 @@ pub struct Vote {
 // ── Comment ──────────────────────────────────────────────────────────────
 
 /// Comment record.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct Comment {
     pub id: String,
     pub post_id: String,
@@ -168,7 +169,7 @@ pub struct Comment {
 }
 
 /// Comment detail (includes creator info).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct CommentDetail {
     #[serde(flatten)]
     pub comment: Comment,
@@ -178,7 +179,7 @@ pub struct CommentDetail {
 // ── API Request/Response ─────────────────────────────────────────────────
 
 /// Create post request.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub struct CreatePostRequest {
     pub title: String,
     pub description: String,
@@ -187,20 +188,20 @@ pub struct CreatePostRequest {
 }
 
 /// Create comment request.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub struct CreateCommentRequest {
     pub content: String,
     pub parent_id: Option<String>,
 }
 
 /// Update post status request (admin).
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub struct UpdateStatusRequest {
     pub status: PostStatus,
 }
 
 /// Create project request (admin).
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub struct CreateProjectRequest {
     pub name: String,
     pub slug: Option<String>,
@@ -209,7 +210,7 @@ pub struct CreateProjectRequest {
 }
 
 /// Generic list response with pagination.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct ListResponse<T> {
     pub data: Vec<T>,
     pub total: i64,
@@ -218,7 +219,7 @@ pub struct ListResponse<T> {
 }
 
 /// Sort options for posts.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum PostSort {
     Newest,
@@ -235,7 +236,7 @@ impl Default for PostSort {
 }
 
 /// Query params for listing posts.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub struct ListPostsQuery {
     pub sort: Option<PostSort>,
     pub status: Option<PostStatus>,
@@ -260,7 +261,7 @@ pub struct ListPostsParams<'a> {
 // ── Stats ───────────────────────────────────────────────────────────────
 
 /// Project statistics.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct ProjectStats {
     pub total_posts: i64,
     pub by_status: std::collections::HashMap<String, i64>,
@@ -280,8 +281,73 @@ pub struct OAuthIdentity {
 // ── Auth Provider Info (for frontend login buttons) ──────────────────────
 
 /// Active auth provider info (sent to frontend).
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct ProviderInfo {
     pub name: String,
     pub login_url: String,
+}
+
+// ── Handler Request Bodies (shared for OpenAPI) ──────────────────────────
+
+/// Request body for creating a post (handler-level, with optional fields).
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct CreatePostBody {
+    pub title: String,
+    pub description: Option<String>,
+    pub category: Option<String>,
+}
+
+/// Request body for updating a post status.
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct UpdatePostBody {
+    pub status: Option<String>,
+}
+
+impl UpdatePostBody {
+    /// Check if at least one field is provided.
+    pub fn has_updates(&self) -> bool {
+        self.status.is_some()
+    }
+}
+
+/// Request body for creating a comment.
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct CreateCommentBody {
+    pub content: String,
+    pub parent_id: Option<String>,
+}
+
+/// Request body for creating a project.
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct CreateProjectBody {
+    pub name: String,
+    pub slug: Option<String>,
+    pub description: Option<String>,
+}
+
+/// Request body for updating a project.
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct UpdateProjectBody {
+    pub name: Option<String>,
+    pub description: Option<String>,
+}
+
+impl UpdateProjectBody {
+    /// Check if at least one field is provided.
+    pub fn has_updates(&self) -> bool {
+        self.name.is_some() || self.description.is_some()
+    }
+}
+
+/// Vote toggle response.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct VoteToggleResponse {
+    pub voted: bool,
+    pub vote_count: i64,
+}
+
+/// Vote status response.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct VoteStatusResponse {
+    pub voted: bool,
 }
