@@ -47,6 +47,56 @@ fn map_user(row: &sqlx::sqlite::SqliteRow) -> User {
     }
 }
 
+/// Map a SQLite row to a PostDetail (with user join + vote status).
+fn map_post_detail(row: &sqlx::sqlite::SqliteRow) -> PostDetail {
+    let post = map_post(row);
+    let creator = UserSummary {
+        id: row.get("user_id"),
+        email: row.get("user_email"),
+        name: row.get("user_name"),
+        avatar_url: row.get("user_avatar"),
+    };
+    PostDetail { post, creator, user_voted: false }
+}
+
+/// Map a SQLite row to a Post.
+fn map_post(row: &sqlx::sqlite::SqliteRow) -> Post {
+    Post {
+        id: row.get("id"),
+        project_id: row.get("project_id"),
+        title: row.get("title"),
+        description: row.get("description"),
+        status: parse_status(row.get::<&str, _>("status")),
+        category: parse_category(row.get::<&str, _>("category")),
+        vote_count: row.get("vote_count"),
+        comment_count: row.get("comment_count"),
+        created_by: row.get("created_by"),
+        created_at: parse_ts(row.get::<&str, _>("created_at")),
+        updated_at: parse_ts(row.get::<&str, _>("updated_at")),
+    }
+}
+
+/// Parse PostStatus from SQLite TEXT column.
+fn parse_status(s: &str) -> PostStatus {
+    match s {
+        "planned" => PostStatus::Planned,
+        "in_progress" => PostStatus::InProgress,
+        "done" => PostStatus::Done,
+        "declined" => PostStatus::Declined,
+        _ => PostStatus::Open,
+    }
+}
+
+/// Parse PostCategory from SQLite TEXT column.
+fn parse_category(s: &str) -> PostCategory {
+    match s {
+        "bug" => PostCategory::Bug,
+        "feature" => PostCategory::Feature,
+        "question" => PostCategory::Question,
+        _ => PostCategory::Feedback,
+    }
+}
+
 /// Storage layer — all database operations.
 #[derive(Clone)]
 pub struct Store {
@@ -165,17 +215,36 @@ impl Store {
             .await
             .context("Failed to list posts")?;
 
-        // TODO(issue #3): map rows to PostDetail. Currently returns empty until #3 lands.
-        let _ = rows;
-
-        // Placeholder — full implementation in issue #3
-        Ok((vec![], total))
+        let posts = rows.iter().map(map_post_detail).collect();
+        Ok((posts, total))
     }
 
     /// Get a single post with detail.
-    pub async fn get_post(&self, _post_id: &str, _user_id: Option<&str>) -> Result<Option<PostDetail>> {
-        // TODO: implement with full join
-        Ok(None)
+    pub async fn get_post(&self, post_id: &str, user_id: Option<&str>) -> Result<Option<PostDetail>> {
+        let row = sqlx::query(
+            "SELECT p.*, u.id as user_id, u.email as user_email, u.name as user_name, u.avatar_url as user_avatar \
+             FROM posts p \
+             LEFT JOIN users u ON p.created_by = u.id \
+             WHERE p.id = ?",
+        )
+        .bind(post_id)
+        .fetch_optional(&self.pool)
+        .await
+        .context("Failed to get post")?;
+
+        let row = match row {
+            Some(r) => r,
+            None => return Ok(None),
+        };
+
+        let mut detail = map_post_detail(&row);
+
+        // Check if current user has voted
+        if let Some(uid) = user_id {
+            detail.user_voted = self.has_voted(uid, post_id).await.unwrap_or(false);
+        }
+
+        Ok(Some(detail))
     }
 
     /// Create a new post.
