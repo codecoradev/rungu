@@ -32,3 +32,6 @@ Thumbs.db
 # Profiling
 flamegraph.svg
 perf.data
+
+# Cora review artifacts (history snapshots, symbol index)
+.cora/

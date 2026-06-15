@@ -3,12 +3,52 @@
 //! SQLite storage operations for Rungu.
 
 use anyhow::{Context, Result};
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use rungu_proto::*;
-use sqlx::SqlitePool;
-use tracing::debug;
+use sqlx::{Row, SqlitePool};
+
+/// Parse RFC3339 timestamp from SQLite TEXT column with fallback to datetime('now') format.
+fn parse_ts(s: &str) -> DateTime<Utc> {
+    DateTime::parse_from_rfc3339(s)
+        .or_else(|_| DateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S"))
+        .map(|d| d.with_timezone(&Utc))
+        .unwrap_or_else(|_| Utc::now())
+}
+
+/// Parse UserRole from SQLite TEXT column.
+fn parse_role(s: &str) -> UserRole {
+    match s {
+        "admin" => UserRole::Admin,
+        _ => UserRole::Member,
+    }
+}
+
+/// Map a SQLite row to a Project.
+fn map_project(row: &sqlx::sqlite::SqliteRow) -> Project {
+    Project {
+        id: row.get("id"),
+        slug: row.get("slug"),
+        name: row.get("name"),
+        description: row.get("description"),
+        created_at: parse_ts(row.get::<&str, _>("created_at")),
+    }
+}
+
+/// Map a SQLite row to a User.
+fn map_user(row: &sqlx::sqlite::SqliteRow) -> User {
+    User {
+        id: row.get("id"),
+        email: row.get("email"),
+        name: row.get("name"),
+        avatar_url: row.get("avatar_url"),
+        role: parse_role(row.get::<&str, _>("role")),
+        created_at: parse_ts(row.get::<&str, _>("created_at")),
+        last_login: parse_ts(row.get::<&str, _>("last_login")),
+    }
+}
 
 /// Storage layer — all database operations.
+#[derive(Clone)]
 pub struct Store {
     pool: SqlitePool,
 }
@@ -27,54 +67,46 @@ impl Store {
 
     /// List all projects.
     pub async fn list_projects(&self) -> Result<Vec<Project>> {
-        let rows = sqlx::query_as::<_, Project>(
-            "SELECT id, slug, name, description, created_at FROM projects ORDER BY created_at DESC",
-        )
-        .fetch_all(&self.pool)
-        .await
-        .context("Failed to list projects")?;
-        Ok(rows)
+        let rows = sqlx::query("SELECT id, slug, name, description, created_at FROM projects ORDER BY created_at DESC")
+            .fetch_all(&self.pool)
+            .await
+            .context("Failed to list projects")?;
+        Ok(rows.iter().map(map_project).collect())
     }
 
     /// Get a project by slug.
     pub async fn get_project_by_slug(&self, slug: &str) -> Result<Option<Project>> {
-        let row = sqlx::query_as::<_, Project>(
-            "SELECT id, slug, name, description, created_at FROM projects WHERE slug = ?",
-        )
-        .bind(slug)
-        .fetch_optional(&self.pool)
-        .await
-        .context("Failed to get project")?;
-        Ok(row)
+        let row = sqlx::query("SELECT id, slug, name, description, created_at FROM projects WHERE slug = ?")
+            .bind(slug)
+            .fetch_optional(&self.pool)
+            .await
+            .context("Failed to get project")?;
+        Ok(row.as_ref().map(map_project))
     }
 
     /// Get a project by ID.
     pub async fn get_project_by_id(&self, id: &str) -> Result<Option<Project>> {
-        let row = sqlx::query_as::<_, Project>(
-            "SELECT id, slug, name, description, created_at FROM projects WHERE id = ?",
-        )
-        .bind(id)
-        .fetch_optional(&self.pool)
-        .await
-        .context("Failed to get project")?;
-        Ok(row)
+        let row = sqlx::query("SELECT id, slug, name, description, created_at FROM projects WHERE id = ?")
+            .bind(id)
+            .fetch_optional(&self.pool)
+            .await
+            .context("Failed to get project")?;
+        Ok(row.as_ref().map(map_project))
     }
 
     /// Create a new project.
     pub async fn create_project(&self, name: &str, slug: &str, description: &str) -> Result<Project> {
         let id = super::new_id();
         let now = Utc::now().to_rfc3339();
-        sqlx::query(
-            "INSERT INTO projects (id, slug, name, description, created_at) VALUES (?, ?, ?, ?, ?)",
-        )
-        .bind(&id)
-        .bind(slug)
-        .bind(name)
-        .bind(description)
-        .bind(&now)
-        .execute(&self.pool)
-        .await
-        .context("Failed to create project")?;
+        sqlx::query("INSERT INTO projects (id, slug, name, description, created_at) VALUES (?, ?, ?, ?, ?)")
+            .bind(&id)
+            .bind(slug)
+            .bind(name)
+            .bind(description)
+            .bind(&now)
+            .execute(&self.pool)
+            .await
+            .context("Failed to create project")?;
         Ok(Project {
             id,
             slug: slug.to_string(),
@@ -87,42 +119,28 @@ impl Store {
     // ── Posts ───────────────────────────────────────────────────────
 
     /// List posts for a project with filters and sorting.
-    pub async fn list_posts(
-        &self,
-        project_id: &str,
-        sort: PostSort,
-        status: Option<PostStatus>,
-        category: Option<PostCategory>,
-        query: Option<&str>,
-        offset: i64,
-        limit: i64,
-    ) -> Result<(Vec<PostDetail>, i64)> {
+    pub async fn list_posts(&self, params: ListPostsParams<'_>) -> Result<(Vec<PostDetail>, i64)> {
         let mut where_clauses = vec!["project_id = ?1".to_string()];
 
-        if let Some(s) = &status {
+        if let Some(s) = &params.status {
             where_clauses.push(format!("status = '{:?}'", s));
         }
-        if let Some(c) = &category {
+        if let Some(c) = &params.category {
             where_clauses.push(format!("category = '{:?}'", c));
         }
-        if let Some(q) = &query {
-            where_clauses.push(format!(
-                "(title LIKE '%{q}%' OR description LIKE '%{q}%')"
-            ));
+        if let Some(q) = &params.query {
+            where_clauses.push(format!("(title LIKE '%{q}%' OR description LIKE '%{q}%')"));
         }
 
         let where_sql = where_clauses.join(" AND ");
 
         // Total count
         let count_sql = format!("SELECT COUNT(*) as cnt FROM posts WHERE {where_sql}");
-        let total: i64 = sqlx::query_scalar(&count_sql)
-            .bind(project_id)
-            .fetch_one(&self.pool)
-            .await
-            .unwrap_or(0);
+        let total: i64 =
+            sqlx::query_scalar(&count_sql).bind(params.project_id).fetch_one(&self.pool).await.unwrap_or(0);
 
         // Sort
-        let order = match sort {
+        let order = match params.sort {
             PostSort::Newest => "created_at DESC",
             PostSort::Oldest => "created_at ASC",
             PostSort::MostVotes => "vote_count DESC, created_at DESC",
@@ -140,25 +158,22 @@ impl Store {
         );
 
         let rows = sqlx::query(&sql)
-            .bind(project_id)
-            .bind(limit)
-            .bind(offset)
+            .bind(params.project_id)
+            .bind(params.limit)
+            .bind(params.offset)
             .fetch_all(&self.pool)
             .await
             .context("Failed to list posts")?;
 
-        let mut posts = Vec::new();
-        for row in rows {
-            // TODO: map rows to PostDetail
-            debug!("Post row: {:?}", row);
-        }
+        // TODO(issue #3): map rows to PostDetail. Currently returns empty until #3 lands.
+        let _ = rows;
 
-        // Placeholder — full implementation in development
+        // Placeholder — full implementation in issue #3
         Ok((vec![], total))
     }
 
     /// Get a single post with detail.
-    pub async fn get_post(&self, post_id: &str, _user_id: Option<&str>) -> Result<Option<PostDetail>> {
+    pub async fn get_post(&self, _post_id: &str, _user_id: Option<&str>) -> Result<Option<PostDetail>> {
         // TODO: implement with full join
         Ok(None)
     }
@@ -233,12 +248,11 @@ impl Store {
     /// Toggle vote on a post. Returns true if now voted, false if unvoted.
     pub async fn toggle_vote(&self, user_id: &str, post_id: &str) -> Result<bool> {
         // Check if already voted
-        let existing: Option<(String,)> =
-            sqlx::query_as("SELECT user_id FROM votes WHERE user_id = ? AND post_id = ?")
-                .bind(user_id)
-                .bind(post_id)
-                .fetch_optional(&self.pool)
-                .await?;
+        let existing: Option<(String,)> = sqlx::query_as("SELECT user_id FROM votes WHERE user_id = ? AND post_id = ?")
+            .bind(user_id)
+            .bind(post_id)
+            .fetch_optional(&self.pool)
+            .await?;
 
         match existing {
             Some(_) => {
@@ -272,19 +286,18 @@ impl Store {
 
     /// Check if a user has voted on a post.
     pub async fn has_voted(&self, user_id: &str, post_id: &str) -> Result<bool> {
-        let row: Option<(String,)> =
-            sqlx::query_as("SELECT user_id FROM votes WHERE user_id = ? AND post_id = ?")
-                .bind(user_id)
-                .bind(post_id)
-                .fetch_optional(&self.pool)
-                .await?;
+        let row: Option<(String,)> = sqlx::query_as("SELECT user_id FROM votes WHERE user_id = ? AND post_id = ?")
+            .bind(user_id)
+            .bind(post_id)
+            .fetch_optional(&self.pool)
+            .await?;
         Ok(row.is_some())
     }
 
     // ── Comments ────────────────────────────────────────────────────
 
     /// List comments for a post.
-    pub async fn list_comments(&self, post_id: &str) -> Result<Vec<CommentDetail>> {
+    pub async fn list_comments(&self, _post_id: &str) -> Result<Vec<CommentDetail>> {
         // TODO: implement with user join
         Ok(vec![])
     }
@@ -342,21 +355,16 @@ impl Store {
     // ── Users ───────────────────────────────────────────────────────
 
     /// Find or create user by email.
-    pub async fn find_or_create_user(
-        &self,
-        email: &str,
-        name: Option<&str>,
-        avatar_url: Option<&str>,
-    ) -> Result<User> {
+    pub async fn find_or_create_user(&self, email: &str, name: Option<&str>, avatar_url: Option<&str>) -> Result<User> {
         // Check existing
-        let existing = sqlx::query_as::<_, User>(
-            "SELECT id, email, name, avatar_url, role, created_at, last_login FROM users WHERE email = ?",
-        )
-        .bind(email)
-        .fetch_optional(&self.pool)
-        .await?;
+        let row =
+            sqlx::query("SELECT id, email, name, avatar_url, role, created_at, last_login FROM users WHERE email = ?")
+                .bind(email)
+                .fetch_optional(&self.pool)
+                .await?;
 
-        if let Some(user) = existing {
+        if let Some(ref row) = row {
+            let user = map_user(row);
             // Update last_login
             let now = Utc::now().to_rfc3339();
             sqlx::query("UPDATE users SET last_login = ? WHERE id = ?")
@@ -396,35 +404,22 @@ impl Store {
 
     /// Get user by ID.
     pub async fn get_user(&self, user_id: &str) -> Result<Option<User>> {
-        let row = sqlx::query_as::<_, User>(
-            "SELECT id, email, name, avatar_url, role, created_at, last_login FROM users WHERE id = ?",
-        )
-        .bind(user_id)
-        .fetch_optional(&self.pool)
-        .await?;
-        Ok(row)
+        let row =
+            sqlx::query("SELECT id, email, name, avatar_url, role, created_at, last_login FROM users WHERE id = ?")
+                .bind(user_id)
+                .fetch_optional(&self.pool)
+                .await?;
+        Ok(row.as_ref().map(map_user))
     }
 
     /// Get current user for session.
     pub async fn get_current_user(&self, user_id: &str) -> Result<CurrentUser> {
-        let user = self
-            .get_user(user_id)
-            .await?
-            .context("User not found")?;
-        Ok(CurrentUser {
-            id: user.id,
-            email: user.email,
-            role: user.role,
-        })
+        let user = self.get_user(user_id).await?.context("User not found")?;
+        Ok(CurrentUser { id: user.id, email: user.email, role: user.role })
     }
 
     /// Upsert user identity (provider link).
-    pub async fn upsert_identity(
-        &self,
-        user_id: &str,
-        provider: &str,
-        provider_id: &str,
-    ) -> Result<()> {
+    pub async fn upsert_identity(&self, user_id: &str, provider: &str, provider_id: &str) -> Result<()> {
         sqlx::query(
             "INSERT INTO user_identities (user_id, provider, provider_id, created_at) VALUES (?, ?, ?, datetime('now')) \
              ON CONFLICT(provider, provider_id) DO NOTHING",

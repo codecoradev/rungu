@@ -21,17 +21,10 @@ pub async fn spa_handler(uri: axum::http::Uri) -> Response {
     // Try exact file match first
     if let Some(file) = Assets::get(path) {
         let mime = mime_guess::from_path(path).first_or_octet_stream();
-        let cache_control = if is_immutable_asset(path) {
-            "public, max-age=31536000, immutable"
-        } else {
-            "no-cache"
-        };
+        let cache_control = if is_immutable_asset(path) { "public, max-age=31536000, immutable" } else { "no-cache" };
         return (
             StatusCode::OK,
-            [
-                (header::CONTENT_TYPE, mime.as_ref()),
-                (header::CACHE_CONTROL, cache_control),
-            ],
+            [(header::CONTENT_TYPE, mime.as_ref()), (header::CACHE_CONTROL, cache_control)],
             file.data.to_vec(),
         )
             .into_response();

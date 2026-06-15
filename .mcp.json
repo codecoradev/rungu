@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "cora": {
+      "command": "cora",
+      "args": ["mcp"],
+      "lifecycle": "lazy",
+      "idleTimeout": 15
+    }
+  }
+}

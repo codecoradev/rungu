@@ -33,7 +33,9 @@ pub async fn handle_message(input: &str, pool: &SqlitePool) -> String {
 
     match result {
         Ok(val) => json!({ "jsonrpc": "2.0", "result": val, "id": id }).to_string(),
-        Err(code_msg) => json!({ "jsonrpc": "2.0", "error": {"code": -32603, "message": code_msg}, "id": id }).to_string(),
+        Err(code_msg) => {
+            json!({ "jsonrpc": "2.0", "error": {"code": -32603, "message": code_msg}, "id": id }).to_string()
+        }
     }
 }
 
@@ -60,7 +62,7 @@ pub async fn run_server(pool: SqlitePool) -> Result<()> {
     let stdin = std::io::stdin();
     let stdout = std::io::stdout();
     let mut stdout = stdout.lock();
-    let mut stdin = stdin.lock();
+    let stdin = stdin.lock();
     let mut line = String::new();
 
     for result in stdin.lines() {

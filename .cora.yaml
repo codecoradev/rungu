@@ -1,0 +1,39 @@
+# Cora AI Code Review configuration
+# Docs: https://codecora.dev/configuration.html
+#
+# Profile "rust-strict" — idiomatic Rust + safety focus (ownership, lifetimes, unsafe).
+# Available built-ins: security-first, performance, clean-code, beginner-friendly, minimal, rust-strict, typescript-strict, go-pragmatic
+
+profile: rust-strict
+
+# Provider/model inherit from ~/.cora/auth.toml (freemodel/gpt-5.4).
+# Override here if needed:
+# provider: openai
+# model: gpt-4o-mini
+# base_url: https://api.openai.com/v1
+
+focus: [security, bugs, performance]
+
+# Quality gate — block CI/commits on critical findings.
+quality_gate:
+  enabled: true
+  thresholds:
+    max_critical: 0
+    max_security: 0
+  categories:
+    performance:
+      action: warn
+      max_findings: 5
+
+# Review scope — Rust workspace + frontend.
+ignore:
+  files:
+    - target/**
+    - web/node_modules/**
+    - web/build/**
+    - .cora/**
+    - "*.db"
+    - "*.db-*"
+
+# Language-specific analyzers (auto-detected from file extensions).
+# Rust analyzer ships built-in; Svelte/TS analyzer active for web/.
