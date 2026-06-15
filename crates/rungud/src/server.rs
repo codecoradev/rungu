@@ -2,7 +2,7 @@
 
 use axum::{Router, routing::get};
 use rungu_api::AppState;
-use rungu_api::auth_routes;
+use rungu_api::api_routes;
 use tower_http::cors::Any;
 use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
@@ -16,9 +16,7 @@ pub async fn serve(config: Config, pool: sqlx::SqlitePool, listen: &str) -> anyh
     let store = rungu_core::Store::new(pool);
     let state = AppState { store, config: config.auth.clone() };
 
-    let api_routes = Router::new()
-        // Auth (public)
-        .merge(auth_routes::auth_routes());
+    let api_routes = api_routes();
 
     // CORS
     let cors = if config.cors_origins.is_empty() {
