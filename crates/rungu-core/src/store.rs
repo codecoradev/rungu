@@ -76,6 +76,30 @@ fn map_post(row: &sqlx::sqlite::SqliteRow) -> Post {
     }
 }
 
+/// Map a SQLite row to a Comment.
+fn map_comment(row: &sqlx::sqlite::SqliteRow) -> Comment {
+    Comment {
+        id: row.get("id"),
+        post_id: row.get("post_id"),
+        parent_id: row.get("parent_id"),
+        content: row.get("content"),
+        created_by: row.get("created_by"),
+        created_at: parse_ts(row.get::<&str, _>("created_at")),
+    }
+}
+
+/// Map a SQLite row to a CommentDetail (with user join).
+fn map_comment_detail(row: &sqlx::sqlite::SqliteRow) -> CommentDetail {
+    let comment = map_comment(row);
+    let creator = UserSummary {
+        id: row.get("user_id"),
+        email: row.get("user_email"),
+        name: row.get("user_name"),
+        avatar_url: row.get("user_avatar"),
+    };
+    CommentDetail { comment, creator }
+}
+
 /// Parse PostStatus from SQLite TEXT column.
 fn parse_status(s: &str) -> PostStatus {
     match s {
@@ -365,10 +389,33 @@ impl Store {
 
     // ── Comments ────────────────────────────────────────────────────
 
-    /// List comments for a post.
-    pub async fn list_comments(&self, _post_id: &str) -> Result<Vec<CommentDetail>> {
-        // TODO: implement with user join
-        Ok(vec![])
+    /// List comments for a post, ordered oldest-first for threading.
+    pub async fn list_comments(&self, post_id: &str) -> Result<Vec<CommentDetail>> {
+        let rows = sqlx::query(
+            "SELECT c.*, u.id as user_id, u.email as user_email, u.name as user_name, u.avatar_url as user_avatar \
+             FROM comments c \
+             LEFT JOIN users u ON c.created_by = u.id \
+             WHERE c.post_id = ? \
+             ORDER BY c.created_at ASC",
+        )
+        .bind(post_id)
+        .fetch_all(&self.pool)
+        .await
+        .context("Failed to list comments")?;
+
+        Ok(rows.iter().map(map_comment_detail).collect())
+    }
+
+    /// Get a single comment by ID (for ownership checks).
+    pub async fn get_comment(&self, comment_id: &str) -> Result<Option<Comment>> {
+        let row =
+            sqlx::query("SELECT id, post_id, parent_id, content, created_by, created_at FROM comments WHERE id = ?")
+                .bind(comment_id)
+                .fetch_optional(&self.pool)
+                .await
+                .context("Failed to get comment")?;
+
+        Ok(row.as_ref().map(map_comment))
     }
 
     /// Add a comment.
