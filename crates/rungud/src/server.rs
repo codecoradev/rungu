@@ -1,12 +1,15 @@
-//! HTTP server — Axum router, API routes, SPA handler.
+//! HTTP server — Axum router, API routes, SPA handler, Swagger UI.
 
 use axum::{Router, routing::get};
 use rungu_api::AppState;
 use rungu_api::api_routes;
+use rungu_api::openapi::ApiDoc;
 use tower_http::cors::Any;
 use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 use tracing::info;
+use utoipa::OpenApi;
+use utoipa_swagger_ui::SwaggerUi;
 
 use crate::config::Config;
 use crate::spa::spa_handler;
@@ -30,6 +33,7 @@ pub async fn serve(config: Config, pool: sqlx::SqlitePool, listen: &str) -> anyh
 
     let app = Router::new()
         .nest("/api", api_routes)
+        .merge(SwaggerUi::new("/swagger-ui").url("/api-docs/openapi.json", ApiDoc::openapi()))
         .route("/health", get(health_check))
         .fallback(spa_handler)
         .layer(cors)
@@ -38,6 +42,8 @@ pub async fn serve(config: Config, pool: sqlx::SqlitePool, listen: &str) -> anyh
 
     let listener = tokio::net::TcpListener::bind(listen).await?;
     info!("Rungu listening on {listen}");
+    info!("Swagger UI:  http://{listen}/swagger-ui");
+    info!("OpenAPI spec: http://{listen}/api-docs/openapi.json");
     axum::serve(listener, app).await?;
 
     Ok(())

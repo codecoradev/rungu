@@ -190,30 +190,80 @@ impl Store {
         })
     }
 
-    // ── Posts ───────────────────────────────────────────────────────
+    /// Update a project's name and/or description.
+    pub async fn update_project(
+        &self,
+        project_id: &str,
+        name: Option<&str>,
+        description: Option<&str>,
+    ) -> Result<Project> {
+        if name.is_none() && description.is_none() {
+            anyhow::bail!("At least one of name or description must be provided");
+        }
+
+        if let Some(n) = name {
+            let n = n.trim();
+            if n.is_empty() {
+                anyhow::bail!("Project name cannot be empty");
+            }
+            sqlx::query("UPDATE projects SET name = ? WHERE id = ?")
+                .bind(n)
+                .bind(project_id)
+                .execute(&self.pool)
+                .await
+                .context("Failed to update project name")?;
+        }
+
+        if let Some(d) = description {
+            sqlx::query("UPDATE projects SET description = ? WHERE id = ?")
+                .bind(d)
+                .bind(project_id)
+                .execute(&self.pool)
+                .await
+                .context("Failed to update project description")?;
+        }
+
+        // Fetch and return the updated row
+        self.get_project_by_id(project_id).await?.context("Project disappeared after update")
+    }
+
+    /// Delete a project by ID.
+    ///
+    /// Cascading deletes (posts, votes, comments) are handled by FK constraints.
+    pub async fn delete_project(&self, project_id: &str) -> Result<()> {
+        sqlx::query("DELETE FROM projects WHERE id = ?")
+            .bind(project_id)
+            .execute(&self.pool)
+            .await
+            .context("Failed to delete project")?;
+        Ok(())
+    }
+
+    // ── Posts ───────────────────────────────────────────────────────────
 
     /// List posts for a project with filters and sorting.
+    ///
+    /// Uses positional `?` parameter binding — user input is NEVER interpolated into SQL.
+    /// The search query uses `LIKE ?` with the pattern passed as a bind parameter.
     pub async fn list_posts(&self, params: ListPostsParams<'_>) -> Result<(Vec<PostDetail>, i64)> {
-        let mut where_clauses = vec!["project_id = ?1".to_string()];
+        // Build WHERE clause fragments — only add conditions for filters that are present.
+        // Each `?` is a positional placeholder bound later via .bind().
+        let mut conditions = vec!["project_id = ?".to_string()];
 
-        if let Some(s) = &params.status {
-            where_clauses.push(format!("status = '{:?}'", s));
+        if params.status.is_some() {
+            conditions.push("status = ?".to_string());
         }
-        if let Some(c) = &params.category {
-            where_clauses.push(format!("category = '{:?}'", c));
+        if params.category.is_some() {
+            conditions.push("category = ?".to_string());
         }
-        if let Some(q) = &params.query {
-            where_clauses.push(format!("(title LIKE '%{q}%' OR description LIKE '%{q}%')"));
+        if params.query.is_some() {
+            // Same pattern bound twice for title OR description LIKE
+            conditions.push("(title LIKE ? OR description LIKE ?)".to_string());
         }
 
-        let where_sql = where_clauses.join(" AND ");
+        let where_sql = conditions.join(" AND ");
 
-        // Total count
-        let count_sql = format!("SELECT COUNT(*) as cnt FROM posts WHERE {where_sql}");
-        let total: i64 =
-            sqlx::query_scalar(&count_sql).bind(params.project_id).fetch_one(&self.pool).await.unwrap_or(0);
-
-        // Sort
+        // Sort — safe because it's a hardcoded match, not user input
         let order = match params.sort {
             PostSort::Newest => "created_at DESC",
             PostSort::Oldest => "created_at ASC",
@@ -222,22 +272,42 @@ impl Store {
             PostSort::RecentlyUpdated => "updated_at DESC",
         };
 
+        // Helper: bind optional filter values in order (project_id already first)
+        // Returns the next bind index (for limit/offset appended after).
+        macro_rules! bind_filters {
+            ($query:expr) => {{
+                let q = $query.bind(params.project_id);
+                let q = if let Some(ref s) = params.status { q.bind(format!("{:?}", s).to_lowercase()) } else { q };
+                let q = if let Some(ref c) = params.category { q.bind(format!("{:?}", c).to_lowercase()) } else { q };
+                let q = if let Some(query_text) = params.query {
+                    let pattern = format!("%{query_text}%");
+                    // Bind twice: once for title LIKE, once for description LIKE
+                    q.bind(pattern.clone()).bind(pattern)
+                } else {
+                    q
+                };
+                q
+            }};
+        }
+
+        // Count query (same WHERE, no LIMIT/OFFSET)
+        let count_sql = format!("SELECT COUNT(*) FROM posts WHERE {where_sql}");
+        let total: i64 =
+            bind_filters!(sqlx::query_scalar::<_, i64>(&count_sql)).fetch_one(&self.pool).await.unwrap_or(0);
+
+        // Main query with LIMIT/OFFSET appended
         let sql = format!(
             "SELECT p.*, u.id as user_id, u.email as user_email, u.name as user_name, u.avatar_url as user_avatar \
              FROM posts p \
              LEFT JOIN users u ON p.created_by = u.id \
              WHERE {where_sql} \
              ORDER BY {order} \
-             LIMIT ?2 OFFSET ?3"
+             LIMIT ? OFFSET ?"
         );
 
-        let rows = sqlx::query(&sql)
-            .bind(params.project_id)
-            .bind(params.limit)
-            .bind(params.offset)
-            .fetch_all(&self.pool)
-            .await
-            .context("Failed to list posts")?;
+        let query = bind_filters!(sqlx::query(&sql)).bind(params.limit).bind(params.offset);
+
+        let rows = query.fetch_all(&self.pool).await.context("Failed to list posts")?;
 
         let posts = rows.iter().map(map_post_detail).collect();
         Ok((posts, total))
