@@ -8,4 +8,4 @@ pub mod middleware;
 pub mod session;
 
 pub use config::AuthConfig;
-pub use middleware::CurrentUser;
+pub use middleware::{CurrentUser, OptionalCurrentUser};

@@ -10,6 +10,7 @@ description = "Multi-provider OAuth + JWT session + middleware"
 rungu_proto = { workspace = true }
 rungu_core = { workspace = true }
 axum = { workspace = true }
+axum-extra = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
