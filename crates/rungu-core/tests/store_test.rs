@@ -311,24 +311,24 @@ async fn test_comment_crud_and_threading() {
 
     // Create top-level comment
     let c1 = store.create_comment(&post.id, "First comment", None, &user.id).await.unwrap();
-    assert_eq!(c1.content, "First comment");
-    assert!(c1.parent_id.is_none());
+    assert_eq!(c1.comment.content, "First comment");
+    assert!(c1.comment.parent_id.is_none());
 
     // Create reply
-    let c2 = store.create_comment(&post.id, "Reply to first", Some(&c1.id), &user.id).await.unwrap();
-    assert_eq!(c2.parent_id.as_deref(), Some(c1.id.as_str()));
+    let c2 = store.create_comment(&post.id, "Reply to first", Some(&c1.comment.id), &user.id).await.unwrap();
+    assert_eq!(c2.comment.parent_id.as_deref(), Some(c1.comment.id.as_str()));
 
     // List comments
     let comments = store.list_comments(&post.id).await.unwrap();
     assert_eq!(comments.len(), 2);
 
     // Get single comment
-    let found = store.get_comment(&c1.id).await.unwrap().unwrap();
+    let found = store.get_comment(&c1.comment.id).await.unwrap().unwrap();
     assert_eq!(found.content, "First comment");
 
     // Delete comment
-    store.delete_comment(&c1.id).await.unwrap();
-    assert!(store.get_comment(&c1.id).await.unwrap().is_none());
+    store.delete_comment(&c1.comment.id).await.unwrap();
+    assert!(store.get_comment(&c1.comment.id).await.unwrap().is_none());
 }
 
 // ── Users ───────────────────────────────────────────────────────────────

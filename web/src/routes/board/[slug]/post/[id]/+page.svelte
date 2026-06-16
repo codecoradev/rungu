@@ -182,6 +182,17 @@
         {#if user}
             <form onsubmit={handleComment} class="mb-6">
                 {#if replyTo}
+                    {@const parentComment = comments.find((c) => c.id === replyTo)}
+                    {#if parentComment}
+                        <div class="mb-2 rounded-lg border border-border bg-muted/50 p-3">
+                            <div class="flex items-center gap-2 text-xs text-muted-foreground">
+                                <span class="font-medium">{parentComment.creator?.name || parentComment.creator?.email || 'User'}</span>
+                                <span>·</span>
+                                <span>{timeAgo(parentComment.created_at)}</span>
+                            </div>
+                            <p class="mt-1 line-clamp-2 text-xs text-muted-foreground">{parentComment.content}</p>
+                        </div>
+                    {/if}
                     <div class="mb-1 text-xs text-muted-foreground">
                         Replying to thread ·
                         <button type="button" onclick={() => (replyTo = null)} class="text-primary">cancel</button>

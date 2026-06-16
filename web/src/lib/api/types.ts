@@ -70,7 +70,7 @@ export interface Comment {
     content: string;
     created_by: string;
     created_at: string;
-    creator?: UserSummary;
+    creator: UserSummary;
 }
 
 export interface VoteResponse {

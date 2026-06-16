@@ -542,7 +542,7 @@ impl Store {
         content: &str,
         parent_id: Option<&str>,
         created_by: &str,
-    ) -> Result<Comment> {
+    ) -> Result<CommentDetail> {
         let id = super::new_id();
         let now = Utc::now().to_rfc3339();
 
@@ -569,13 +569,29 @@ impl Store {
 
         tx.commit().await.context("Failed to commit comment creation")?;
 
-        Ok(Comment {
-            id,
-            post_id: post_id.to_string(),
-            parent_id: parent_id.map(String::from),
-            content: content.to_string(),
-            created_by: created_by.to_string(),
-            created_at: parse_now(&now),
+        // Fetch creator info for the response
+        let creator_row = sqlx::query("SELECT u.id, u.email, u.name, u.avatar_url FROM users u WHERE u.id = ?")
+            .bind(created_by)
+            .fetch_one(&self.pool)
+            .await?;
+
+        let creator = UserSummary {
+            id: creator_row.get("id"),
+            email: creator_row.get("email"),
+            name: creator_row.get("name"),
+            avatar_url: creator_row.get("avatar_url"),
+        };
+
+        Ok(CommentDetail {
+            comment: Comment {
+                id,
+                post_id: post_id.to_string(),
+                parent_id: parent_id.map(String::from),
+                content: content.to_string(),
+                created_by: created_by.to_string(),
+                created_at: parse_now(&now),
+            },
+            creator,
         })
     }
 
