@@ -1,8 +1,5 @@
 services:
   rungu:
-    build:
-      context: .
-      dockerfile: Dockerfile
     image: ghcr.io/codecoradev/rungu:latest
     container_name: rungu
     restart: unless-stopped
@@ -11,18 +8,18 @@ services:
     volumes:
       - rungu-data:/data
     environment:
-      - RUST_LOG=${RUST_LOG:-rungu=info}
-      - APP_SECRET=${APP_SECRET:?APP_SECRET is required. Generate with: openssl rand -hex 32}
-      - APP_URL=${APP_URL:-http://localhost:3000}
-      # OAuth providers (leave empty to disable)
-      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
-      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}
-      - GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID:-}
-      - GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET:-}
-      - KEYCLOAK_URL=${KEYCLOAK_URL:-}
-      - KEYCLOAK_REALM=${KEYCLOAK_REALM:-}
-      - KEYCLOAK_CLIENT_ID=${KEYCLOAK_CLIENT_ID:-}
-      - KEYCLOAK_CLIENT_SECRET=${KEYCLOAK_CLIENT_SECRET:-}
+      RUST_LOG: ${RUST_LOG:-rungu=info}
+      APP_SECRET: ${APP_SECRET:?APP_SECRET is required}
+      APP_URL: ${APP_URL:-http://localhost:3000}
+      RUNGU_SECURE_COOKIE: ${RUNGU_SECURE_COOKIE:-true}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
+      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
+      KEYCLOAK_URL: ${KEYCLOAK_URL:-}
+      KEYCLOAK_REALM: ${KEYCLOAK_REALM:-}
+      KEYCLOAK_CLIENT_ID: ${KEYCLOAK_CLIENT_ID:-}
+      KEYCLOAK_CLIENT_SECRET: ${KEYCLOAK_CLIENT_SECRET:-}
     command: >
       serve
       --db /data/rungu.db

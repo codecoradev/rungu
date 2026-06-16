@@ -47,8 +47,8 @@ impl AuthConfig {
     }
 
     fn build_google(app_url: &str) -> Option<ProviderConfig> {
-        let client_id = env::var("GOOGLE_CLIENT_ID").ok()?;
-        let client_secret = env::var("GOOGLE_CLIENT_SECRET").ok()?;
+        let client_id = std::env::var("GOOGLE_CLIENT_ID").ok().filter(|s| !s.is_empty())?;
+        let client_secret = std::env::var("GOOGLE_CLIENT_SECRET").ok().filter(|s| !s.is_empty())?;
         Some(ProviderConfig {
             client_id: client_id.clone(),
             client_secret,
@@ -60,8 +60,8 @@ impl AuthConfig {
     }
 
     fn build_github(app_url: &str) -> Option<ProviderConfig> {
-        let client_id = env::var("GITHUB_CLIENT_ID").ok()?;
-        let client_secret = env::var("GITHUB_CLIENT_SECRET").ok()?;
+        let client_id = std::env::var("GITHUB_CLIENT_ID").ok().filter(|s| !s.is_empty())?;
+        let client_secret = std::env::var("GITHUB_CLIENT_SECRET").ok().filter(|s| !s.is_empty())?;
         Some(ProviderConfig {
             client_id: client_id.clone(),
             client_secret,
@@ -73,10 +73,10 @@ impl AuthConfig {
     }
 
     fn build_keycloak(app_url: &str) -> Option<ProviderConfig> {
-        let base_url = env::var("KEYCLOAK_URL").ok()?;
-        let realm = env::var("KEYCLOAK_REALM").ok()?;
-        let client_id = env::var("KEYCLOAK_CLIENT_ID").ok()?;
-        let client_secret = env::var("KEYCLOAK_CLIENT_SECRET").ok()?;
+        let base_url = std::env::var("KEYCLOAK_URL").ok().filter(|s| !s.is_empty())?;
+        let realm = std::env::var("KEYCLOAK_REALM").ok().filter(|s| !s.is_empty())?;
+        let client_id = std::env::var("KEYCLOAK_CLIENT_ID").ok().filter(|s| !s.is_empty())?;
+        let client_secret = std::env::var("KEYCLOAK_CLIENT_SECRET").ok().filter(|s| !s.is_empty())?;
         let realm_url = format!("{}/realms/{}", base_url, realm);
         Some(ProviderConfig {
             client_id,
