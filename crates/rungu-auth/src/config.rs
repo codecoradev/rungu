@@ -20,6 +20,7 @@ pub struct AuthConfig {
     pub app_secret: String,
     pub app_url: String,
     pub secure_cookie: bool,
+    pub admin_emails: Vec<String>,
     pub google: Option<ProviderConfig>,
     pub github: Option<ProviderConfig>,
     pub keycloak: Option<ProviderConfig>,
@@ -39,6 +40,12 @@ impl AuthConfig {
                 std::process::exit(1);
             }),
             secure_cookie: env::var("RUNGU_SECURE_COOKIE").map(|v| v != "false").unwrap_or(true),
+            admin_emails: env::var("ADMIN_EMAILS")
+                .unwrap_or_default()
+                .split(',')
+                .map(|s| s.trim().to_lowercase())
+                .filter(|s| !s.is_empty())
+                .collect(),
             app_url,
             google,
             github,

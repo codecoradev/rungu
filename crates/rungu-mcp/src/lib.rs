@@ -118,7 +118,7 @@ fn parse_sort(s: Option<&str>) -> PostSort {
 /// Get or create the MCP system user for operations that need a user_id.
 async fn get_mcp_user(store: &Store) -> Result<String, String> {
     let user = store
-        .find_or_create_user("mcp@rungu.local", Some("MCP Bot"), None)
+        .find_or_create_user("mcp@rungu.local", Some("MCP Bot"), None, &[])
         .await
         .map_err(|e| format!("Failed to get/create MCP user: {e}"))?;
     Ok(user.id)

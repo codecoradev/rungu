@@ -127,6 +127,7 @@ mod tests {
             app_secret: "test-secret".to_string(),
             app_url: "http://localhost:3000".to_string(),
             secure_cookie: false,
+            admin_emails: vec![],
             google: None,
             github: None,
             keycloak: None,

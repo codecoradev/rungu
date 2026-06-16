@@ -5,8 +5,8 @@
 
 use axum::extract::{Path, Query, State};
 use axum::http::header::SET_COOKIE;
-use axum::response::AppendHeaders;
 use axum::http::{HeaderMap, StatusCode};
+use axum::response::AppendHeaders;
 use axum::response::IntoResponse;
 use axum::{Json, Router};
 use rungu_auth::session;
@@ -180,7 +180,12 @@ async fn callback(
     // Find or create user (email dedup)
     let user = state
         .store
-        .find_or_create_user(&identity.email, identity.name.as_deref(), identity.avatar_url.as_deref())
+        .find_or_create_user(
+            &identity.email,
+            identity.name.as_deref(),
+            identity.avatar_url.as_deref(),
+            &state.config.admin_emails,
+        )
         .await
         .map_err(|e| {
             error!(error = %e, "Failed to find/create user");
@@ -209,13 +214,8 @@ async fn callback(
 
     Ok((
         StatusCode::FOUND,
-        [
-            (axum::http::header::LOCATION, "/".to_string()),
-        ],
-        AppendHeaders([
-            (SET_COOKIE, session_cookie),
-            (SET_COOKIE, clear_state_cookie),
-        ]),
+        [(axum::http::header::LOCATION, "/".to_string())],
+        AppendHeaders([(SET_COOKIE, session_cookie), (SET_COOKIE, clear_state_cookie)]),
     ))
 }
 
