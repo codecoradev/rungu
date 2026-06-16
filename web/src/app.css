@@ -1,7 +1,7 @@
 @import 'tailwindcss';
 
 @theme inline {
-    /* ── Zinc (default dark-first, matches TrapFall) ──────────────── */
+    /* Dark mode (default) */
     --color-background: oklch(0.145 0.015 265);
     --color-foreground: oklch(0.985 0 0);
     --color-card: oklch(0.18 0.015 265);
@@ -38,8 +38,8 @@
         font-family: system-ui, -apple-system, sans-serif;
     }
 
-    /* Light mode override */
-    :root:not(.dark) {
+    /* Light mode — applied via .light class on <html> */
+    :root.light {
         --color-background: oklch(0.985 0 0);
         --color-foreground: oklch(0.145 0.015 265);
         --color-card: oklch(0.985 0 0);

@@ -24,6 +24,7 @@ async fn setup_app() -> (axum::Router, Store) {
         app_secret: "test-secret".to_string(),
         app_url: "http://localhost:3000".to_string(),
         secure_cookie: false,
+        admin_emails: vec![],
         google: None,
         github: None,
         keycloak: None,
@@ -44,7 +45,7 @@ fn make_token(user: &CurrentUser, secret: &str) -> String {
 
 /// Create a user in the DB and return a JWT token for them.
 async fn authed_user(store: &Store, secret: &str) -> String {
-    let user = store.find_or_create_user("user@test.com", Some("Test User"), None).await.unwrap();
+    let user = store.find_or_create_user("user@test.com", Some("Test User"), None, &[]).await.unwrap();
     let current = CurrentUser { id: user.id.clone(), email: user.email, role: user.role };
     make_token(&current, secret)
 }

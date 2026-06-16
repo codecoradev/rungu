@@ -14,12 +14,14 @@
 	let {
 		class: className,
 		ref = $bindable(null),
+		value = $bindable(),
 		...restProps
 	}: TextareaProps = $props();
 </script>
 
 <textarea
 	bind:this={ref}
+	bind:value
 	data-slot="textarea"
 	class={cn(textareaVariants(), className)}
 	{...restProps}

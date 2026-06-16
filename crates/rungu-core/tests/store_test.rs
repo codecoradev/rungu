@@ -48,7 +48,7 @@ async fn test_project_crud() {
 async fn test_project_delete_cascades() {
     let store = setup().await;
     let project = store.create_project("App", "app", "").await.unwrap();
-    let user = store.find_or_create_user("test@test.com", None, None).await.unwrap();
+    let user = store.find_or_create_user("test@test.com", None, None, &[]).await.unwrap();
     let post = store.create_post(&project.id, "Title", "Desc", PostCategory::Feedback, &user.id).await.unwrap();
 
     // Delete project should cascade-delete posts
@@ -62,7 +62,7 @@ async fn test_project_delete_cascades() {
 async fn test_post_crud() {
     let store = setup().await;
     let project = store.create_project("App", "app", "").await.unwrap();
-    let user = store.find_or_create_user("user@test.com", None, None).await.unwrap();
+    let user = store.find_or_create_user("user@test.com", None, None, &[]).await.unwrap();
 
     // Create
     let post =
@@ -90,7 +90,7 @@ async fn test_post_crud() {
 async fn test_list_posts_with_filters() {
     let store = setup().await;
     let project = store.create_project("App", "app", "").await.unwrap();
-    let user = store.find_or_create_user("user@test.com", None, None).await.unwrap();
+    let user = store.find_or_create_user("user@test.com", None, None, &[]).await.unwrap();
 
     // Create varied posts
     let _p1 =
@@ -174,7 +174,7 @@ async fn test_list_posts_with_filters() {
 async fn test_list_posts_search_with_sql_injection_chars() {
     let store = setup().await;
     let project = store.create_project("App", "app", "").await.unwrap();
-    let user = store.find_or_create_user("u@t.com", None, None).await.unwrap();
+    let user = store.find_or_create_user("u@t.com", None, None, &[]).await.unwrap();
 
     store.create_post(&project.id, "Normal Post", "content", PostCategory::Feedback, &user.id).await.unwrap();
 
@@ -215,7 +215,7 @@ async fn test_list_posts_search_with_sql_injection_chars() {
 async fn test_list_posts_pagination() {
     let store = setup().await;
     let project = store.create_project("App", "app", "").await.unwrap();
-    let user = store.find_or_create_user("u@t.com", None, None).await.unwrap();
+    let user = store.find_or_create_user("u@t.com", None, None, &[]).await.unwrap();
 
     // Create 5 posts
     for i in 0..5 {
@@ -260,7 +260,7 @@ async fn test_list_posts_pagination() {
 async fn test_vote_toggle() {
     let store = setup().await;
     let project = store.create_project("App", "app", "").await.unwrap();
-    let user = store.find_or_create_user("u@t.com", None, None).await.unwrap();
+    let user = store.find_or_create_user("u@t.com", None, None, &[]).await.unwrap();
     let post = store.create_post(&project.id, "Title", "", PostCategory::Feedback, &user.id).await.unwrap();
 
     // Vote
@@ -287,7 +287,7 @@ async fn test_vote_toggle() {
 async fn test_delete_post_cascades_votes_and_comments() {
     let store = setup().await;
     let project = store.create_project("App", "app", "").await.unwrap();
-    let user = store.find_or_create_user("u@t.com", None, None).await.unwrap();
+    let user = store.find_or_create_user("u@t.com", None, None, &[]).await.unwrap();
     let post = store.create_post(&project.id, "Title", "", PostCategory::Feedback, &user.id).await.unwrap();
 
     // Add vote + comment
@@ -306,29 +306,29 @@ async fn test_delete_post_cascades_votes_and_comments() {
 async fn test_comment_crud_and_threading() {
     let store = setup().await;
     let project = store.create_project("App", "app", "").await.unwrap();
-    let user = store.find_or_create_user("u@t.com", None, None).await.unwrap();
+    let user = store.find_or_create_user("u@t.com", None, None, &[]).await.unwrap();
     let post = store.create_post(&project.id, "Title", "", PostCategory::Feedback, &user.id).await.unwrap();
 
     // Create top-level comment
     let c1 = store.create_comment(&post.id, "First comment", None, &user.id).await.unwrap();
-    assert_eq!(c1.content, "First comment");
-    assert!(c1.parent_id.is_none());
+    assert_eq!(c1.comment.content, "First comment");
+    assert!(c1.comment.parent_id.is_none());
 
     // Create reply
-    let c2 = store.create_comment(&post.id, "Reply to first", Some(&c1.id), &user.id).await.unwrap();
-    assert_eq!(c2.parent_id.as_deref(), Some(c1.id.as_str()));
+    let c2 = store.create_comment(&post.id, "Reply to first", Some(&c1.comment.id), &user.id).await.unwrap();
+    assert_eq!(c2.comment.parent_id.as_deref(), Some(c1.comment.id.as_str()));
 
     // List comments
     let comments = store.list_comments(&post.id).await.unwrap();
     assert_eq!(comments.len(), 2);
 
     // Get single comment
-    let found = store.get_comment(&c1.id).await.unwrap().unwrap();
+    let found = store.get_comment(&c1.comment.id).await.unwrap().unwrap();
     assert_eq!(found.content, "First comment");
 
     // Delete comment
-    store.delete_comment(&c1.id).await.unwrap();
-    assert!(store.get_comment(&c1.id).await.unwrap().is_none());
+    store.delete_comment(&c1.comment.id).await.unwrap();
+    assert!(store.get_comment(&c1.comment.id).await.unwrap().is_none());
 }
 
 // ── Users ───────────────────────────────────────────────────────────────
@@ -338,17 +338,17 @@ async fn test_user_find_or_create_email_dedup() {
     let store = setup().await;
 
     // Create new user
-    let u1 = store.find_or_create_user("test@example.com", Some("Alice"), None).await.unwrap();
+    let u1 = store.find_or_create_user("test@example.com", Some("Alice"), None, &[]).await.unwrap();
     assert_eq!(u1.email, "test@example.com");
     assert_eq!(u1.name, "Alice");
     assert_eq!(u1.role, UserRole::Member);
 
     // Same email → should return same user (dedup)
-    let u2 = store.find_or_create_user("test@example.com", Some("Alice Updated"), None).await.unwrap();
+    let u2 = store.find_or_create_user("test@example.com", Some("Alice Updated"), None, &[]).await.unwrap();
     assert_eq!(u1.id, u2.id);
 
     // Different email → different user
-    let u3 = store.find_or_create_user("other@example.com", None, None).await.unwrap();
+    let u3 = store.find_or_create_user("other@example.com", None, None, &[]).await.unwrap();
     assert_ne!(u1.id, u3.id);
 
     // upsert identity link
@@ -361,7 +361,7 @@ async fn test_user_find_or_create_email_dedup() {
 #[tokio::test]
 async fn test_get_current_user() {
     let store = setup().await;
-    let user = store.find_or_create_user("cur@test.com", None, None).await.unwrap();
+    let user = store.find_or_create_user("cur@test.com", None, None, &[]).await.unwrap();
 
     let current = store.get_current_user(&user.id).await.unwrap();
     assert_eq!(current.id, user.id);

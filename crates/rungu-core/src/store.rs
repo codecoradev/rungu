@@ -106,6 +106,27 @@ fn map_comment_detail(row: &sqlx::sqlite::SqliteRow) -> CommentDetail {
     CommentDetail { comment, creator }
 }
 
+/// Convert PostStatus to DB string (avoid format! Debug for underscore variants).
+fn status_to_str(s: PostStatus) -> &'static str {
+    match s {
+        PostStatus::Open => "open",
+        PostStatus::Planned => "planned",
+        PostStatus::InProgress => "in_progress",
+        PostStatus::Done => "done",
+        PostStatus::Declined => "declined",
+    }
+}
+
+/// Convert PostCategory to DB string.
+fn category_to_str(c: PostCategory) -> &'static str {
+    match c {
+        PostCategory::Feedback => "feedback",
+        PostCategory::Bug => "bug",
+        PostCategory::Feature => "feature",
+        PostCategory::Question => "question",
+    }
+}
+
 /// Parse PostStatus from SQLite TEXT column.
 fn parse_status(s: &str) -> PostStatus {
     match s {
@@ -283,8 +304,8 @@ impl Store {
         macro_rules! bind_filters {
             ($query:expr) => {{
                 let q = $query.bind(params.project_id);
-                let q = if let Some(ref s) = params.status { q.bind(format!("{:?}", s).to_lowercase()) } else { q };
-                let q = if let Some(ref c) = params.category { q.bind(format!("{:?}", c).to_lowercase()) } else { q };
+                let q = if let Some(ref s) = params.status { q.bind(status_to_str(*s)) } else { q };
+                let q = if let Some(ref c) = params.category { q.bind(category_to_str(*c)) } else { q };
                 let q = if let Some(query_text) = params.query {
                     let pattern = format!("%{query_text}%");
                     // Bind twice: once for title LIKE, once for description LIKE
@@ -368,7 +389,7 @@ impl Store {
         .bind(project_id)
         .bind(title)
         .bind(description)
-        .bind(format!("{:?}", category).to_lowercase())
+        .bind(category_to_str(category))
         .bind(created_by)
         .bind(&now)
         .bind(&now)
@@ -392,15 +413,29 @@ impl Store {
     }
 
     /// Update post status.
+    /// Update post status.
     pub async fn update_post_status(&self, post_id: &str, status: PostStatus) -> Result<()> {
         let now = Utc::now().to_rfc3339();
         sqlx::query("UPDATE posts SET status = ?, updated_at = ? WHERE id = ?")
-            .bind(format!("{:?}", status).to_lowercase())
+            .bind(status_to_str(status))
             .bind(&now)
             .bind(post_id)
             .execute(&self.pool)
             .await
             .context("Failed to update post status")?;
+        Ok(())
+    }
+
+    /// Update post category.
+    pub async fn update_post_category(&self, post_id: &str, category: PostCategory) -> Result<()> {
+        let now = Utc::now().to_rfc3339();
+        sqlx::query("UPDATE posts SET category = ?, updated_at = ? WHERE id = ?")
+            .bind(category_to_str(category))
+            .bind(&now)
+            .bind(post_id)
+            .execute(&self.pool)
+            .await
+            .context("Failed to update post category")?;
         Ok(())
     }
 
@@ -507,7 +542,7 @@ impl Store {
         content: &str,
         parent_id: Option<&str>,
         created_by: &str,
-    ) -> Result<Comment> {
+    ) -> Result<CommentDetail> {
         let id = super::new_id();
         let now = Utc::now().to_rfc3339();
 
@@ -534,13 +569,29 @@ impl Store {
 
         tx.commit().await.context("Failed to commit comment creation")?;
 
-        Ok(Comment {
-            id,
-            post_id: post_id.to_string(),
-            parent_id: parent_id.map(String::from),
-            content: content.to_string(),
-            created_by: created_by.to_string(),
-            created_at: parse_now(&now),
+        // Fetch creator info for the response
+        let creator_row = sqlx::query("SELECT u.id, u.email, u.name, u.avatar_url FROM users u WHERE u.id = ?")
+            .bind(created_by)
+            .fetch_one(&self.pool)
+            .await?;
+
+        let creator = UserSummary {
+            id: creator_row.get("id"),
+            email: creator_row.get("email"),
+            name: creator_row.get("name"),
+            avatar_url: creator_row.get("avatar_url"),
+        };
+
+        Ok(CommentDetail {
+            comment: Comment {
+                id,
+                post_id: post_id.to_string(),
+                parent_id: parent_id.map(String::from),
+                content: content.to_string(),
+                created_by: created_by.to_string(),
+                created_at: parse_now(&now),
+            },
+            creator,
         })
     }
 
@@ -579,23 +630,44 @@ impl Store {
     // ── Users ───────────────────────────────────────────────────────
 
     /// Find or create user by email.
-    pub async fn find_or_create_user(&self, email: &str, name: Option<&str>, avatar_url: Option<&str>) -> Result<User> {
+    pub async fn find_or_create_user(
+        &self,
+        email: &str,
+        name: Option<&str>,
+        avatar_url: Option<&str>,
+        admin_emails: &[String],
+    ) -> Result<User> {
+        let email_lower = email.to_lowercase();
+        let is_admin = admin_emails.iter().any(|e| e == &email_lower);
+        let role = if is_admin { "admin" } else { "member" };
+
         // Check existing
         let row =
             sqlx::query("SELECT id, email, name, avatar_url, role, created_at, last_login FROM users WHERE email = ?")
-                .bind(email)
+                .bind(&email_lower)
                 .fetch_optional(&self.pool)
                 .await?;
 
         if let Some(ref row) = row {
             let mut user = map_user(row);
-            // Update last_login and return fresh data
             let now = Utc::now().to_rfc3339();
-            sqlx::query("UPDATE users SET last_login = ? WHERE id = ?")
-                .bind(&now)
-                .bind(&user.id)
-                .execute(&self.pool)
-                .await?;
+
+            // Auto-promote to admin if in ADMIN_EMAILS (and not already admin)
+            if is_admin && user.role != UserRole::Admin {
+                sqlx::query("UPDATE users SET role = 'admin', last_login = ? WHERE id = ?")
+                    .bind(&now)
+                    .bind(&user.id)
+                    .execute(&self.pool)
+                    .await?;
+                user.role = UserRole::Admin;
+            } else {
+                sqlx::query("UPDATE users SET last_login = ? WHERE id = ?")
+                    .bind(&now)
+                    .bind(&user.id)
+                    .execute(&self.pool)
+                    .await?;
+            }
+
             user.last_login = parse_now(&now);
             Ok(user)
         } else {
@@ -603,12 +675,13 @@ impl Store {
             let id = super::new_id();
             let now = Utc::now().to_rfc3339();
             sqlx::query(
-                "INSERT INTO users (id, email, name, avatar_url, role, created_at, last_login) VALUES (?, ?, ?, ?, 'member', ?, ?)",
+                "INSERT INTO users (id, email, name, avatar_url, role, created_at, last_login) VALUES (?, ?, ?, ?, ?, ?, ?)",
             )
             .bind(&id)
-            .bind(email)
+            .bind(&email_lower)
             .bind(name.unwrap_or(""))
             .bind(avatar_url.unwrap_or(""))
+            .bind(role)
             .bind(&now)
             .bind(&now)
             .execute(&self.pool)
@@ -617,10 +690,10 @@ impl Store {
 
             Ok(User {
                 id,
-                email: email.to_string(),
+                email: email_lower.clone(),
                 name: name.unwrap_or("").to_string(),
                 avatar_url: avatar_url.unwrap_or("").to_string(),
-                role: UserRole::Member,
+                role: if is_admin { UserRole::Admin } else { UserRole::Member },
                 created_at: parse_now(&now),
                 last_login: parse_now(&now),
             })

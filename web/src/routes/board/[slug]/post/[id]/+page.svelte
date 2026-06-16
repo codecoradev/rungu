@@ -1,7 +1,7 @@
 <script lang="ts">
     import { onMount } from 'svelte';
     import { api, ApiError } from '$lib/api/client';
-    import type { PostDetail, Comment, CurrentUser, PostStatus } from '$lib/api/types';
+    import type { PostDetail, Comment, CurrentUser, PostStatus, PostCategory } from '$lib/api/types';
     import StatusBadge from '$lib/components/StatusBadge.svelte';
     import CategoryBadge from '$lib/components/CategoryBadge.svelte';
     import VoteButton from '$lib/components/VoteButton.svelte';
@@ -25,6 +25,7 @@
     let commentLoading = $state(false);
 
     const statusOptions: PostStatus[] = ['open', 'planned', 'in_progress', 'done', 'declined'];
+    const categoryOptions: PostCategory[] = ['feedback', 'bug', 'feature', 'question'];
     const isAdmin = $derived(user?.role === 'admin');
     const isAuthor = $derived(user?.id === post?.created_by);
     const canEditStatus = $derived(isAdmin || isAuthor);
@@ -89,6 +90,17 @@
         }
     }
 
+    async function handleCategoryChange(e: Event) {
+        const target = e.currentTarget as HTMLSelectElement;
+        const category = target.value as PostCategory;
+        if (!post) return;
+        try {
+            post = await api.updatePostCategory(post.id, category);
+        } catch {
+            error = 'Failed to update category';
+        }
+    }
+
     function handleVote(voted: boolean, count: number) {
         if (post) {
             post.user_voted = voted;
@@ -123,6 +135,17 @@
             <div class="min-w-0 flex-1">
                 <div class="mb-2 flex flex-wrap items-center gap-2">
                     <CategoryBadge category={post.category} />
+                    {#if canEditStatus}
+                        <select
+                            value={post.category}
+                            onchange={handleCategoryChange}
+                            class="rounded-md border border-input bg-background px-2 py-0.5 text-xs capitalize"
+                        >
+                            {#each categoryOptions as c (c)}
+                                <option value={c} class="capitalize">{c}</option>
+                            {/each}
+                        </select>
+                    {/if}
                     <StatusBadge status={post.status} />
                     {#if canEditStatus}
                         <select
@@ -159,6 +182,17 @@
         {#if user}
             <form onsubmit={handleComment} class="mb-6">
                 {#if replyTo}
+                    {@const parentComment = comments.find((c) => c.id === replyTo)}
+                    {#if parentComment}
+                        <div class="mb-2 rounded-lg border border-border bg-muted/50 p-3">
+                            <div class="flex items-center gap-2 text-xs text-muted-foreground">
+                                <span class="font-medium">{parentComment.creator?.name || parentComment.creator?.email || 'User'}</span>
+                                <span>·</span>
+                                <span>{timeAgo(parentComment.created_at)}</span>
+                            </div>
+                            <p class="mt-1 line-clamp-2 text-xs text-muted-foreground">{parentComment.content}</p>
+                        </div>
+                    {/if}
                     <div class="mb-1 text-xs text-muted-foreground">
                         Replying to thread ·
                         <button type="button" onclick={() => (replyTo = null)} class="text-primary">cancel</button>
