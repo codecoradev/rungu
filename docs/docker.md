@@ -7,7 +7,7 @@ docker run -d \
   --name rungu \
   -p 3000:3000 \
   -v rungu-data:/data \
-  -e APP_SECRET=change-me-to-random-secret \
+  -e APP_SECRET=$(openssl rand -hex 32) \
   ghcr.io/codecoradev/rungu:latest
 ```
 

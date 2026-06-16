@@ -1,5 +1,7 @@
 # MCP Server
 
+> ⚠️ **Experimental** — tool handlers currently return stub data. Full implementation tracked in [#28](https://github.com/codecoradev/rungu/issues/28).
+
 Rungu includes a built-in MCP (Model Context Protocol) server that lets AI agents query and manage feedback directly.
 
 ## Setup

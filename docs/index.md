@@ -21,7 +21,7 @@ features:
   - title: 🔐 Multi-Provider Auth
     details: Google, GitHub, Keycloak — or all three. ENV-driven setup. No external auth server required.
   - title: 📋 Status & Categories
-    details: Track posts through statuses: Open → Planned → In Progress → Done. Categorize as feedback, bug, feature, or question.
+    details: "Track posts through statuses: Open → Planned → In Progress → Done. Categorize as feedback, bug, feature, or question."
   - title: 🏗️ Multi-Board
     details: Multiple projects, each with its own feedback board. Perfect for teams managing multiple products or modules.
   - title: 🤖 MCP Server

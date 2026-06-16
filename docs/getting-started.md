@@ -48,7 +48,7 @@ cargo build --release
 
 1. **Create a project:**
    ```bash
-   ./rungu project add --name "My App"
+   ./rungu project-add "My App"
    ```
 
 2. **Start the server:**
