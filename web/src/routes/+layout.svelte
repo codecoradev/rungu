@@ -26,7 +26,7 @@
     }
 </script>
 
-<div class="min-h-screen">
+<div class="flex min-h-screen flex-col">
     <nav class="border-b border-border bg-background">
         <div class="mx-auto flex max-w-5xl items-center justify-between px-4 py-3">
             <a href="/" class="flex items-center gap-2 font-bold">
@@ -50,7 +50,7 @@
         </div>
     </nav>
 
-    <main class="mx-auto max-w-5xl px-4 py-6">
+    <main class="mx-auto w-full max-w-5xl flex-1 px-4 py-6">
         {@render children()}
     </main>
 

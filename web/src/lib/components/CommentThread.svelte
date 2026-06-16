@@ -40,9 +40,9 @@
         <div class="rounded-lg border border-border bg-card p-4">
             <div class="flex items-center gap-2 text-sm">
                 <div class="flex size-8 items-center justify-center rounded-full bg-muted text-xs font-medium text-muted-foreground">
-                    {(comment.creator.name || comment.creator.email)[0]?.toUpperCase()}
+                    {(comment.creator?.name || comment.creator?.email || comment.created_by)[0]?.toUpperCase()}
                 </div>
-                <span class="font-medium">{comment.creator.name || comment.creator.email}</span>
+                <span class="font-medium">{comment.creator?.name || comment.creator?.email || 'User'}</span>
                 <span class="text-muted-foreground">· {timeAgo(comment.created_at)}</span>
             </div>
             <p class="mt-2 whitespace-pre-wrap text-sm text-muted-foreground">{comment.content}</p>
@@ -65,9 +65,9 @@
                         <div class="rounded-lg bg-muted p-3">
                             <div class="flex items-center gap-2 text-sm">
                                 <div class="flex size-6 items-center justify-center rounded-full bg-background text-xs font-medium text-muted-foreground">
-                                    {(reply.creator.name || reply.creator.email)[0]?.toUpperCase()}
+                                    {(reply.creator?.name || reply.creator?.email || reply.created_by)[0]?.toUpperCase()}
                                 </div>
-                                <span class="font-medium">{reply.creator.name || reply.creator.email}</span>
+                                <span class="font-medium">{reply.creator?.name || reply.creator?.email || 'User'}</span>
                                 <span class="text-muted-foreground">· {timeAgo(reply.created_at)}</span>
                             </div>
                             <p class="mt-1.5 whitespace-pre-wrap text-sm text-muted-foreground">{reply.content}</p>
