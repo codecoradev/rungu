@@ -70,3 +70,29 @@ CREATE TABLE IF NOT EXISTS comments (
     created_at  TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_comments_post ON comments(post_id, created_at);
+
+-- Full-text search (FTS5)
+CREATE VIRTUAL TABLE IF NOT EXISTS posts_fts USING fts5(
+    title,
+    description,
+    content='posts',
+    content_rowid='rowid'
+);
+
+-- Triggers to keep FTS index in sync
+CREATE TRIGGER IF NOT EXISTS posts_ai AFTER INSERT ON posts BEGIN
+    INSERT INTO posts_fts(rowid, title, description)
+    VALUES (new.rowid, new.title, new.description);
+END;
+
+CREATE TRIGGER IF NOT EXISTS posts_ad AFTER DELETE ON posts BEGIN
+    INSERT INTO posts_fts(posts_fts, rowid, title, description)
+    VALUES ('delete', old.rowid, old.title, old.description);
+END;
+
+CREATE TRIGGER IF NOT EXISTS posts_au AFTER UPDATE ON posts BEGIN
+    INSERT INTO posts_fts(posts_fts, rowid, title, description)
+    VALUES ('delete', old.rowid, old.title, old.description);
+    INSERT INTO posts_fts(rowid, title, description)
+    VALUES (new.rowid, new.title, new.description);
+END;

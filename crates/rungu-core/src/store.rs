@@ -284,8 +284,9 @@ impl Store {
             conditions.push("category = ?".to_string());
         }
         if params.query.is_some() {
-            // Same pattern bound twice for title OR description LIKE
-            conditions.push("(title LIKE ? OR description LIKE ?)".to_string());
+            // Case-insensitive search via LOWER() — works on both SQLite and PostgreSQL.
+            // FTS5 index (SQLite) maintained by triggers for future use.
+            conditions.push("(LOWER(title) LIKE LOWER(?) OR LOWER(description) LIKE LOWER(?))".to_string());
         }
 
         let where_sql = conditions.join(" AND ");
@@ -308,7 +309,6 @@ impl Store {
                 let q = if let Some(ref c) = params.category { q.bind(category_to_str(*c)) } else { q };
                 let q = if let Some(query_text) = params.query {
                     let pattern = format!("%{query_text}%");
-                    // Bind twice: once for title LIKE, once for description LIKE
                     q.bind(pattern.clone()).bind(pattern)
                 } else {
                     q
