@@ -1,5 +1,4 @@
-//! Daemon configuration.
-
+/// Daemon configuration.
 use rungu_auth::AuthConfig;
 use std::path::PathBuf;
 
@@ -10,8 +9,6 @@ pub struct Config {
     pub auth: AuthConfig,
     /// Allowed CORS origins. Empty = allow all (development only).
     pub cors_origins: Vec<String>,
-    /// Set to false to disable Secure cookie flag (e.g. for local HTTP development).
-    pub secure_cookie: bool,
 }
 
 impl Config {
@@ -31,7 +28,6 @@ impl Config {
             listen_addr: std::env::var("RUNGU_LISTEN").unwrap_or_else(|_| "0.0.0.0:3000".to_string()),
             auth: AuthConfig::from_env(),
             cors_origins,
-            secure_cookie: std::env::var("RUNGU_SECURE_COOKIE").map(|v| v != "false").unwrap_or(true),
         }
     }
 }

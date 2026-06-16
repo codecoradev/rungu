@@ -19,6 +19,7 @@ pub struct ProviderConfig {
 pub struct AuthConfig {
     pub app_secret: String,
     pub app_url: String,
+    pub secure_cookie: bool,
     pub google: Option<ProviderConfig>,
     pub github: Option<ProviderConfig>,
     pub keycloak: Option<ProviderConfig>,
@@ -34,6 +35,7 @@ impl AuthConfig {
 
         Self {
             app_secret: env::var("APP_SECRET").unwrap_or_else(|_| "dev-secret-change-me".to_string()),
+            secure_cookie: env::var("RUNGU_SECURE_COOKIE").map(|v| v != "false").unwrap_or(true),
             app_url,
             google,
             github,
