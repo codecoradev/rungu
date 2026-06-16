@@ -12,7 +12,7 @@ services:
       - rungu-data:/data
     environment:
       - RUST_LOG=${RUST_LOG:-rungu=info}
-      - APP_SECRET=${APP_SECRET:-change-me-in-production}
+      - APP_SECRET=${APP_SECRET:?APP_SECRET is required. Generate with: openssl rand -hex 32}
       - APP_URL=${APP_URL:-http://localhost:3000}
       # OAuth providers (leave empty to disable)
       - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}

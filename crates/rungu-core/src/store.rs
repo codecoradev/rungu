@@ -415,42 +415,46 @@ impl Store {
     // ── Votes ────────────────────────────────────────────────────────
 
     /// Toggle vote on a post. Returns true if now voted, false if unvoted.
+    /// Toggle vote on a post. Returns true if now voted, false if unvoted.
+    /// Wrapped in a transaction to prevent race conditions.
     pub async fn toggle_vote(&self, user_id: &str, post_id: &str) -> Result<bool> {
-        // Check if already voted
+        let mut tx = self.pool.begin().await.context("Failed to begin transaction")?;
+
         let existing: Option<(String,)> = sqlx::query_as("SELECT user_id FROM votes WHERE user_id = ? AND post_id = ?")
             .bind(user_id)
             .bind(post_id)
-            .fetch_optional(&self.pool)
+            .fetch_optional(&mut *tx)
             .await?;
 
-        match existing {
+        let voted = match existing {
             Some(_) => {
-                // Unvote
                 sqlx::query("DELETE FROM votes WHERE user_id = ? AND post_id = ?")
                     .bind(user_id)
                     .bind(post_id)
-                    .execute(&self.pool)
+                    .execute(&mut *tx)
                     .await?;
                 sqlx::query("UPDATE posts SET vote_count = MAX(0, vote_count - 1) WHERE id = ?")
                     .bind(post_id)
-                    .execute(&self.pool)
+                    .execute(&mut *tx)
                     .await?;
-                Ok(false)
+                false
             }
             None => {
-                // Vote
                 sqlx::query("INSERT INTO votes (user_id, post_id, created_at) VALUES (?, ?, datetime('now'))")
                     .bind(user_id)
                     .bind(post_id)
-                    .execute(&self.pool)
+                    .execute(&mut *tx)
                     .await?;
                 sqlx::query("UPDATE posts SET vote_count = vote_count + 1 WHERE id = ?")
                     .bind(post_id)
-                    .execute(&self.pool)
+                    .execute(&mut *tx)
                     .await?;
-                Ok(true)
+                true
             }
-        }
+        };
+
+        tx.commit().await.context("Failed to commit vote toggle")?;
+        Ok(voted)
     }
 
     /// Check if a user has voted on a post.
@@ -504,6 +508,9 @@ impl Store {
     ) -> Result<Comment> {
         let id = super::new_id();
         let now = Utc::now().to_rfc3339();
+
+        let mut tx = self.pool.begin().await.context("Failed to begin transaction")?;
+
         sqlx::query(
             "INSERT INTO comments (id, post_id, parent_id, content, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?)",
         )
@@ -513,16 +520,17 @@ impl Store {
         .bind(content)
         .bind(created_by)
         .bind(&now)
-        .execute(&self.pool)
+        .execute(&mut *tx)
         .await
         .context("Failed to create comment")?;
 
-        // Increment comment count
         sqlx::query("UPDATE posts SET comment_count = comment_count + 1, updated_at = ? WHERE id = ?")
             .bind(&now)
             .bind(post_id)
-            .execute(&self.pool)
+            .execute(&mut *tx)
             .await?;
+
+        tx.commit().await.context("Failed to commit comment creation")?;
 
         Ok(Comment {
             id,
@@ -535,12 +543,34 @@ impl Store {
     }
 
     /// Delete a comment.
+    /// Delete a comment and decrement the post's comment_count in a transaction.
     pub async fn delete_comment(&self, comment_id: &str) -> Result<()> {
-        sqlx::query("DELETE FROM comments WHERE id = ?")
+        let mut tx = self.pool.begin().await.context("Failed to begin transaction")?;
+
+        // Get post_id before deleting
+        let post_id: Option<String> = sqlx::query_scalar("SELECT post_id FROM comments WHERE id = ?")
             .bind(comment_id)
-            .execute(&self.pool)
+            .fetch_optional(&mut *tx)
+            .await?;
+
+        // Delete the comment
+        let result = sqlx::query("DELETE FROM comments WHERE id = ?")
+            .bind(comment_id)
+            .execute(&mut *tx)
             .await
             .context("Failed to delete comment")?;
+
+        // Decrement comment_count if a row was deleted
+        if result.rows_affected() > 0 {
+            if let Some(pid) = post_id {
+                sqlx::query("UPDATE posts SET comment_count = MAX(0, comment_count - 1) WHERE id = ?")
+                    .bind(pid)
+                    .execute(&mut *tx)
+                    .await?;
+            }
+        }
+
+        tx.commit().await.context("Failed to commit comment deletion")?;
         Ok(())
     }
 
@@ -556,14 +586,15 @@ impl Store {
                 .await?;
 
         if let Some(ref row) = row {
-            let user = map_user(row);
-            // Update last_login
+            let mut user = map_user(row);
+            // Update last_login and return fresh data
             let now = Utc::now().to_rfc3339();
             sqlx::query("UPDATE users SET last_login = ? WHERE id = ?")
                 .bind(&now)
                 .bind(&user.id)
                 .execute(&self.pool)
                 .await?;
+            user.last_login = parse_now(&now);
             Ok(user)
         } else {
             // Create new user
