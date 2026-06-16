@@ -18,26 +18,18 @@ pub use store::Store;
 pub async fn open_pool(database_url: &str) -> Result<AnyPool> {
     sqlx::any::install_default_drivers();
 
-    if database_url.starts_with("sqlite:") {
-        // SQLite — connect directly. WAL mode only works for file-based DBs.
-        // In-memory databases (sqlite::memory:) skip WAL params.
-        let pool = if database_url.contains(":memory:") {
-            // In-memory: use AnyPoolOptions to limit to 1 connection
-            // (each connection to in-memory SQLite gets its own DB)
-            sqlx::pool::PoolOptions::<sqlx::Any>::new().max_connections(1).connect(database_url).await?
-        } else {
-            // File-based SQLite — enable WAL mode via query params
-            let wal_url = if database_url.contains("?") {
-                format!("{}&_journal_mode=WAL&_synchronous=NORMAL", database_url)
-            } else {
-                format!("{}?mode=rwc&_journal_mode=WAL&_synchronous=NORMAL", database_url)
-            };
-            AnyPool::connect(&wal_url).await?
-        };
+    if database_url.starts_with("sqlite:") && database_url.contains(":memory:") {
+        // In-memory: single connection (each connection gets its own DB)
+        let pool = sqlx::pool::PoolOptions::<sqlx::Any>::new().max_connections(1).connect(database_url).await?;
         Ok(pool)
     } else {
-        // PostgreSQL
+        // SQLite file or PostgreSQL — connect via AnyPool
         let pool = AnyPool::connect(database_url).await?;
+        // Enable WAL mode for SQLite file databases
+        if database_url.starts_with("sqlite:") {
+            let _ = sqlx::query("PRAGMA journal_mode=WAL").execute(&pool).await;
+            let _ = sqlx::query("PRAGMA synchronous=NORMAL").execute(&pool).await;
+        }
         Ok(pool)
     }
 }
