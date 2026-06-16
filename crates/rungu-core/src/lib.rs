@@ -24,7 +24,20 @@ pub async fn open_pool(database_url: &str) -> Result<AnyPool> {
         Ok(pool)
     } else {
         // SQLite file or PostgreSQL — connect via AnyPool
-        let pool = AnyPool::connect(database_url).await?;
+        // For SQLite files, ensure mode=rwc (read-write-create) is in the URL
+        let url = if database_url.starts_with("sqlite:")
+            && !database_url.contains(":memory:")
+            && !database_url.contains("?mode=")
+        {
+            if database_url.contains("?") {
+                format!("{}&mode=rwc", database_url)
+            } else {
+                format!("{}?mode=rwc", database_url)
+            }
+        } else {
+            database_url.to_string()
+        };
+        let pool = AnyPool::connect(&url).await?;
         // Enable WAL mode for SQLite file databases
         if database_url.starts_with("sqlite:") {
             let _ = sqlx::query("PRAGMA journal_mode=WAL").execute(&pool).await;
