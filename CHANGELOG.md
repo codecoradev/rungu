@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.1] - 2026-06-16
+
+### Fixed
+- Translate tagline from Indonesian to English ("Listen. Prioritize. Build.")
+- Rename Cloudflare Pages project to `rungu-docs` (rungu.pages.dev was taken)
+- Translate AGENTS.md from Indonesian to English
+
 ## [0.1.0] - 2026-06-16
 
 First MVP release. Full-stack feedback board with OAuth, REST API, and embedded SPA.
