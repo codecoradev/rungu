@@ -8,7 +8,7 @@ RUN npm run build
 
 # ── Stage 2: Build static binary (musl) ───────────────────────────────
 FROM rust:1.86-alpine AS builder
-RUN apk add --no-cache musl-dev
+RUN apk add --no-cache musl-dev curl
 
 WORKDIR /app
 
