@@ -20,11 +20,11 @@
     let loading = $state(false);
     let error = $state('');
 
-    const categories: { value: PostCategory; label: string }[] = [
-        { value: 'feedback', label: '💬 Feedback' },
-        { value: 'bug', label: '🐛 Bug' },
-        { value: 'feature', label: '✨ Feature' },
-        { value: 'question', label: '❓ Question' },
+    const categories: { value: PostCategory; label: string; icon: string }[] = [
+        { value: 'feedback', label: 'Feedback', icon: '💬' },
+        { value: 'bug', label: 'Bug', icon: '🐛' },
+        { value: 'feature', label: 'Feature', icon: '✨' },
+        { value: 'question', label: 'Question', icon: '❓' },
     ];
 
     async function handleSubmit(e: Event) {
@@ -62,17 +62,26 @@
 
             <Textarea bind:value={description} placeholder="Add more details (optional)" rows="3" />
 
-            <div class="flex items-center gap-2">
-                {#each categories as cat (cat.value)}
-                    <Button
-                        type="button"
-                        variant={category === cat.value ? 'default' : 'secondary'}
-                        size="xs"
-                        onclick={() => (category = cat.value)}
-                    >
-                        {cat.label}
-                    </Button>
-                {/each}
+            <!-- Category: vertical list, no overflow -->
+            <div class="space-y-1.5">
+                <span class="text-xs font-medium text-muted-foreground">Category</span>
+                <div class="grid grid-cols-2 gap-2">
+                    {#each categories as cat (cat.value)}
+                        <button
+                            type="button"
+                            onclick={() => (category = cat.value)}
+                            class={cn(
+                                'flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium transition-colors',
+                                category === cat.value
+                                    ? 'border-primary bg-primary/10 text-primary'
+                                    : 'border-border text-muted-foreground hover:bg-muted',
+                            )}
+                        >
+                            <span>{cat.icon}</span>
+                            <span>{cat.label}</span>
+                        </button>
+                    {/each}
+                </div>
             </div>
 
             <Button type="submit" class="w-full" disabled={loading}>
