@@ -81,9 +81,14 @@ async fn login(
     all_params.insert("response_type".to_string(), "code".to_string());
     all_params.insert("state".to_string(), state_token.clone());
 
-    // Store redirect target in state (URL-encoded) so callback knows where to go.
+    // Store redirect target in state — validate to prevent open redirect.
+    // Only allow relative paths starting with "/" (no protocol-relative "//").
     if let Some(ref r) = query.redirect {
-        all_params.insert("redirect_target".to_string(), r.clone());
+        if r.starts_with('/') && !r.starts_with("//") && !r.contains("\\") {
+            all_params.insert("redirect_target".to_string(), r.clone());
+        } else {
+            tracing::warn!(redirect = %r, "Rejecting invalid redirect target");
+        }
     }
 
     // Serialize query params manually (HashMap<String,String> → key=val&...)

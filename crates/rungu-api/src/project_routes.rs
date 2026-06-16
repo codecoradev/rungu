@@ -138,6 +138,14 @@ pub async fn update_project(
         return Err(ApiError::bad_request("No fields to update"));
     }
 
+    // Validate name if provided (same rules as create)
+    if let Some(ref name) = body.name {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err(ApiError::bad_request("Project name cannot be empty"));
+        }
+    }
+
     let project =
         state.store.get_project_by_slug(&slug).await?.ok_or_else(|| ApiError::not_found("Project not found"))?;
 

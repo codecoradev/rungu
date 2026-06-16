@@ -51,7 +51,9 @@ pub async fn exchange_code(client: &reqwest::Client, cfg: &ProviderConfig, code:
     let status = resp.status();
     if !status.is_success() {
         let body = resp.text().await.unwrap_or_default();
-        tracing::error!(status = %status, body = %body, url = %cfg.token_url, "Token exchange failed");
+        // Redact potential secrets — only log first 200 chars, never full error body
+        let redacted = if body.len() > 200 { &body[..200] } else { &body };
+        tracing::error!(status = %status, url = %cfg.token_url, body_preview = %redacted, "Token exchange failed");
         bail!("Token exchange failed: HTTP {status}");
     }
 
@@ -82,7 +84,8 @@ pub async fn fetch_identity(
     let status = resp.status();
     if !status.is_success() {
         let body = resp.text().await.unwrap_or_default();
-        tracing::error!(status = %status, body = %body, url = %userinfo_url, "Userinfo fetch failed");
+        let redacted = if body.len() > 200 { &body[..200] } else { &body };
+        tracing::error!(status = %status, url = %userinfo_url, body_preview = %redacted, "Userinfo fetch failed");
         bail!("Userinfo fetch failed: HTTP {status}");
     }
 

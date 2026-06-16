@@ -194,7 +194,11 @@ pub async fn update_post(
         state.store.update_post_status(&id, status).await?;
     }
 
-    let updated = state.store.get_post(&id, Some(&user.id)).await?;
+    let updated = state
+        .store
+        .get_post(&id, Some(&user.id))
+        .await?
+        .ok_or_else(|| ApiError::internal("Post disappeared after update"))?;
 
     Ok(Json(serde_json::json!({ "data": updated })))
 }

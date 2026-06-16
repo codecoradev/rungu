@@ -19,10 +19,23 @@ pub async fn serve(config: Config, pool: sqlx::SqlitePool, listen: &str) -> anyh
     let store = rungu_core::Store::new(pool);
     let state = AppState { store, config: config.auth.clone() };
 
-    // CORS
-    let cors = if config.cors_origins.is_empty() {
+    // CORS — secure by default.
+    // If RUNGU_CORS_ORIGINS is empty, only allow the APP_URL origin.
+    // To allow all origins (dev only), set RUNGU_CORS_ORIGINS=*.
+    let cors = if config.cors_origins.iter().any(|o| o == "*") {
+        // Explicit wildcard — dev mode only
+        tracing::warn!("CORS set to allow all origins — not safe for production");
         CorsLayer::new().allow_origin(Any).allow_methods(Any).allow_headers(Any)
+    } else if config.cors_origins.is_empty() {
+        // Default: only allow APP_URL
+        let app_origin: axum::http::HeaderValue = config
+            .auth
+            .app_url
+            .parse()
+            .unwrap_or_else(|_| "http://localhost:3000".parse().expect("valid header value"));
+        CorsLayer::new().allow_origin(app_origin).allow_methods(Any).allow_headers(Any)
     } else {
+        // Explicit origins from config
         CorsLayer::new()
             .allow_origin(config.cors_origins.iter().filter_map(|o| o.parse().ok()).collect::<Vec<_>>())
             .allow_methods(Any)
