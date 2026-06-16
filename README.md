@@ -10,7 +10,7 @@ Lightweight, self-hosted feedback board. Collect feature requests, bug reports, 
 - **Email-based identity** — same email across providers = one user
 - **Vote & comment** — upvote the features you want
 - **Categories & status** — feedback, bug, feature, question → open, planned, in progress, done
-- **MCP server** — 12 tools for AI coding agents (Claude Code, Cursor, Windsurf)
+- **MCP server** — AI agent tools for Claude Code, Cursor, Windsurf (experimental — tools are stubs, full implementation planned post-MVP)
 - **REST API** — full CRUD for posts, votes, comments
 - **Single binary** — embedded SPA, Docker ready
 - **SQLite** — zero external database dependency
@@ -18,12 +18,25 @@ Lightweight, self-hosted feedback board. Collect feature requests, bug reports, 
 ## Quick Start
 
 ```bash
-# Docker
+# Docker (recommended)
 docker compose up -d
+# → Frontend: http://localhost:3000
+# → Swagger:  http://localhost:3000/swagger-ui
 
 # Or build from source
 cargo build --release
 ./target/release/rungu --db rungu.db serve --listen 0.0.0.0:3000
+
+# Create your first project
+./target/release/rungu --db rungu.db project-add "My App" --slug myapp
+```
+
+### Local Development (HTTP without HTTPS)
+
+```bash
+# .env
+RUNGU_SECURE_COOKIE=false    # allow login over plain HTTP
+APP_URL=http://localhost:3000
 ```
 
 ## Configuration
@@ -65,6 +78,8 @@ rungu mcp
 ```
 
 ## MCP Tools
+
+> ⚠️ **Experimental** — tool handlers return stub data. Full implementation tracked in [#28](https://github.com/codecoradev/rungu/issues/28).
 
 12 tools available via stdio for AI coding agents:
 - `list_projects`, `get_project`

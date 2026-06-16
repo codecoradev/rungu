@@ -97,7 +97,7 @@ async fn login(
     let _ = scope; // scope already merged into params
 
     // Build state cookie (short-lived, HttpOnly)
-    let state_cookie = build_cookie(STATE_COOKIE, &state_token, STATE_MAX_AGE_SECS);
+    let state_cookie = build_cookie(STATE_COOKIE, &state_token, STATE_MAX_AGE_SECS, state.config.secure_cookie);
 
     info!(provider = %provider, "OAuth login initiated");
 
@@ -196,8 +196,8 @@ async fn callback(
         (StatusCode::INTERNAL_SERVER_ERROR, "Session error".to_string())
     })?;
 
-    let session_cookie = build_cookie(SESSION_COOKIE, &jwt, SESSION_MAX_AGE_SECS);
-    let clear_state_cookie = clear_cookie(STATE_COOKIE);
+    let session_cookie = build_cookie(SESSION_COOKIE, &jwt, SESSION_MAX_AGE_SECS, state.config.secure_cookie);
+    let clear_state_cookie = clear_cookie(STATE_COOKIE, state.config.secure_cookie);
 
     info!(user_id = %user.id, provider = %provider, "OAuth login successful");
 
@@ -214,8 +214,8 @@ async fn callback(
 /// `POST /auth/logout` — clear session cookie.
 ///
 /// Returns 200 with cleared cookie. Client should redirect to "/".
-async fn logout() -> impl IntoResponse {
-    let clear_session = clear_cookie(SESSION_COOKIE);
+async fn logout(State(state): State<AppState>) -> impl IntoResponse {
+    let clear_session = clear_cookie(SESSION_COOKIE, state.config.secure_cookie);
 
     info!("User logout");
 
@@ -243,13 +243,16 @@ async fn me(State(state): State<AppState>, headers: HeaderMap) -> Result<Json<se
 // ── Helpers ─────────────────────────────────────────────────────────────
 
 /// Build a Set-Cookie value string.
-fn build_cookie(name: &str, value: &str, max_age_secs: i64) -> String {
-    format!("{name}={value}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age={max_age_secs}")
+/// `secure` controls whether the Secure flag is included (false for local HTTP).
+fn build_cookie(name: &str, value: &str, max_age_secs: i64, secure: bool) -> String {
+    let secure_flag = if secure { " Secure" } else { "" };
+    format!("{name}={value}; Path=/; HttpOnly;{secure_flag}; SameSite=Lax; Max-Age={max_age_secs}")
 }
 
 /// Build a Set-Cookie value that immediately expires the cookie.
-fn clear_cookie(name: &str) -> String {
-    format!("{name}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0")
+fn clear_cookie(name: &str, secure: bool) -> String {
+    let secure_flag = if secure { " Secure" } else { "" };
+    format!("{name}=; Path=/; HttpOnly;{secure_flag}; SameSite=Lax; Max-Age=0")
 }
 
 /// Extract a cookie value from the Cookie header.
@@ -293,8 +296,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_build_cookie() {
-        let c = build_cookie("session", "abc123", 604800);
+    fn test_build_cookie_secure() {
+        let c = build_cookie("session", "abc123", 604800, true);
         assert!(c.contains("session=abc123"));
         assert!(c.contains("HttpOnly"));
         assert!(c.contains("Secure"));
@@ -302,8 +305,17 @@ mod tests {
     }
 
     #[test]
+    fn test_build_cookie_insecure() {
+        // Local HTTP dev mode — no Secure flag
+        let c = build_cookie("session", "abc123", 604800, false);
+        assert!(c.contains("session=abc123"));
+        assert!(c.contains("HttpOnly"));
+        assert!(!c.contains("Secure"));
+    }
+
+    #[test]
     fn test_clear_cookie() {
-        let c = clear_cookie("session");
+        let c = clear_cookie("session", true);
         assert!(c.contains("session=;"));
         assert!(c.contains("Max-Age=0"));
     }
