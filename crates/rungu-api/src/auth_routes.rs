@@ -5,6 +5,7 @@
 
 use axum::extract::{Path, Query, State};
 use axum::http::header::SET_COOKIE;
+use axum::response::AppendHeaders;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::IntoResponse;
 use axum::{Json, Router};
@@ -210,9 +211,11 @@ async fn callback(
         StatusCode::FOUND,
         [
             (axum::http::header::LOCATION, "/".to_string()),
+        ],
+        AppendHeaders([
             (SET_COOKIE, session_cookie),
             (SET_COOKIE, clear_state_cookie),
-        ],
+        ]),
     ))
 }
 
@@ -239,25 +242,36 @@ async fn me(State(state): State<AppState>, headers: HeaderMap) -> Result<Json<se
     })?;
 
     Ok(Json(serde_json::json!({
-        "id": current_user.id,
-        "email": current_user.email,
-        "role": format!("{:?}", current_user.role).to_lowercase(),
+        "data": {
+            "id": current_user.id,
+            "email": current_user.email,
+            "role": format!("{:?}", current_user.role).to_lowercase(),
+        }
     })))
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────
 
 /// Build a Set-Cookie value string.
+/// Uses SameSite=None for OAuth compatibility (cross-site redirect from provider).
 /// `secure` controls whether the Secure flag is included (false for local HTTP).
 fn build_cookie(name: &str, value: &str, max_age_secs: i64, secure: bool) -> String {
-    let secure_flag = if secure { " Secure" } else { "" };
-    format!("{name}={value}; Path=/; HttpOnly;{secure_flag}; SameSite=Lax; Max-Age={max_age_secs}")
+    // SameSite=None requires Secure in production. For local HTTP, omit both None and Secure
+    // so the cookie defaults to SameSite=Lax (browsers allow this on localhost redirects).
+    if secure {
+        format!("{name}={value}; Path=/; HttpOnly; Secure; SameSite=None; Max-Age={max_age_secs}")
+    } else {
+        format!("{name}={value}; Path=/; HttpOnly; SameSite=Lax; Max-Age={max_age_secs}")
+    }
 }
 
 /// Build a Set-Cookie value that immediately expires the cookie.
 fn clear_cookie(name: &str, secure: bool) -> String {
-    let secure_flag = if secure { " Secure" } else { "" };
-    format!("{name}=; Path=/; HttpOnly;{secure_flag}; SameSite=Lax; Max-Age=0")
+    if secure {
+        format!("{name}=; Path=/; HttpOnly; Secure; SameSite=None; Max-Age=0")
+    } else {
+        format!("{name}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0")
+    }
 }
 
 /// Extract a cookie value from the Cookie header.

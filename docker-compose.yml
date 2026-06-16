@@ -1,6 +1,7 @@
 services:
   rungu:
     image: ghcr.io/codecoradev/rungu:latest
+    build: .
     container_name: rungu
     restart: unless-stopped
     ports:
