@@ -7,8 +7,8 @@ use rungu_core::{Store, open_pool, run_migrations};
 use rungu_proto::*;
 
 async fn setup() -> Store {
-    let pool = open_pool(":memory:").await.unwrap();
-    run_migrations(&pool).await.unwrap();
+    let pool = open_pool("sqlite::memory:").await.unwrap();
+    run_migrations(&pool, "sqlite::memory:").await.unwrap();
     Store::new(pool)
 }
 

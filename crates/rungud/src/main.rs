@@ -64,9 +64,10 @@ async fn main() -> Result<()> {
         )
         .init();
 
-    let pool = rungu_core::open_pool(&format!("sqlite:{}", cli.db.display())).await?;
-    rungu_core::run_migrations(&pool).await?;
-    info!("Database ready: {}", cli.db.display());
+    let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| format!("sqlite:{}", cli.db.display()));
+    let pool = rungu_core::open_pool(&db_url).await?;
+    rungu_core::run_migrations(&pool, &db_url).await?;
+    info!("Database ready: {}", db_url);
 
     let config = config::Config::from_env();
     info!("Auth providers: {} active", config.auth.active_providers().len());

@@ -5,7 +5,7 @@
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use rungu_proto::*;
-use sqlx::{Row, SqlitePool};
+use sqlx::{AnyPool, Row, any::AnyRow};
 
 /// Parse a timestamp string from the DB (with fallback).
 fn parse_ts(s: &str) -> DateTime<Utc> {
@@ -30,7 +30,7 @@ fn parse_role(s: &str) -> UserRole {
 }
 
 /// Map a SQLite row to a Project.
-fn map_project(row: &sqlx::sqlite::SqliteRow) -> Project {
+fn map_project(row: &AnyRow) -> Project {
     Project {
         id: row.get("id"),
         slug: row.get("slug"),
@@ -41,7 +41,7 @@ fn map_project(row: &sqlx::sqlite::SqliteRow) -> Project {
 }
 
 /// Map a SQLite row to a User.
-fn map_user(row: &sqlx::sqlite::SqliteRow) -> User {
+fn map_user(row: &AnyRow) -> User {
     User {
         id: row.get("id"),
         email: row.get("email"),
@@ -54,7 +54,7 @@ fn map_user(row: &sqlx::sqlite::SqliteRow) -> User {
 }
 
 /// Map a SQLite row to a PostDetail (with user join + vote status).
-fn map_post_detail(row: &sqlx::sqlite::SqliteRow) -> PostDetail {
+fn map_post_detail(row: &AnyRow) -> PostDetail {
     let post = map_post(row);
     let creator = UserSummary {
         id: row.get("user_id"),
@@ -66,7 +66,7 @@ fn map_post_detail(row: &sqlx::sqlite::SqliteRow) -> PostDetail {
 }
 
 /// Map a SQLite row to a Post.
-fn map_post(row: &sqlx::sqlite::SqliteRow) -> Post {
+fn map_post(row: &AnyRow) -> Post {
     Post {
         id: row.get("id"),
         project_id: row.get("project_id"),
@@ -83,7 +83,7 @@ fn map_post(row: &sqlx::sqlite::SqliteRow) -> Post {
 }
 
 /// Map a SQLite row to a Comment.
-fn map_comment(row: &sqlx::sqlite::SqliteRow) -> Comment {
+fn map_comment(row: &AnyRow) -> Comment {
     Comment {
         id: row.get("id"),
         post_id: row.get("post_id"),
@@ -95,7 +95,7 @@ fn map_comment(row: &sqlx::sqlite::SqliteRow) -> Comment {
 }
 
 /// Map a SQLite row to a CommentDetail (with user join).
-fn map_comment_detail(row: &sqlx::sqlite::SqliteRow) -> CommentDetail {
+fn map_comment_detail(row: &AnyRow) -> CommentDetail {
     let comment = map_comment(row);
     let creator = UserSummary {
         id: row.get("user_id"),
@@ -151,16 +151,16 @@ fn parse_category(s: &str) -> PostCategory {
 /// Storage layer — all database operations.
 #[derive(Clone)]
 pub struct Store {
-    pool: SqlitePool,
+    pool: AnyPool,
 }
 
 impl Store {
-    pub fn new(pool: SqlitePool) -> Self {
+    pub fn new(pool: AnyPool) -> Self {
         Self { pool }
     }
 
     /// Get a reference to the pool.
-    pub fn pool(&self) -> &SqlitePool {
+    pub fn pool(&self) -> &AnyPool {
         &self.pool
     }
 
@@ -477,9 +477,11 @@ impl Store {
                 false
             }
             None => {
-                sqlx::query("INSERT INTO votes (user_id, post_id, created_at) VALUES (?, ?, datetime('now'))")
+                let now = chrono::Utc::now().to_rfc3339();
+                sqlx::query("INSERT INTO votes (user_id, post_id, created_at) VALUES (?, ?, ?)")
                     .bind(user_id)
                     .bind(post_id)
+                    .bind(&now)
                     .execute(&mut *tx)
                     .await?;
                 sqlx::query("UPDATE posts SET vote_count = vote_count + 1 WHERE id = ?")
@@ -718,13 +720,15 @@ impl Store {
 
     /// Upsert user identity (provider link).
     pub async fn upsert_identity(&self, user_id: &str, provider: &str, provider_id: &str) -> Result<()> {
+        let now = chrono::Utc::now().to_rfc3339();
         sqlx::query(
-            "INSERT INTO user_identities (user_id, provider, provider_id, created_at) VALUES (?, ?, ?, datetime('now')) \
+            "INSERT INTO user_identities (user_id, provider, provider_id, created_at) VALUES (?, ?, ?, ?) \
              ON CONFLICT(provider, provider_id) DO NOTHING",
         )
         .bind(user_id)
         .bind(provider)
         .bind(provider_id)
+        .bind(&now)
         .execute(&self.pool)
         .await?;
         Ok(())
