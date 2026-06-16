@@ -2,6 +2,16 @@
 
 Full REST API for integration with dashboards, widgets, or custom tools.
 
+## Swagger UI
+
+Interactive API documentation is available at runtime:
+
+```
+http://localhost:3000/swagger-ui
+```
+
+OpenAPI 3.1 spec: `http://localhost:3000/api-docs/openapi.json`
+
 ## Base URL
 
 ```

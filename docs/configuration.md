@@ -8,7 +8,7 @@ All configuration is done via environment variables.
 |----------|---------|-------------|
 | `RUNGU_LISTEN` | `0.0.0.0:3000` | HTTP listen address |
 | `RUNGU_DB` | `rungu.db` | SQLite database path |
-| `RUNGU_CORS_ORIGINS` | `*` (all) | Comma-separated CORS origins |
+| `RUNGU_CORS_ORIGINS` | _(APP_URL only)_ | Comma-separated CORS origins. Default: only `APP_URL`. Set to `*` to allow all (dev only). |
 | `RUNGU_SECURE_COOKIE` | `true` | Set `false` for HTTP (no Secure flag on cookies) |
 
 ## Auth (Session)
@@ -16,7 +16,7 @@ All configuration is done via environment variables.
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `APP_URL` | `http://localhost:3000` | Base URL (used for OAuth redirect URIs) |
-| `APP_SECRET` | `dev-secret-change-me` | JWT signing secret (**change in production!**) |
+| `APP_SECRET` | _(required)_ | JWT signing secret. **Must be set** — generate with `openssl rand -hex 32`. Process exits if not set. |
 
 ## Google OAuth
 

@@ -19,12 +19,12 @@ rungu serve [options]
 rungu serve --db /data/feedback.db --listen 0.0.0.0:8080
 ```
 
-## `rungu project add`
+## `rungu project-add`
 
 Create a new feedback project/board.
 
 ```bash
-rungu project add [options] <name>
+rungu project-add [options] <name>
 ```
 
 | Option | Default | Description |
@@ -35,15 +35,15 @@ rungu project add [options] <name>
 ### Example
 
 ```bash
-rungu project add "My SaaS" --slug "my-saas" --description "Customer feedback for My SaaS"
+rungu project-add "My SaaS" --slug "my-saas" --description "Customer feedback for My SaaS"
 ```
 
-## `rungu project list`
+## `rungu project-list`
 
 List all projects.
 
 ```bash
-rungu project list
+rungu project-list
 ```
 
 ## `rungu healthcheck`
