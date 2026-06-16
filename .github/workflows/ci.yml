@@ -88,8 +88,9 @@ jobs:
         run: |
           docker run -d --name rungu-test -p 3001:3000 \
             -e APP_SECRET=test-secret \
-            rungu:ci-test serve --db /tmp/rungu.db --listen 0.0.0.0:3000
-          sleep 5
+            rungu:ci-test serve --db /data/rungu.db --listen 0.0.0.0:3000
+          sleep 10
+          docker logs rungu-test 2>&1 || true
           curl -sf http://localhost:3001/health | grep -q OK
           docker stop rungu-test
           docker rm rungu-test
