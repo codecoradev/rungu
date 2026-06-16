@@ -5,12 +5,16 @@ use chrono::{Duration, Utc};
 use jsonwebtoken::{DecodingKey, EncodingKey, Header, Validation, decode, encode};
 use rungu_proto::CurrentUser;
 
+/// JWT issuer identifier.
+const JWT_ISSUER: &str = "rungu";
+
 /// JWT claims for session tokens.
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct Claims {
     pub sub: String, // user_id
     pub email: String,
     pub role: String, // "admin" or "member"
+    pub iss: String,  // issuer
     pub exp: i64,     // expiry timestamp
     pub iat: i64,     // issued at
 }
@@ -22,6 +26,7 @@ pub fn issue_jwt(user: &CurrentUser, app_secret: &str) -> Result<String> {
         sub: user.id.clone(),
         email: user.email.clone(),
         role: format!("{:?}", user.role).to_lowercase(),
+        iss: JWT_ISSUER.to_string(),
         exp: (now + Duration::days(7)).timestamp(),
         iat: now.timestamp(),
     };
@@ -33,8 +38,12 @@ pub fn issue_jwt(user: &CurrentUser, app_secret: &str) -> Result<String> {
 }
 
 /// Validate a JWT and extract current user.
+/// Validates issuer claim to reject tokens from other applications.
 pub fn validate_jwt(token: &str, app_secret: &str) -> Result<CurrentUser> {
-    let data = decode::<Claims>(token, &DecodingKey::from_secret(app_secret.as_bytes()), &Validation::default())
+    let mut validation = Validation::default();
+    validation.set_issuer(&[JWT_ISSUER]);
+
+    let data = decode::<Claims>(token, &DecodingKey::from_secret(app_secret.as_bytes()), &validation)
         .context("Invalid JWT")?;
 
     let claims = data.claims;

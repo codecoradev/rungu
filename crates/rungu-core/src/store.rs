@@ -298,8 +298,10 @@ impl Store {
 
         // Count query (same WHERE, no LIMIT/OFFSET)
         let count_sql = format!("SELECT COUNT(*) FROM posts WHERE {where_sql}");
-        let total: i64 =
-            bind_filters!(sqlx::query_scalar::<_, i64>(&count_sql)).fetch_one(&self.pool).await.unwrap_or(0);
+        let total: i64 = bind_filters!(sqlx::query_scalar::<_, i64>(&count_sql))
+            .fetch_one(&self.pool)
+            .await
+            .context("Failed to count posts")?;
 
         // Main query with LIMIT/OFFSET appended
         let sql = format!(
