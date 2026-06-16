@@ -586,13 +586,14 @@ impl Store {
         avatar_url: Option<&str>,
         admin_emails: &[String],
     ) -> Result<User> {
-        let is_admin = admin_emails.iter().any(|e| e == &email.to_lowercase());
+        let email_lower = email.to_lowercase();
+        let is_admin = admin_emails.iter().any(|e| e == &email_lower);
         let role = if is_admin { "admin" } else { "member" };
 
         // Check existing
         let row =
             sqlx::query("SELECT id, email, name, avatar_url, role, created_at, last_login FROM users WHERE email = ?")
-                .bind(email)
+                .bind(&email_lower)
                 .fetch_optional(&self.pool)
                 .await?;
 
@@ -626,7 +627,7 @@ impl Store {
                 "INSERT INTO users (id, email, name, avatar_url, role, created_at, last_login) VALUES (?, ?, ?, ?, ?, ?, ?)",
             )
             .bind(&id)
-            .bind(email)
+            .bind(&email_lower)
             .bind(name.unwrap_or(""))
             .bind(avatar_url.unwrap_or(""))
             .bind(role)
@@ -638,7 +639,7 @@ impl Store {
 
             Ok(User {
                 id,
-                email: email.to_string(),
+                email: email_lower.clone(),
                 name: name.unwrap_or("").to_string(),
                 avatar_url: avatar_url.unwrap_or("").to_string(),
                 role: if is_admin { UserRole::Admin } else { UserRole::Member },
