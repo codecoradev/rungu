@@ -127,6 +127,12 @@ export const api = {
             body: JSON.stringify({ status }),
         }).then((r) => r.data),
 
+    updatePostCategory: (id: string, category: PostCategory) =>
+        request<DataResponse<PostDetail>>(`/api/posts/${id}`, {
+            method: 'PATCH',
+            body: JSON.stringify({ category }),
+        }).then((r) => r.data),
+
     deletePost: (id: string) => request<void>(`/api/posts/${id}`, { method: 'DELETE' }),
 
     // Votes

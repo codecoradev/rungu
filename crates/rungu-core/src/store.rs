@@ -106,6 +106,27 @@ fn map_comment_detail(row: &sqlx::sqlite::SqliteRow) -> CommentDetail {
     CommentDetail { comment, creator }
 }
 
+/// Convert PostStatus to DB string (avoid format! Debug for underscore variants).
+fn status_to_str(s: PostStatus) -> &'static str {
+    match s {
+        PostStatus::Open => "open",
+        PostStatus::Planned => "planned",
+        PostStatus::InProgress => "in_progress",
+        PostStatus::Done => "done",
+        PostStatus::Declined => "declined",
+    }
+}
+
+/// Convert PostCategory to DB string.
+fn category_to_str(c: PostCategory) -> &'static str {
+    match c {
+        PostCategory::Feedback => "feedback",
+        PostCategory::Bug => "bug",
+        PostCategory::Feature => "feature",
+        PostCategory::Question => "question",
+    }
+}
+
 /// Parse PostStatus from SQLite TEXT column.
 fn parse_status(s: &str) -> PostStatus {
     match s {
@@ -283,8 +304,8 @@ impl Store {
         macro_rules! bind_filters {
             ($query:expr) => {{
                 let q = $query.bind(params.project_id);
-                let q = if let Some(ref s) = params.status { q.bind(format!("{:?}", s).to_lowercase()) } else { q };
-                let q = if let Some(ref c) = params.category { q.bind(format!("{:?}", c).to_lowercase()) } else { q };
+                let q = if let Some(ref s) = params.status { q.bind(status_to_str(*s)) } else { q };
+                let q = if let Some(ref c) = params.category { q.bind(category_to_str(*c)) } else { q };
                 let q = if let Some(query_text) = params.query {
                     let pattern = format!("%{query_text}%");
                     // Bind twice: once for title LIKE, once for description LIKE
@@ -368,7 +389,7 @@ impl Store {
         .bind(project_id)
         .bind(title)
         .bind(description)
-        .bind(format!("{:?}", category).to_lowercase())
+        .bind(category_to_str(category))
         .bind(created_by)
         .bind(&now)
         .bind(&now)
@@ -392,15 +413,29 @@ impl Store {
     }
 
     /// Update post status.
+    /// Update post status.
     pub async fn update_post_status(&self, post_id: &str, status: PostStatus) -> Result<()> {
         let now = Utc::now().to_rfc3339();
         sqlx::query("UPDATE posts SET status = ?, updated_at = ? WHERE id = ?")
-            .bind(format!("{:?}", status).to_lowercase())
+            .bind(status_to_str(status))
             .bind(&now)
             .bind(post_id)
             .execute(&self.pool)
             .await
             .context("Failed to update post status")?;
+        Ok(())
+    }
+
+    /// Update post category.
+    pub async fn update_post_category(&self, post_id: &str, category: PostCategory) -> Result<()> {
+        let now = Utc::now().to_rfc3339();
+        sqlx::query("UPDATE posts SET category = ?, updated_at = ? WHERE id = ?")
+            .bind(category_to_str(category))
+            .bind(&now)
+            .bind(post_id)
+            .execute(&self.pool)
+            .await
+            .context("Failed to update post category")?;
         Ok(())
     }
 

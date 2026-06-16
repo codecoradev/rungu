@@ -301,12 +301,13 @@ pub struct CreatePostBody {
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct UpdatePostBody {
     pub status: Option<String>,
+    pub category: Option<String>,
 }
 
 impl UpdatePostBody {
     /// Check if at least one field is provided.
     pub fn has_updates(&self) -> bool {
-        self.status.is_some()
+        self.status.is_some() || self.category.is_some()
     }
 }
 

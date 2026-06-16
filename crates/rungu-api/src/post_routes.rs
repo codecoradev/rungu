@@ -194,6 +194,11 @@ pub async fn update_post(
         state.store.update_post_status(&id, status).await?;
     }
 
+    if let Some(category_str) = &body.category {
+        let category = parse_category(category_str).ok_or_else(|| ApiError::bad_request("Invalid category"))?;
+        state.store.update_post_category(&id, category).await?;
+    }
+
     let updated = state
         .store
         .get_post(&id, Some(&user.id))
@@ -294,7 +299,7 @@ mod tests {
 
     #[test]
     fn test_update_body_has_updates() {
-        assert!(UpdatePostBody { status: Some("done".into()) }.has_updates());
-        assert!(!UpdatePostBody { status: None }.has_updates());
+        assert!(UpdatePostBody { status: Some("done".into()), category: None }.has_updates());
+        assert!(!UpdatePostBody { status: None, category: None }.has_updates());
     }
 }
