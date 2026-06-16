@@ -21,7 +21,7 @@
 </svelte:head>
 
 <div class="py-12 text-center">
-    <h1 class="text-4xl font-bold">Dengar. Prioritaskan. Bangun.</h1>
+    <h1 class="text-4xl font-bold">Listen. Prioritize. Build.</h1>
     <p class="mx-auto mt-3 max-w-lg text-muted-foreground">
         A lightweight, self-hosted feedback board. Submit, vote, and discuss — all in one place.
     </p>

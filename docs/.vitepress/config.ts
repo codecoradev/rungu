@@ -8,7 +8,7 @@ export default defineConfig({
   head: [
     ['link', { rel: 'icon', href: '/favicon.svg' }],
     ['meta', { property: 'og:type', content: 'website' }],
-    ['meta', { property: 'og:title', content: 'Rungu — Dengar. Prioritaskan. Bangun.' }],
+    ['meta', { property: 'og:title', content: 'Rungu — Listen. Prioritize. Build.' }],
     ['meta', { property: 'og:description', content: 'Self-hosted feedback board with voting, comments, and multi-provider OAuth.' }],
     ['meta', { name: 'twitter:card', content: 'summary_large_image' }],
   ],
