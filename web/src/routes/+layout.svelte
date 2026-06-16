@@ -4,6 +4,7 @@
     import { api } from '$lib/api/client';
     import type { CurrentUser } from '$lib/api/types';
     import { Button } from '$lib/components/ui/button';
+    import ThemeToggle from '$lib/components/ThemeToggle.svelte';
 
     let { children } = $props();
     let user = $state<CurrentUser | null>(null);
@@ -35,6 +36,7 @@
             </a>
 
             <div class="flex items-center gap-2">
+                <ThemeToggle />
                 {#if loading}
                     <div class="size-8 animate-pulse rounded-full bg-muted"></div>
                 {:else if user}
