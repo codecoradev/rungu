@@ -1,4 +1,5 @@
 <script lang="ts">
+    import '../app.css';
     import { onMount } from 'svelte';
     import { api } from '$lib/api/client';
     import type { CurrentUser } from '$lib/api/types';
