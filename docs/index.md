@@ -3,7 +3,7 @@ layout: home
 
 hero:
   name: Rungu
-  text: Dengar. Prioritaskan. Bangun.
+  text: Listen. Prioritize. Build.
   tagline: Lightweight, self-hosted feedback board with voting, comments, and multi-provider OAuth
   actions:
     - theme: brand
