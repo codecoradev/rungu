@@ -15,7 +15,7 @@ use crate::config::Config;
 use crate::spa::spa_handler;
 
 /// Build the Axum router and start serving.
-pub async fn serve(config: Config, pool: sqlx::SqlitePool, listen: &str) -> anyhow::Result<()> {
+pub async fn serve(config: Config, pool: sqlx::AnyPool, listen: &str) -> anyhow::Result<()> {
     let store = rungu_core::Store::new(pool);
     let state = AppState { store, config: config.auth.clone() };
 

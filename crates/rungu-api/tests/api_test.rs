@@ -14,8 +14,8 @@ use tower::ServiceExt;
 
 /// Build a test app router with an in-memory database.
 async fn setup_app() -> (axum::Router, Store) {
-    let pool = open_pool(":memory:").await.unwrap();
-    run_migrations(&pool).await.unwrap();
+    let pool = open_pool("sqlite::memory:").await.unwrap();
+    run_migrations(&pool, "sqlite::memory:").await.unwrap();
     let store = Store::new(pool);
     // Seed a project
     store.create_project("Test App", "test-app", "A test project").await.unwrap();

@@ -11,13 +11,13 @@ use anyhow::Result;
 use rungu_core::Store;
 use rungu_proto::*;
 use serde_json::{Value, json};
-use sqlx::SqlitePool;
+use sqlx::AnyPool;
 
 /// Maximum input line length (1 MB) to prevent unbounded memory usage.
 const MAX_INPUT_LEN: usize = 1_048_576;
 
 /// Process a single JSON-RPC message and return the response string.
-pub async fn handle_message(input: &str, pool: &SqlitePool) -> String {
+pub async fn handle_message(input: &str, pool: &AnyPool) -> String {
     if input.len() > MAX_INPUT_LEN {
         return serde_json::to_string(&json!({
             "jsonrpc": "2.0",
@@ -358,7 +358,7 @@ async fn get_trending(params: &Value, store: &Store) -> Result<Value, String> {
 }
 
 /// Run the MCP server, reading JSON-RPC from stdin and writing to stdout.
-pub async fn run_server(pool: SqlitePool) -> Result<()> {
+pub async fn run_server(pool: AnyPool) -> Result<()> {
     let stdin = std::io::stdin();
     let stdout = std::io::stdout();
     let mut stdout = stdout.lock();
@@ -409,7 +409,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_handle_message_invalid_json() {
-        let pool = sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap();
+        sqlx::any::install_default_drivers();
+        let pool = sqlx::AnyPool::connect("sqlite::memory:").await.unwrap();
         let response = handle_message("not json", &pool).await;
         let parsed: Value = serde_json::from_str(&response).unwrap();
         assert_eq!(parsed["error"]["code"], -32700);
@@ -417,7 +418,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_handle_message_unknown_method() {
-        let pool = sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap();
+        sqlx::any::install_default_drivers();
+        let pool = sqlx::AnyPool::connect("sqlite::memory:").await.unwrap();
         let input = r#"{"jsonrpc":"2.0","method":"nonexistent","id":1}"#;
         let response = handle_message(input, &pool).await;
         let parsed: Value = serde_json::from_str(&response).unwrap();
@@ -427,7 +429,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_handle_message_too_large() {
-        let pool = sqlx::SqlitePool::connect("sqlite::memory:").await.unwrap();
+        sqlx::any::install_default_drivers();
+        let pool = sqlx::AnyPool::connect("sqlite::memory:").await.unwrap();
         let huge = "x".repeat(MAX_INPUT_LEN + 1);
         let response = handle_message(&huge, &pool).await;
         let parsed: Value = serde_json::from_str(&response).unwrap();
