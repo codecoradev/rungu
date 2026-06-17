@@ -2,6 +2,10 @@
 
 > ⚠️ **Experimental** — tool handlers currently return stub data. Full implementation tracked in [#28](https://github.com/codecoradev/rungu/issues/28).
 
+> 🔴 **Security: local trusted environments only.**
+>
+> The MCP server runs **without authentication** and calls the storage layer directly. It is designed exclusively for use as a local subprocess of an AI agent you control (e.g. Claude Code, Cursor) on a trusted machine. **Never expose the MCP server over the network or to a shared/multi-user environment** — any process that can reach the database file (or invoke the subprocess) can read and write all feedback data, impersonate any user, and bypass every application-level authorization check. See [Trust Boundary](#trust-boundary--security) below.
+
 Rungu includes a built-in MCP (Model Context Protocol) server that lets AI agents query and manage feedback directly.
 
 ## Setup
@@ -70,6 +74,30 @@ In Claude Code:
 
 The MCP server uses **stdio** transport (stdin/stdout). No HTTP server needed — it runs as a subprocess of the AI agent.
 
-## No Auth Required
+## Trust Boundary & Security
 
-Since MCP runs as a local subprocess, no authentication is needed. The agent has direct access to the SQLite database.
+The MCP server intentionally has **no authentication**. This is safe only because of a strict trust assumption:
+
+- **The MCP subprocess inherits the privileges of whatever launches it.** Any agent, editor plugin, or script that can spawn `rungu mcp` can read and mutate the entire SQLite database.
+- **There is no row-level authorization.** `update_post_status`, `create_post`, `vote_post`, and `add_comment` execute as a built-in MCP user with full write access.
+
+### Safe deployments
+
+✅ Do:
+- Run MCP only on a **single-user, trusted workstation** you control.
+- Point `--db` at a **copy** of the production database (read replica, snapshot) when the agent only needs read access.
+- Audit the prompts you send to the agent — prompt injection from untrusted content (web pages, issues, emails) can instruct the agent to mutate data via MCP.
+
+❌ Don't:
+- Expose the MCP server (or the SQLite file) on a shared host, CI runner, or container reachable by other users.
+- Wire MCP into a production deployment alongside the HTTP server.
+- Assume the OAuth/role model from the HTTP API applies to MCP calls — it does not.
+
+### Future hardening
+
+Planned guardrails (tracked separately) include:
+- An `RUNGU_MCP_READ_ONLY` mode that disables mutating tools (`create_post`, `update_post_status`, `vote_post`, `add_comment`).
+- An explicit `RUNGU_MCP_ALLOW_WRITES=true` opt-in before mutating tools are registered.
+- Scoped capability tokens for multi-tenant or shared-workstation use cases.
+
+Until those land, treat any MCP-enabled environment as equivalent to handing the agent raw database credentials.

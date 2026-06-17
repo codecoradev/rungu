@@ -3,7 +3,24 @@
 //! MCP server — stdio transport, AI agent tools.
 //!
 //! Implements JSON-RPC 2.0 over stdin/stdout for Model Context Protocol.
-//! Spawned by AI agents as subprocess. No auth needed (process isolation).
+//!
+//! ## ⚠️ Security model — local trusted subprocess ONLY
+//!
+//! This server runs **without authentication**. It is designed to be spawned as
+//! a local subprocess of an AI agent (Claude Code, Cursor, Windsurf) on a
+//! trusted single-user machine, with direct access to the SQLite database.
+//!
+//! This means:
+//! - Any process that can spawn this binary can read and write all feedback data.
+//! - There is **no row-level authorization** and **no user impersonation check**.
+//! - Mutating tools (`create_post`, `update_post_status`, `vote_post`,
+//!   `add_comment`) execute as the built-in `mcp@rungu.local` system user.
+//! - The HTTP API's OAuth/session/role model does **not** apply here.
+//!
+//! Never expose this server over the network, never share the database file
+//! with untrusted users, and be aware that prompt-injection payloads can
+//! instruct the host agent to call these tools. See
+//! `docs/integrations/mcp.md#trust-boundary--security` for the full guidance.
 
 use std::io::{BufRead, Write};
 

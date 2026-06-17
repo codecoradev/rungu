@@ -54,11 +54,11 @@ Axum route handlers. Orchestrates `rungu-core` calls with `rungu-auth` middlewar
 
 ### rungu-mcp
 
-MCP server over stdio. 12 tools for AI agent integration. No auth (process isolation). Calls `rungu-core` directly.
+MCP server over stdio. 12 tools for AI agent integration. **No auth — local trusted subprocess only** (see [MCP trust boundary](../integrations/mcp.md#trust-boundary--security)). Calls `rungu-core` directly.
 
 ### rungud
 
-Binary entrypoint. CLI subcommands (`serve`, `project add`, `project list`, `healthcheck`, `mcp`). Embeds the SvelteKit SPA via `rust-embed`.
+Binary entrypoint. CLI subcommands (`serve`, `project-add`, `project-list`, `healthcheck`, `mcp`). Embeds the SvelteKit SPA via `rust-embed`.
 
 ## Data Flow
 
