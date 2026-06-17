@@ -144,11 +144,7 @@ fn parse_google(v: &serde_json::Value) -> Result<OAuthIdentity> {
 ///     `/user/emails` is `verified: true`, or
 ///   - `/user.email` is null/empty but `/user/emails` contains a primary+verified entry
 ///     (in which case that entry's email is used).
-async fn parse_github(
-    client: &reqwest::Client,
-    cfg: &ProviderConfig,
-    v: &serde_json::Value,
-) -> Result<OAuthIdentity> {
+async fn parse_github(client: &reqwest::Client, cfg: &ProviderConfig, v: &serde_json::Value) -> Result<OAuthIdentity> {
     let provider_id =
         v.get("id").and_then(|i| i.as_i64()).map(|i| i.to_string()).context("GitHub userinfo missing 'id' field")?;
 
@@ -175,8 +171,7 @@ async fn parse_github(
         );
     }
 
-    let emails: Vec<GitHubEmail> =
-        emails_resp.json().await.context("Failed to parse GitHub /user/emails response")?;
+    let emails: Vec<GitHubEmail> = emails_resp.json().await.context("Failed to parse GitHub /user/emails response")?;
 
     // Pick the primary verified entry. GitHub guarantees at most one primary email.
     let primary_verified = emails.iter().find(|e| e.primary && e.verified);
