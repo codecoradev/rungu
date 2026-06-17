@@ -25,7 +25,7 @@
                     <p class="mt-1 line-clamp-2 text-sm text-muted-foreground">{post.description}</p>
                 {/if}
                 <div class="mt-2 flex items-center gap-3 text-xs text-muted-foreground">
-                    <span>{post.creator.name || post.creator.email}</span>
+                    <span>{post.creator.name || post.creator.email || 'User'}</span>
                     <span>·</span>
                     <span>{timeAgo(post.created_at)}</span>
                     {#if post.comment_count > 0}
