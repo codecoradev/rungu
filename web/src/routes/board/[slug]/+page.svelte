@@ -169,6 +169,10 @@
 
         <!-- Sidebar -->
         <div class="space-y-4">
+            <Button variant="outline" class="w-full" href="/board/{slug}/roadmap">
+                Roadmap
+            </Button>
+
             {#if authed}
                 <Button class="w-full" onclick={() => (showForm = !showForm)}>
                     {showForm ? 'Cancel' : '+ New Post'}
