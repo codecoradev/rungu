@@ -1783,6 +1783,7 @@ dependencies = [
  "axum",
  "clap",
  "mime_guess",
+ "reqwest",
  "rungu_api",
  "rungu_auth",
  "rungu_core",

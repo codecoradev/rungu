@@ -13,7 +13,6 @@ use rungu_auth::session;
 use rungu_proto::AuthProvider;
 use serde::Deserialize;
 use std::collections::HashMap;
-use std::time::Duration;
 use tracing::{error, info, warn};
 
 use crate::AppState;
@@ -27,11 +26,24 @@ const SESSION_COOKIE: &str = "session";
 /// CSRF state cookie name — validates the OAuth round-trip.
 const STATE_COOKIE: &str = "oauth_state";
 
+/// Cookie name for the signed post-login redirect target.
+///
+/// OAuth providers don't echo arbitrary `state`/custom params back to the
+/// callback, so we carry the intended post-login destination in a separate
+/// short-lived HMAC-signed cookie. Verified in `callback`.
+const REDIRECT_COOKIE: &str = "oauth_redirect";
+
 /// Session cookie max-age: 7 days (matches JWT expiry).
 const SESSION_MAX_AGE_SECS: i64 = 7 * 24 * 60 * 60;
 
 /// CSRF state cookie max-age: 10 minutes.
 const STATE_MAX_AGE_SECS: i64 = 10 * 60;
+
+/// Max-age for the signed redirect cookie — must be long enough to cover the
+/// OAuth round-trip but short enough to not outlive the user's intent.
+/// Matches `session::REDIRECT_MAX_AGE_SECS` (kept duplicated here because it's
+/// a cookie-level concern).
+const REDIRECT_MAX_AGE_SECS: i64 = 5 * 60;
 
 // ── Route builder ───────────────────────────────────────────────────────
 
@@ -82,15 +94,26 @@ async fn login(
     all_params.insert("response_type".to_string(), "code".to_string());
     all_params.insert("state".to_string(), state_token.clone());
 
-    // Store redirect target in state — validate to prevent open redirect.
+    // Store redirect target in a signed cookie — validate to prevent open redirect.
     // Only allow relative paths starting with "/" (no protocol-relative "//").
-    if let Some(ref r) = query.redirect {
-        if r.starts_with('/') && !r.starts_with("//") && !r.contains("\\") {
-            all_params.insert("redirect_target".to_string(), r.clone());
-        } else {
-            tracing::warn!(redirect = %r, "Rejecting invalid redirect target");
+    // We carry it in REDIRECT_COOKIE (signed) rather than as a provider param,
+    // because OAuth providers don't echo arbitrary params back to the callback.
+    let redirect_cookie = match query.redirect.as_ref() {
+        Some(r) if r.starts_with('/') && !r.starts_with("//") && !r.contains('\\') => {
+            match session::issue_redirect_token(r, &state.config.app_secret) {
+                Ok(tok) => Some(build_cookie(REDIRECT_COOKIE, &tok, REDIRECT_MAX_AGE_SECS, state.config.secure_cookie)),
+                Err(e) => {
+                    tracing::warn!(error = %e, "Failed to sign redirect cookie");
+                    None
+                }
+            }
         }
-    }
+        Some(r) => {
+            tracing::warn!(redirect = %r, "Rejecting invalid redirect target");
+            None
+        }
+        None => None,
+    };
 
     // Serialize query params manually (HashMap<String,String> → key=val&...)
     let query_string = all_params
@@ -107,7 +130,15 @@ async fn login(
 
     info!(provider = %provider, "OAuth login initiated");
 
-    Ok((StatusCode::FOUND, [(axum::http::header::LOCATION, auth_url)], [(SET_COOKIE, state_cookie)]))
+    // Assemble response headers. Always include Location + state cookie; the
+    // redirect cookie is added only when we set it (avoids emitting an empty cookie).
+    let mut headers: Vec<(axum::http::HeaderName, String)> =
+        vec![(axum::http::header::LOCATION, auth_url), (SET_COOKIE, state_cookie)];
+    if let Some(c) = redirect_cookie {
+        headers.push((SET_COOKIE, c));
+    }
+
+    Ok((StatusCode::FOUND, AppendHeaders(headers)))
 }
 
 /// Query params for the OAuth callback.
@@ -116,11 +147,6 @@ struct CallbackQuery {
     code: Option<String>,
     state: Option<String>,
     error: Option<String>,
-    /// Our custom param echoed back from the provider — but since OAuth providers
-    /// don't echo arbitrary params, we instead store redirect in the session.
-    /// This field is for future use / custom flows.
-    #[allow(dead_code)]
-    redirect_target: Option<String>,
 }
 
 /// `GET /auth/:provider/callback` — handle OAuth provider callback.
@@ -133,10 +159,12 @@ async fn callback(
     Query(query): Query<CallbackQuery>,
     headers: HeaderMap,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
-    // Check for OAuth error from provider
+    // Check for OAuth error from provider. Log the raw provider error internally
+    // but return a generic client-facing message — provider error strings are
+    // untrusted input and can leak provider-specific details.
     if let Some(err) = &query.error {
         warn!(provider = %provider, error = %err, "OAuth provider returned error");
-        return Err((StatusCode::BAD_REQUEST, format!("OAuth error: {err}")));
+        return Err((StatusCode::BAD_REQUEST, "OAuth login failed".to_string()));
     }
 
     let code = query.code.as_deref().ok_or((StatusCode::BAD_REQUEST, "Missing 'code' parameter".to_string()))?;
@@ -159,18 +187,16 @@ async fn callback(
         .get_provider(&provider)
         .ok_or((StatusCode::NOT_FOUND, format!("Provider '{provider}' not configured")))?;
 
-    // Exchange code → access token → fetch identity
-    let http_client = reqwest::Client::builder().timeout(Duration::from_secs(15)).build().map_err(|e| {
-        error!(error = %e, "Failed to build HTTP client");
-        (StatusCode::INTERNAL_SERVER_ERROR, "Internal error".to_string())
-    })?;
+    // Exchange code → access token → fetch identity using the shared HTTP client
+    // (reused across requests — avoids per-callback connection-pool/TLS setup).
+    let http_client = &state.http_client;
 
-    let access_token = oauth::exchange_code(&http_client, cfg, code).await.map_err(|e| {
+    let access_token = oauth::exchange_code(http_client, cfg, code).await.map_err(|e| {
         error!(error = %e, "Token exchange failed");
         (StatusCode::BAD_GATEWAY, format!("Token exchange failed: {e}"))
     })?;
 
-    let identity = oauth::fetch_identity(&http_client, cfg, provider_enum, &access_token).await.map_err(|e| {
+    let identity = oauth::fetch_identity(http_client, cfg, provider_enum, &access_token).await.map_err(|e| {
         error!(error = %e, "Userinfo fetch failed");
         (StatusCode::BAD_GATEWAY, format!("Failed to fetch user info: {e}"))
     })?;
@@ -209,13 +235,30 @@ async fn callback(
 
     let session_cookie = build_cookie(SESSION_COOKIE, &jwt, SESSION_MAX_AGE_SECS, state.config.secure_cookie);
     let clear_state_cookie = clear_cookie(STATE_COOKIE, state.config.secure_cookie);
+    let clear_redirect_cookie = clear_cookie(REDIRECT_COOKIE, state.config.secure_cookie);
 
-    info!(user_id = %user.id, provider = %provider, "OAuth login successful");
+    // Resolve post-login destination from the signed redirect cookie.
+    // Defaults to "/" when absent, invalid, or expired. Always clear the cookie.
+    let dest = extract_cookie_value(&headers, REDIRECT_COOKIE)
+        .and_then(|tok| match session::validate_redirect_token(&tok, &state.config.app_secret) {
+            Ok(path) => Some(path),
+            Err(e) => {
+                tracing::warn!(error = %e, "Discarding invalid/expired redirect cookie");
+                None
+            }
+        })
+        .unwrap_or_else(|| "/".to_string());
+
+    info!(user_id = %user.id, provider = %provider, dest = %dest, "OAuth login successful");
 
     Ok((
         StatusCode::FOUND,
-        [(axum::http::header::LOCATION, "/".to_string())],
-        AppendHeaders([(SET_COOKIE, session_cookie), (SET_COOKIE, clear_state_cookie)]),
+        [(axum::http::header::LOCATION, dest)],
+        AppendHeaders([
+            (SET_COOKIE, session_cookie),
+            (SET_COOKIE, clear_state_cookie),
+            (SET_COOKIE, clear_redirect_cookie),
+        ]),
     ))
 }
 

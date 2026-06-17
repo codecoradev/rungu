@@ -39,7 +39,7 @@ impl AuthConfig {
                 eprintln!("FATAL: APP_SECRET environment variable is not set. Generate one with: openssl rand -hex 32");
                 std::process::exit(1);
             }),
-            secure_cookie: env::var("RUNGU_SECURE_COOKIE").map(|v| v != "false").unwrap_or(true),
+            secure_cookie: parse_bool_env("RUNGU_SECURE_COOKIE", true),
             admin_emails: env::var("ADMIN_EMAILS")
                 .unwrap_or_default()
                 .split(',')
@@ -126,6 +126,94 @@ impl AuthConfig {
             "github" => self.github.as_ref().map(|c| (c, AuthProvider::GitHub)),
             "keycloak" => self.keycloak.as_ref().map(|c| (c, AuthProvider::Keycloak)),
             _ => None,
+        }
+    }
+}
+
+/// Parse a boolean env var strictly.
+///
+/// Accepts (case-insensitive): `true`, `1`, `yes`, `y`, `on` → `true`
+///                            `false`, `0`, `no`, `n`, `off` → `false`
+/// Empty string → falls back to `default_value`.
+/// Any other value → logs a fatal error and exits, rather than silently picking
+/// a side. This prevents the old `v != "false"` footgun where typos like
+/// `False`, `0`, or `no` silently enabled secure cookies and broke local HTTP login.
+fn parse_bool_env(name: &str, default_value: bool) -> bool {
+    match std::env::var(name) {
+        Ok(v) => {
+            let lower = v.trim().to_lowercase();
+            match lower.as_str() {
+                "" => default_value,
+                "true" | "1" | "yes" | "y" | "on" => true,
+                "false" | "0" | "no" | "n" | "off" => false,
+                other => {
+                    eprintln!(
+                        "FATAL: Invalid boolean value for {name}: {other:?}. \
+                         Accepted (case-insensitive): true|false|1|0|yes|no|on|off. \
+                         Example: {name}=false"
+                    );
+                    std::process::exit(1);
+                }
+            }
+        }
+        Err(_) => default_value,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_bool_env;
+    use std::sync::Mutex;
+
+    // ENV manipulation is process-global, so serialize the tests.
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    fn set_env(name: &str, value: Option<&str>) {
+        // SAFETY: tests are serialized via ENV_LOCK, so there are no concurrent
+        // env mutations from other tests in this binary. The env keys used
+        // (RUNGU_TEST_BOOL_*) are test-only and never read by production code
+        // outside the single parse_bool_env call under test.
+        match value {
+            Some(v) => unsafe { std::env::set_var(name, v) },
+            None => unsafe { std::env::remove_var(name) },
+        }
+    }
+
+    #[test]
+    fn parse_bool_env_unset_returns_default() {
+        let _g = ENV_LOCK.lock().unwrap();
+        let name = "RUNGU_TEST_BOOL_UNSET";
+        set_env(name, None);
+        assert!(parse_bool_env(name, true));
+        assert!(!parse_bool_env(name, false));
+    }
+
+    #[test]
+    fn parse_bool_env_empty_returns_default() {
+        let _g = ENV_LOCK.lock().unwrap();
+        let name = "RUNGU_TEST_BOOL_EMPTY";
+        set_env(name, Some(""));
+        assert!(parse_bool_env(name, true));
+        assert!(!parse_bool_env(name, false));
+    }
+
+    #[test]
+    fn parse_bool_env_truthy_values() {
+        let _g = ENV_LOCK.lock().unwrap();
+        let name = "RUNGU_TEST_BOOL_TRUE";
+        for v in ["true", "TRUE", "True", "1", "yes", "YES", "y", "Y", "on", "ON"] {
+            set_env(name, Some(v));
+            assert!(parse_bool_env(name, false), "expected truthy for {v:?}");
+        }
+    }
+
+    #[test]
+    fn parse_bool_env_falsy_values() {
+        let _g = ENV_LOCK.lock().unwrap();
+        let name = "RUNGU_TEST_BOOL_FALSE";
+        for v in ["false", "FALSE", "False", "0", "no", "NO", "n", "off", "OFF"] {
+            set_env(name, Some(v));
+            assert!(!parse_bool_env(name, true), "expected falsy for {v:?}");
         }
     }
 }

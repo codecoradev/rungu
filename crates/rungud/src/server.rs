@@ -19,7 +19,15 @@ use crate::spa::spa_handler;
 /// Build the Axum router and start serving.
 pub async fn serve(config: Config, pool: sqlx::AnyPool, listen: &str) -> anyhow::Result<()> {
     let store = rungu_core::Store::new(pool);
-    let state = AppState { store, config: config.auth.clone() };
+
+    // Single shared HTTP client for outbound calls (OAuth token exchange, userinfo).
+    // Reusing the client avoids per-request connection-pool and TLS setup.
+    let http_client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+        .map_err(|e| anyhow::anyhow!("Failed to build HTTP client: {e}"))?;
+
+    let state = AppState { store, config: config.auth.clone(), http_client };
 
     // CORS — secure by default.
     // If RUNGU_CORS_ORIGINS is empty, only allow the APP_URL origin.
