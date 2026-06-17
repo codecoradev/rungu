@@ -11,6 +11,28 @@
     import * as Card from '$lib/components/ui/card';
     import { timeAgo } from '$lib/utils';
 
+    /**
+     * Collect the id of `rootId` plus every comment whose `parent_id` chain leads
+     * back to `rootId`. Used after a delete to prune orphaned replies locally.
+     * The server is the source of truth; this keeps the client consistent until
+     * the next refetch.
+     */
+    function collectDescendants(list: Comment[], rootId: string): Set<string> {
+        const ids = new Set<string>([rootId]);
+        // Iterate to fixed point — handles arbitrary nesting depth.
+        let added = true;
+        while (added) {
+            added = false;
+            for (const c of list) {
+                if (c.parent_id && ids.has(c.parent_id) && !ids.has(c.id)) {
+                    ids.add(c.id);
+                    added = true;
+                }
+            }
+        }
+        return ids;
+    }
+
     let { params } = $props();
     let slug = $derived(params.slug);
     let postId = $derived(params.id);
@@ -73,7 +95,11 @@
     async function handleDeleteComment(id: string) {
         try {
             await api.deleteComment(id);
-            comments = comments.filter((c) => c.id !== id);
+            // Remove the comment AND all of its descendants. The server likely
+            // cascades the delete (or should), but the client must reflect it
+            // — otherwise replies become invisible while still counted in length.
+            const toRemove = collectDescendants(comments, id);
+            comments = comments.filter((c) => !toRemove.has(c.id));
         } catch {
             error = 'Failed to delete comment';
         }
