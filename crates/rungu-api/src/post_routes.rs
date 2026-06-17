@@ -35,6 +35,7 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/projects/{slug}/posts", axum::routing::get(list_posts).post(create_post))
         .route("/projects/{slug}/roadmap", axum::routing::get(get_project_roadmap))
+        .route("/projects/{slug}/changelog", axum::routing::get(get_project_changelog))
         .route("/posts/{id}", axum::routing::get(get_post).patch(update_post).delete(delete_post))
 }
 
@@ -84,6 +85,7 @@ pub async fn list_posts(
         status,
         category,
         query: query.q.as_deref(),
+        since: None,
         offset,
         limit: per_page,
     };
@@ -333,11 +335,93 @@ async fn fetch_bucket(
         status: Some(status),
         category: None,
         query: None,
+        since: None,
         offset: 0,
         limit,
     };
     let (posts, total) = state.store.list_posts(params).await?;
     Ok((posts, total))
+}
+
+// ── Changelog ──────────────────────────────────────────────────────────
+
+/// Query params for `GET /api/projects/{slug}/changelog`.
+///
+/// Mirrors the board's pagination plus an optional `since` lower bound on
+/// `updated_at` (RFC3339) for incremental pulls ("what shipped since my last
+/// sync?").
+#[derive(Debug, Deserialize, IntoParams)]
+pub struct ChangelogQuery {
+    pub page: Option<i64>,
+    pub per_page: Option<i64>,
+    /// RFC3339 timestamp; only posts updated at or after this time are returned.
+    pub since: Option<String>,
+}
+
+/// Public changelog — `done` posts sorted by most-recently-shipped first.
+///
+/// Returns posts with `status == done` ordered by `updated_at DESC`. Supports
+/// the same pagination shape as the board list, plus an optional `?since=`
+/// filter for incremental syncs. Public (no auth).
+#[utoipa::path(
+    get,
+    path = "/api/projects/{slug}/changelog",
+    params(
+        ("slug" = String, Path, description = "Project slug"),
+        ChangelogQuery,
+    ),
+    responses(
+        (status = 200, description = "Done posts, newest ship first", body = serde_json::Value),
+        (status = 404, description = "Project not found", body = serde_json::Value),
+    ),
+    tag = "posts",
+)]
+pub async fn get_project_changelog(
+    State(state): State<AppState>,
+    Path(slug): Path<String>,
+    Query(query): Query<ChangelogQuery>,
+) -> Result<impl IntoResponse, ApiError> {
+    let project =
+        state.store.get_project_by_slug(&slug).await?.ok_or_else(|| ApiError::not_found("Project not found"))?;
+
+    let page = query.page.unwrap_or(1).max(1);
+    let per_page = query.per_page.unwrap_or(20).clamp(1, 100);
+    let offset = (page - 1) * per_page;
+
+    // Parse the optional `since` bound. A malformed timestamp must 400, not
+    // silently behave as "no filter" — otherwise a client bug (wrong timezone
+    // format, stray space) would silently return the full history.
+    let since = match query.since.as_deref() {
+        Some(s) => Some(
+            chrono::DateTime::parse_from_rfc3339(s)
+                .map(|dt| dt.with_timezone(&chrono::Utc))
+                .map_err(|_| ApiError::bad_request("Invalid `since` timestamp; expected RFC3339"))?,
+        ),
+        None => None,
+    };
+
+    let params = rungu_proto::ListPostsParams {
+        project_id: &project.id,
+        sort: PostSort::RecentlyUpdated,
+        status: Some(PostStatus::Done),
+        category: None,
+        query: None,
+        since,
+        offset,
+        limit: per_page,
+    };
+
+    let (posts, total) = state.store.list_posts(params).await?;
+
+    Ok(Json(serde_json::json!({
+        "data": posts,
+        "pagination": {
+            "page": page,
+            "per_page": per_page,
+            "total": total,
+            "total_pages": ((total as f64 / per_page as f64).ceil() as i64).max(1),
+        }
+    })))
 }
 
 // ── Parsing helpers ────────────────────────────────────────────────────

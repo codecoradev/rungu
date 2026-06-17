@@ -351,6 +351,10 @@ impl Store {
             // LIKE fallback for non-SQLite backends.
             conditions.push("(LOWER(p.title) LIKE LOWER(?) OR LOWER(p.description) LIKE LOWER(?))".to_string());
         }
+        if params.since.is_some() {
+            // Incremental-pull lower bound on `updated_at` (used by changelog).
+            conditions.push("p.updated_at >= ?".to_string());
+        }
 
         let where_sql = conditions.join(" AND ");
 
@@ -376,11 +380,17 @@ impl Store {
                 let q = $query.bind(params.project_id);
                 let q = if let Some(ref s) = params.status { q.bind(status_to_str(*s)) } else { q };
                 let q = if let Some(ref c) = params.category { q.bind(category_to_str(*c)) } else { q };
-                if use_fts {
+                let q = if use_fts {
                     // Bind the FTS5 MATCH term — sanitized for FTS syntax.
                     q.bind(fts_term.clone().unwrap_or_default())
                 } else if let Some(ref pat) = search_pattern {
                     q.bind(pat.clone()).bind(pat.clone())
+                } else {
+                    q
+                };
+                if let Some(ts) = params.since {
+                    // Bind the `updated_at >= ?` lower bound as an RFC3339 string.
+                    q.bind(ts.to_rfc3339())
                 } else {
                     q
                 }

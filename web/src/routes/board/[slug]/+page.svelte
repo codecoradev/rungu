@@ -265,9 +265,14 @@
 
         <!-- Sidebar -->
         <div class="space-y-4">
-            <Button variant="outline" class="w-full" href="/board/{slug}/roadmap">
-                Roadmap
-            </Button>
+            <div class="flex flex-col gap-2">
+                <Button variant="outline" class="w-full" href="/board/{slug}/roadmap">
+                    Roadmap
+                </Button>
+                <Button variant="outline" class="w-full" href="/board/{slug}/changelog">
+                    Changelog
+                </Button>
+            </div>
 
             {#if authed}
                 <Button class="w-full" onclick={() => (showForm = !showForm)}>
