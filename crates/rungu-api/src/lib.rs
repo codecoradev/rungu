@@ -20,6 +20,12 @@ use rungu_core::Store;
 pub struct AppState {
     pub store: Store,
     pub config: rungu_auth::AuthConfig,
+    /// Reused HTTP client for outbound calls (OAuth token exchange, userinfo fetch).
+    ///
+    /// `reqwest::Client` holds a connection pool, DNS cache, and TLS state that is
+    /// expensive to rebuild per request. Constructed once at startup and shared
+    /// across all handlers that need outbound HTTP.
+    pub http_client: reqwest::Client,
 }
 
 impl FromRef<AppState> for rungu_auth::AuthConfig {

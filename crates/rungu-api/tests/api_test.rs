@@ -30,7 +30,7 @@ async fn setup_app() -> (axum::Router, Store) {
         keycloak: None,
     };
 
-    let state = AppState { store: store.clone(), config };
+    let state = AppState { store: store.clone(), config, http_client: reqwest::Client::new() };
     // Tests use bare paths (e.g. "/projects") — match the production router structure:
     // API routes under /api, auth routes at root.
     // For simplicity in tests, mount everything at root.
