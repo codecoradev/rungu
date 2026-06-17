@@ -11,6 +11,7 @@ import type {
     PostStatus,
     Project,
     Comment,
+    RoadmapResponse,
     VoteResponse,
     ProviderInfo,
 } from './types';
@@ -110,6 +111,12 @@ export const api = {
         return request<PaginatedResponse<PostDetail>>(
             `/api/projects/${slug}/posts${qs ? `?${qs}` : ''}`,
         );
+    },
+
+    /** Fetch the public roadmap (posts grouped by lifecycle status). Public endpoint. */
+    getRoadmap: (slug: string, limit?: number) => {
+        const qs = limit !== undefined ? `?limit=${limit}` : '';
+        return request<DataResponse<RoadmapResponse>>(`/api/projects/${slug}/roadmap${qs}`).then((r) => r.data);
     },
 
     getPost: (id: string) =>

@@ -101,3 +101,14 @@ export interface DataResponse<T> {
 export interface ErrorResponse {
     error: string;
 }
+
+/** Shape returned by `GET /api/projects/{slug}/roadmap`. */
+export interface RoadmapResponse {
+    planned: PostDetail[];
+    planned_total: number;
+    in_progress: PostDetail[];
+    in_progress_total: number;
+    done: PostDetail[];
+    done_total: number;
+    limit: number;
+}

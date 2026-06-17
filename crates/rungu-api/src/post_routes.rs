@@ -34,6 +34,7 @@ pub struct ListPostsQuery {
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/projects/{slug}/posts", axum::routing::get(list_posts).post(create_post))
+        .route("/projects/{slug}/roadmap", axum::routing::get(get_project_roadmap))
         .route("/posts/{id}", axum::routing::get(get_post).patch(update_post).delete(delete_post))
 }
 
@@ -248,6 +249,95 @@ pub async fn delete_post(
     state.store.delete_post(&id).await?;
 
     Ok(StatusCode::NO_CONTENT)
+}
+
+// ── Roadmap ────────────────────────────────────────────────────────────
+
+/// Query params for `GET /api/projects/{slug}/roadmap`.
+///
+/// `limit` caps the number of posts returned per status bucket (default 10,
+/// max 50) so a project with hundreds of `done` items doesn't flood the board.
+#[derive(Debug, Deserialize, IntoParams)]
+pub struct RoadmapQuery {
+    /// Max posts per status bucket. Defaults to 10, clamped to 1..=50.
+    pub limit: Option<i64>,
+}
+
+/// Public roadmap view — posts grouped by lifecycle status.
+///
+/// Returns three buckets (`planned`, `in_progress`, `done`) with posts sorted
+/// by vote count (desc) within each bucket. Only posts that have progressed
+/// past `open` appear here — `open` and `declined` are intentionally excluded
+/// because they don't represent committed work.
+///
+/// Public (no auth) — mirrors the visibility of `GET /projects/{slug}/posts`.
+#[utoipa::path(
+    get,
+    path = "/api/projects/{slug}/roadmap",
+    params(
+        ("slug" = String, Path, description = "Project slug"),
+        RoadmapQuery,
+    ),
+    responses(
+        (status = 200, description = "Posts grouped by status", body = serde_json::Value),
+        (status = 404, description = "Project not found", body = serde_json::Value),
+    ),
+    tag = "posts",
+)]
+pub async fn get_project_roadmap(
+    State(state): State<AppState>,
+    Path(slug): Path<String>,
+    Query(query): Query<RoadmapQuery>,
+) -> Result<impl IntoResponse, ApiError> {
+    let project =
+        state.store.get_project_by_slug(&slug).await?.ok_or_else(|| ApiError::not_found("Project not found"))?;
+
+    // Clamp per-bucket limit. 10 keeps the board readable; 50 is the ceiling
+    // so a single API call can never return more than 150 post rows.
+    let per_bucket = query.limit.unwrap_or(10).clamp(1, 50);
+
+    // Fetch each committed-work bucket. We reuse `list_posts` so the roadmap
+    // inherits its parameter binding, sort, and (FTS5/LIKE) search behavior.
+    // Three round-trips is acceptable — these are indexed status scans, and
+    // it keeps the store API the single source of truth for post queries.
+    let planned = fetch_bucket(&state, &project.id, PostStatus::Planned, per_bucket).await?;
+    let in_progress = fetch_bucket(&state, &project.id, PostStatus::InProgress, per_bucket).await?;
+    let done = fetch_bucket(&state, &project.id, PostStatus::Done, per_bucket).await?;
+
+    Ok(Json(serde_json::json!({
+        "data": {
+            "planned": planned.0,
+            "planned_total": planned.1,
+            "in_progress": in_progress.0,
+            "in_progress_total": in_progress.1,
+            "done": done.0,
+            "done_total": done.1,
+            "limit": per_bucket,
+        }
+    })))
+}
+
+/// Fetch a single roadmap bucket: the top-N most-voted posts for `status`.
+///
+/// Returns `(posts, total_matching)` so the UI can show "12 planned" even when
+/// only the top 10 are rendered.
+async fn fetch_bucket(
+    state: &AppState,
+    project_id: &str,
+    status: PostStatus,
+    limit: i64,
+) -> Result<(Vec<PostDetail>, i64), ApiError> {
+    let params = rungu_proto::ListPostsParams {
+        project_id,
+        sort: PostSort::MostVotes,
+        status: Some(status),
+        category: None,
+        query: None,
+        offset: 0,
+        limit,
+    };
+    let (posts, total) = state.store.list_posts(params).await?;
+    Ok((posts, total))
 }
 
 // ── Parsing helpers ────────────────────────────────────────────────────

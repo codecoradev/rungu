@@ -431,3 +431,127 @@ async fn test_list_comments_nonexistent_post_returns_404() {
     // Listing comments for a nonexistent post must 404, not 200 with empty list.
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
+
+// ── Roadmap view ──────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn test_roadmap_unknown_project_returns_404() {
+    let (app, _store) = setup_app().await;
+    let response =
+        app.oneshot(Request::builder().uri("/projects/nope/roadmap").body(Body::empty()).unwrap()).await.unwrap();
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn test_roadmap_public_no_auth_required() {
+    // Roadmap must be reachable without a session cookie — it's the public
+    // status board. If this 401s, the board view for logged-out users breaks.
+    let (app, _store) = setup_app().await;
+    let response =
+        app.oneshot(Request::builder().uri("/projects/test-app/roadmap").body(Body::empty()).unwrap()).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn test_roadmap_groups_by_status_and_sorts_by_votes() {
+    let (app, store) = setup_app().await;
+    let user = store.find_or_create_user("u@t.com", None, None, &[]).await.unwrap();
+    let project = store.get_project_by_slug("test-app").await.unwrap().unwrap();
+
+    // Planned bucket: two posts, different vote counts.
+    let p1 = store
+        .create_post(&project.id, "Planned A", "desc", rungu_proto::PostCategory::Feature, &user.id)
+        .await
+        .unwrap();
+    let p2 = store
+        .create_post(&project.id, "Planned B (more votes)", "desc", rungu_proto::PostCategory::Feature, &user.id)
+        .await
+        .unwrap();
+    store.update_post_status(&p1.id, rungu_proto::PostStatus::Planned).await.unwrap();
+    store.update_post_status(&p2.id, rungu_proto::PostStatus::Planned).await.unwrap();
+
+    // In-progress bucket.
+    let p3 =
+        store.create_post(&project.id, "WIP item", "desc", rungu_proto::PostCategory::Bug, &user.id).await.unwrap();
+    store.update_post_status(&p3.id, rungu_proto::PostStatus::InProgress).await.unwrap();
+
+    // Done bucket.
+    let p4 =
+        store.create_post(&project.id, "Shipped", "desc", rungu_proto::PostCategory::Feedback, &user.id).await.unwrap();
+    store.update_post_status(&p4.id, rungu_proto::PostStatus::Done).await.unwrap();
+
+    // An OPEN post that must NOT appear on the roadmap (not committed work).
+    let _open = store
+        .create_post(&project.id, "Just submitted", "desc", rungu_proto::PostCategory::Question, &user.id)
+        .await
+        .unwrap();
+
+    // Pump p2's votes so it sorts above p1 within the planned bucket.
+    let voter = store.find_or_create_user("v@t.com", None, None, &[]).await.unwrap();
+    store.toggle_vote(&voter.id, &p2.id).await.unwrap();
+
+    let response =
+        app.oneshot(Request::builder().uri("/projects/test-app/roadmap").body(Body::empty()).unwrap()).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+    let data = &json["data"];
+    assert_eq!(data["planned"].as_array().unwrap().len(), 2);
+    assert_eq!(data["planned_total"], 2);
+    assert_eq!(data["in_progress"].as_array().unwrap().len(), 1);
+    assert_eq!(data["in_progress_total"], 1);
+    assert_eq!(data["done"].as_array().unwrap().len(), 1);
+    assert_eq!(data["done_total"], 1);
+    assert_eq!(data["limit"], 10);
+
+    // Within `planned`, the most-voted post ("Planned B") must come first.
+    let planned_titles: Vec<&str> =
+        data["planned"].as_array().unwrap().iter().map(|p| p["title"].as_str().unwrap()).collect();
+    assert_eq!(planned_titles, vec!["Planned B (more votes)", "Planned A"]);
+}
+
+#[tokio::test]
+async fn test_roadmap_respects_limit_param() {
+    let (app, store) = setup_app().await;
+    let user = store.find_or_create_user("u@t.com", None, None, &[]).await.unwrap();
+    let project = store.get_project_by_slug("test-app").await.unwrap().unwrap();
+
+    // Create 5 planned posts, ask for a limit of 2.
+    for i in 0..5 {
+        let p = store
+            .create_post(&project.id, &format!("Planned {i}"), "d", rungu_proto::PostCategory::Feature, &user.id)
+            .await
+            .unwrap();
+        store.update_post_status(&p.id, rungu_proto::PostStatus::Planned).await.unwrap();
+    }
+
+    let response = app
+        .oneshot(Request::builder().uri("/projects/test-app/roadmap?limit=2").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+    // Only 2 posts returned, but the total reflects all 5.
+    let data = &json["data"];
+    assert_eq!(data["planned"].as_array().unwrap().len(), 2);
+    assert_eq!(data["planned_total"], 5);
+    assert_eq!(data["limit"], 2);
+}
+
+#[tokio::test]
+async fn test_roadmap_limit_clamped_to_max_50() {
+    // A pathologically large limit must be clamped server-side, not passed
+    // straight to SQL — otherwise a client can force a huge result set.
+    let (app, _store) = setup_app().await;
+    let response = app
+        .oneshot(Request::builder().uri("/projects/test-app/roadmap?limit=9999").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["data"]["limit"], 50);
+}
