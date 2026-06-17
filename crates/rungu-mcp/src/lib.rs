@@ -80,6 +80,7 @@ async fn handle_request(method: &str, params: &Value, store: &Store) -> Result<V
         "update_post_status" => update_post_status(params, store).await,
         "vote_post" => vote_post(params, store).await,
         "search_posts" => search_posts(params, store).await,
+        "get_changelog" => get_changelog(params, store).await,
         "list_comments" => list_comments(params, store).await,
         "add_comment" => add_comment(params, store).await,
         "get_stats" => get_stats(params, store).await,
@@ -176,7 +177,16 @@ async fn list_posts(params: &Value, store: &Store) -> Result<Value, String> {
     let limit = get_optional_u64(params, "limit").unwrap_or(20).clamp(1, 100) as i64;
 
     let (posts, total) = store
-        .list_posts(ListPostsParams { project_id: &project.id, sort, status, category, query, offset: 0, limit })
+        .list_posts(ListPostsParams {
+            project_id: &project.id,
+            sort,
+            status,
+            category,
+            query,
+            since: None,
+            offset: 0,
+            limit,
+        })
         .await
         .map_err(|e| format!("Failed to list posts: {e}"))?;
 
@@ -263,11 +273,42 @@ async fn search_posts(params: &Value, store: &Store) -> Result<Value, String> {
             status: None,
             category: None,
             query: Some(query),
+            since: None,
             offset: 0,
             limit,
         })
         .await
         .map_err(|e| format!("Failed to search posts: {e}"))?;
+
+    Ok(json!({ "posts": posts, "total": total }))
+}
+
+/// Get the changelog for a project — done posts, most recently shipped first.
+///
+/// Useful for AI agents summarizing "what shipped recently" in a project.
+async fn get_changelog(params: &Value, store: &Store) -> Result<Value, String> {
+    let slug = get_str(params, "slug")?;
+    let limit = get_optional_u64(params, "limit").unwrap_or(20).clamp(1, 100) as i64;
+
+    let project = store
+        .get_project_by_slug(slug)
+        .await
+        .map_err(|e| format!("Failed to get project: {e}"))?
+        .ok_or_else(|| format!("Project not found: {slug}"))?;
+
+    let (posts, total) = store
+        .list_posts(ListPostsParams {
+            project_id: &project.id,
+            sort: PostSort::RecentlyUpdated,
+            status: Some(PostStatus::Done),
+            category: None,
+            query: None,
+            since: None,
+            offset: 0,
+            limit,
+        })
+        .await
+        .map_err(|e| format!("Failed to get changelog: {e}"))?;
 
     Ok(json!({ "posts": posts, "total": total }))
 }
@@ -312,6 +353,7 @@ async fn get_stats(params: &Value, store: &Store) -> Result<Value, String> {
             status: None,
             category: None,
             query: None,
+            since: None,
             offset: 0,
             limit: 1000,
         })
@@ -365,6 +407,7 @@ async fn get_trending(params: &Value, store: &Store) -> Result<Value, String> {
             status: None,
             category: None,
             query: None,
+            since: None,
             offset: 0,
             limit,
         })

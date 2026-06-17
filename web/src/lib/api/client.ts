@@ -119,6 +119,16 @@ export const api = {
         return request<DataResponse<RoadmapResponse>>(`/api/projects/${slug}/roadmap${qs}`).then((r) => r.data);
     },
 
+    /** Fetch the changelog (done posts, newest ship first). Public, paginated. */
+    getChangelog: (slug: string, params?: { page?: number; per_page?: number; since?: string }) => {
+        const query = new URLSearchParams();
+        if (params?.page !== undefined) query.set('page', String(params.page));
+        if (params?.per_page !== undefined) query.set('per_page', String(params.per_page));
+        if (params?.since) query.set('since', params.since);
+        const qs = query.toString();
+        return request<PaginatedResponse<PostDetail>>(`/api/projects/${slug}/changelog${qs ? `?${qs}` : ''}`);
+    },
+
     getPost: (id: string) =>
         request<DataResponse<PostDetail>>(`/api/posts/${id}`).then((r) => r.data),
 

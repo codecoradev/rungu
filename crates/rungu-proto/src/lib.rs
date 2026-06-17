@@ -254,6 +254,10 @@ pub struct ListPostsParams<'a> {
     pub status: Option<PostStatus>,
     pub category: Option<PostCategory>,
     pub query: Option<&'a str>,
+    /// Optional lower bound on `updated_at` (inclusive). Used by the changelog
+    /// endpoint for incremental pulls ("what shipped since my last sync?").
+    /// When `None`, no `updated_at` filter is applied.
+    pub since: Option<DateTime<Utc>>,
     pub offset: i64,
     pub limit: i64,
 }

@@ -555,3 +555,94 @@ async fn test_roadmap_limit_clamped_to_max_50() {
     let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(json["data"]["limit"], 50);
 }
+
+// ── Changelog ──────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn test_changelog_unknown_project_returns_404() {
+    let (app, _store) = setup_app().await;
+    let response =
+        app.oneshot(Request::builder().uri("/projects/nope/changelog").body(Body::empty()).unwrap()).await.unwrap();
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn test_changelog_public_no_auth_required() {
+    let (app, _store) = setup_app().await;
+    let response =
+        app.oneshot(Request::builder().uri("/projects/test-app/changelog").body(Body::empty()).unwrap()).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn test_changelog_returns_only_done_posts() {
+    // The changelog must surface ONLY shipped (done) work. Planned, in-progress,
+    // and open posts must not leak in.
+    let (app, store) = setup_app().await;
+    let user = store.find_or_create_user("u@t.com", None, None, &[]).await.unwrap();
+    let project = store.get_project_by_slug("test-app").await.unwrap().unwrap();
+
+    let done_post = store
+        .create_post(&project.id, "Shipped feature", "desc", rungu_proto::PostCategory::Feature, &user.id)
+        .await
+        .unwrap();
+    store.update_post_status(&done_post.id, rungu_proto::PostStatus::Done).await.unwrap();
+
+    // These must NOT appear.
+    let planned =
+        store.create_post(&project.id, "Planned", "desc", rungu_proto::PostCategory::Feature, &user.id).await.unwrap();
+    store.update_post_status(&planned.id, rungu_proto::PostStatus::Planned).await.unwrap();
+    let wip =
+        store.create_post(&project.id, "In progress", "desc", rungu_proto::PostCategory::Bug, &user.id).await.unwrap();
+    store.update_post_status(&wip.id, rungu_proto::PostStatus::InProgress).await.unwrap();
+    store
+        .create_post(&project.id, "Just submitted", "desc", rungu_proto::PostCategory::Question, &user.id)
+        .await
+        .unwrap();
+
+    let response =
+        app.oneshot(Request::builder().uri("/projects/test-app/changelog").body(Body::empty()).unwrap()).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+
+    let data = &json["data"];
+    assert_eq!(data.as_array().unwrap().len(), 1);
+    assert_eq!(data[0]["title"], "Shipped feature");
+    assert_eq!(json["pagination"]["total"], 1);
+}
+
+#[tokio::test]
+async fn test_changelog_invalid_since_returns_400() {
+    // A malformed `since` must 400, not silently behave as "no filter" —
+    // otherwise a client bug would return the full history unnoticed.
+    let (app, _store) = setup_app().await;
+    let response = app
+        .oneshot(Request::builder().uri("/projects/test-app/changelog?since=not-a-date").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn test_changelog_since_filters_out_older_ships() {
+    let (app, store) = setup_app().await;
+    let user = store.find_or_create_user("u@t.com", None, None, &[]).await.unwrap();
+    let project = store.get_project_by_slug("test-app").await.unwrap().unwrap();
+
+    let p =
+        store.create_post(&project.id, "Shipped A", "d", rungu_proto::PostCategory::Feature, &user.id).await.unwrap();
+    store.update_post_status(&p.id, rungu_proto::PostStatus::Done).await.unwrap();
+
+    // `since` set to a year in the future → nothing ships after it.
+    // The `+` in the RFC3339 offset must be percent-encoded (`%2B`) so it isn't
+    // decoded to a space by query-string parsing.
+    let future = (chrono::Utc::now() + chrono::Duration::days(365)).to_rfc3339().replace('+', "%2B");
+    let uri = format!("/projects/test-app/changelog?since={future}");
+    let response = app.oneshot(Request::builder().uri(&uri).body(Body::empty()).unwrap()).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["pagination"]["total"], 0);
+    assert!(json["data"].as_array().unwrap().is_empty());
+}

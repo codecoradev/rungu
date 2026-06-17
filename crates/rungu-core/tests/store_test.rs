@@ -111,6 +111,7 @@ async fn test_list_posts_with_filters() {
             status: None,
             category: None,
             query: None,
+            since: None,
             offset: 0,
             limit: 20,
         })
@@ -127,6 +128,7 @@ async fn test_list_posts_with_filters() {
             status: None,
             category: Some(PostCategory::Bug),
             query: None,
+            since: None,
             offset: 0,
             limit: 20,
         })
@@ -143,6 +145,7 @@ async fn test_list_posts_with_filters() {
             status: Some(PostStatus::Done),
             category: None,
             query: None,
+            since: None,
             offset: 0,
             limit: 20,
         })
@@ -159,6 +162,7 @@ async fn test_list_posts_with_filters() {
             status: None,
             category: None,
             query: Some("dark"),
+            since: None,
             offset: 0,
             limit: 20,
         })
@@ -186,6 +190,7 @@ async fn test_list_posts_search_with_sql_injection_chars() {
             status: None,
             category: None,
             query: Some("'; DROP TABLE posts; --"),
+            since: None,
             offset: 0,
             limit: 20,
         })
@@ -202,6 +207,7 @@ async fn test_list_posts_search_with_sql_injection_chars() {
             status: None,
             category: None,
             query: None,
+            since: None,
             offset: 0,
             limit: 20,
         })
@@ -250,6 +256,7 @@ async fn test_list_posts_search_fts5_multitoken() {
             status: None,
             category: None,
             query: Some("dark mode"),
+            since: None,
             offset: 0,
             limit: 20,
         })
@@ -277,6 +284,7 @@ async fn test_list_posts_search_punctuation_only_drops_to_noop() {
             status: None,
             category: None,
             query: Some("!!!"),
+            since: None,
             offset: 0,
             limit: 20,
         })
@@ -306,6 +314,7 @@ async fn test_list_posts_pagination() {
             status: None,
             category: None,
             query: None,
+            since: None,
             offset: 0,
             limit: 2,
         })
@@ -322,6 +331,7 @@ async fn test_list_posts_pagination() {
             status: None,
             category: None,
             query: None,
+            since: None,
             offset: 4,
             limit: 2,
         })
