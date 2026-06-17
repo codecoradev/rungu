@@ -161,7 +161,7 @@
                 </div>
                 <Card.Title class="text-xl">{post.title}</Card.Title>
                 <div class="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
-                    <span>{post.creator.name || post.creator.email}</span>
+                    <span>{post.creator.name || post.creator.email || 'User'}</span>
                     <span>·</span>
                     <span>{timeAgo(post.created_at)}</span>
                 </div>

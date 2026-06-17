@@ -42,6 +42,8 @@
 </script>
 
 <script lang="ts">
+	import { sanitizeHref } from "$lib/utils.js";
+
 	let {
 		class: className,
 		variant = "default",
@@ -53,14 +55,18 @@
 		children,
 		...restProps
 	}: ButtonProps = $props();
+
+	// Sanitize href — unsafe schemes (`javascript:`, `data:`, protocol-relative)
+	// are dropped, which falls back to the button (non-link) branch below.
+	const safeHref = $derived(sanitizeHref(href));
 </script>
 
-{#if href}
+{#if safeHref}
 	<a
 		bind:this={ref}
 		data-slot="button"
 		class={cn(buttonVariants({ variant, size }), className)}
-		href={disabled ? undefined : href}
+		href={disabled ? undefined : safeHref}
 		aria-disabled={disabled}
 		role={disabled ? "link" : undefined}
 		tabindex={disabled ? -1 : undefined}

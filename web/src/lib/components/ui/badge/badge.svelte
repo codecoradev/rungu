@@ -23,7 +23,7 @@
 
 <script lang="ts">
 	import type { HTMLAnchorAttributes } from "svelte/elements";
-	import { cn, type WithElementRef } from "$lib/utils.js";
+	import { cn, sanitizeHref, type WithElementRef } from "$lib/utils.js";
 
 	let {
 		ref = $bindable(null),
@@ -35,13 +35,19 @@
 	}: WithElementRef<HTMLAnchorAttributes> & {
 		variant?: BadgeVariant;
 	} = $props();
+
+	// Sanitize href so a `javascript:`/`data:`/protocol-relative URL can't be
+	// smuggled in via a caller. When the value is unsafe or missing, we render
+	// a <span> instead of an <a> by passing `this={undefined}`-equivalent below.
+	const safeHref = $derived(sanitizeHref(href));
+	const tagName = $derived(safeHref ? "a" : "span");
 </script>
 
 <svelte:element
-	this={href ? "a" : "span"}
+	this={tagName}
 	bind:this={ref}
 	data-slot="badge"
-	{href}
+	href={safeHref}
 	class={cn(badgeVariants({ variant }), className)}
 	{...restProps}
 >

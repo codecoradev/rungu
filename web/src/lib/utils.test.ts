@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { cn, timeAgo, formatDate } from '$lib/utils';
+import { cn, timeAgo, formatDate, sanitizeHref } from '$lib/utils';
 
 describe('cn utility', () => {
     it('merges class names', () => {
@@ -39,6 +39,12 @@ describe('timeAgo', () => {
     it('returns empty for empty string', () => {
         expect(timeAgo('')).toBe('');
     });
+
+    it('returns empty for invalid date strings (no "NaNy ago")', () => {
+        expect(timeAgo('not-a-date')).toBe('');
+        expect(timeAgo('2026-13-99')).toBe('');
+        // Regression: previously returned "NaNy ago" because date.getTime() is NaN.
+    });
 });
 
 describe('formatDate', () => {
@@ -50,5 +56,50 @@ describe('formatDate', () => {
 
     it('returns empty for empty string', () => {
         expect(formatDate('')).toBe('');
+    });
+
+    it('returns empty for invalid date strings (no "Invalid Date" text)', () => {
+        expect(formatDate('not-a-date')).toBe('');
+        expect(formatDate('garbage')).toBe('');
+        // Regression: previously returned locale-dependent "Invalid Date".
+    });
+});
+
+describe('sanitizeHref', () => {
+    it('returns undefined for empty / null / undefined', () => {
+        expect(sanitizeHref(undefined)).toBeUndefined();
+        expect(sanitizeHref(null)).toBeUndefined();
+        expect(sanitizeHref('')).toBeUndefined();
+        expect(sanitizeHref('   ')).toBeUndefined();
+    });
+
+    it('passes through safe relative URLs', () => {
+        expect(sanitizeHref('/')).toBe('/');
+        expect(sanitizeHref('/board/my-app')).toBe('/board/my-app');
+        expect(sanitizeHref('#section')).toBe('#section');
+        expect(sanitizeHref('?q=1')).toBe('?q=1');
+    });
+
+    it('passes through safe absolute protocols', () => {
+        expect(sanitizeHref('https://example.com')).toBe('https://example.com');
+        expect(sanitizeHref('http://example.com')).toBe('http://example.com');
+        expect(sanitizeHref('mailto:foo@example.com')).toBe('mailto:foo@example.com');
+        expect(sanitizeHref('tel:+15551234')).toBe('tel:+15551234');
+    });
+
+    it('rejects protocol-relative URLs (open-redirect vector)', () => {
+        expect(sanitizeHref('//evil.com')).toBeUndefined();
+        expect(sanitizeHref(' //evil.com')).toBeUndefined();
+    });
+
+    it('rejects dangerous schemes (XSS vectors)', () => {
+        expect(sanitizeHref('javascript:alert(1)')).toBeUndefined();
+        expect(sanitizeHref('JaVaScRiPt:alert(1)')).toBeUndefined();
+        expect(sanitizeHref('data:text/html,<script>alert(1)</script>')).toBeUndefined();
+        expect(sanitizeHref('vbscript:msgbox')).toBeUndefined();
+    });
+
+    it('rejects non-URL garbage', () => {
+        expect(sanitizeHref('not a url at all')).toBeUndefined();
     });
 });
