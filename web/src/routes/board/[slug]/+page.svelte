@@ -76,6 +76,7 @@
             authed = false;
         }
         await loadBoard();
+        initialized = true;
     });
 
     async function handleCreatePost(data: { title: string; description: string; category: PostCategory }) {
@@ -84,8 +85,17 @@
         await loadBoard();
     }
 
+    // Re-fetch when the slug changes (route param swap). We intentionally
+    // read only `slug` inside this effect — reading `project`/`posts`/etc
+    // would re-trigger the effect on our own state writes and cause loops.
+    // `loadBoard()` is safe to call before `project` is set; it sets `project`
+    // on first resolve. We also guard against running before mount completes
+    // via the `initialized` flag set at the end of onMount.
+    let initialized = $state(false);
     $effect(() => {
-        if (project) loadBoard();
+        if (!initialized) return;
+        void slug; // track slug only
+        loadBoard();
     });
 </script>
 

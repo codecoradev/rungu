@@ -31,8 +31,13 @@
     async function loadData() {
         loading = true;
         try {
-            user = await api.getCurrentUser();
-            if (!isAdmin) {
+            // Check the fetched user object directly. `isAdmin` is a `$derived`
+            // of `user`; reading it synchronously after the assignment in the
+            // same tick may return the pre-update value and incorrectly deny
+            // access to real admins.
+            const currentUser = await api.getCurrentUser();
+            user = currentUser;
+            if (currentUser.role !== 'admin') {
                 error = 'Admin access required';
                 return;
             }
