@@ -9,7 +9,7 @@ use rungu_proto::*;
 async fn setup() -> Store {
     let pool = open_pool("sqlite::memory:").await.unwrap();
     run_migrations(&pool, "sqlite::memory:").await.unwrap();
-    Store::new(pool)
+    Store::new_with_kind(pool, true)
 }
 
 // ── Projects ────────────────────────────────────────────────────────────
@@ -207,6 +207,82 @@ async fn test_list_posts_search_with_sql_injection_chars() {
         })
         .await
         .unwrap();
+    assert_eq!(total, 1);
+    assert_eq!(posts.len(), 1);
+}
+
+#[tokio::test]
+async fn test_list_posts_search_fts5_multitoken() {
+    // The store uses SQLite's FTS5 virtual table (`posts_fts`, maintained by
+    // triggers) for search when the backend is SQLite. A multi-token query
+    // must match a post that contains ALL tokens (implicit AND), not just one.
+    let store = setup().await;
+    let project = store.create_project("App", "app", "").await.unwrap();
+    let user = store.find_or_create_user("u@t.com", None, None, &[]).await.unwrap();
+
+    store
+        .create_post(
+            &project.id,
+            "Dark mode for the dashboard",
+            "Add a dark theme that follows system preference",
+            PostCategory::Feature,
+            &user.id,
+        )
+        .await
+        .unwrap();
+    // Distractor: has "dark" but not "mode".
+    store
+        .create_post(
+            &project.id,
+            "Fix dark flicker on load",
+            "Background flashes before CSS loads",
+            PostCategory::Bug,
+            &user.id,
+        )
+        .await
+        .unwrap();
+
+    // Multi-token query → only the post with BOTH "dark" AND "mode" matches.
+    let (posts, total) = store
+        .list_posts(ListPostsParams {
+            project_id: &project.id,
+            sort: PostSort::Newest,
+            status: None,
+            category: None,
+            query: Some("dark mode"),
+            offset: 0,
+            limit: 20,
+        })
+        .await
+        .unwrap();
+    assert_eq!(total, 1, "multi-token FTS5 query should AND the tokens");
+    assert_eq!(posts.len(), 1);
+    assert_eq!(posts[0].post.title, "Dark mode for the dashboard");
+}
+
+#[tokio::test]
+async fn test_list_posts_search_punctuation_only_drops_to_noop() {
+    // A query that is only punctuation/operators must not produce a broken
+    // FTS5 MATCH expression. The store sanitizes it to empty and treats it
+    // as "no search" — so it returns ALL posts for the project.
+    let store = setup().await;
+    let project = store.create_project("App", "app", "").await.unwrap();
+    let user = store.find_or_create_user("u@t.com", None, None, &[]).await.unwrap();
+    store.create_post(&project.id, "Hello", "world", PostCategory::Feedback, &user.id).await.unwrap();
+
+    let (posts, total) = store
+        .list_posts(ListPostsParams {
+            project_id: &project.id,
+            sort: PostSort::Newest,
+            status: None,
+            category: None,
+            query: Some("!!!"),
+            offset: 0,
+            limit: 20,
+        })
+        .await
+        .unwrap();
+    // Punctuation-only → sanitized to empty → no MATCH clause → returns the one post.
     assert_eq!(total, 1);
     assert_eq!(posts.len(), 1);
 }

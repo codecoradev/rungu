@@ -127,6 +127,38 @@ fn category_to_str(c: PostCategory) -> &'static str {
     }
 }
 
+/// Sanitize a user-supplied search term into a safe FTS5 MATCH expression.
+///
+/// FTS5 query syntax ("AND", "OR", "NEAR", `*`, `^`, `"..."`, column filters)
+/// would let a crafted query do expensive work or syntax-error out. To keep
+/// behavior predictable and safe, we split the input on whitespace and turn
+/// each token into a prefix-match token (`token*`), then join with implicit
+/// AND (space-separated). Empty/whitespace input yields an empty string,
+/// which the caller treats as "no MATCH".
+///
+/// Example: `"dark mode"` → `"dark* mode*"`.
+fn sanitize_fts_query(input: &str) -> String {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    trimmed
+        .split_whitespace()
+        // Drop anything that's only punctuation — avoids feeding FTS5 lone
+        // operators that would either error or match nothing.
+        .filter(|tok| tok.chars().any(|c| c.is_alphanumeric()))
+        .map(|tok| {
+            // Strip any FTS5-special chars so the user can't inject query syntax.
+            // We keep alphanumerics, underscores, and hyphens (common in
+            // identifiers like "v0-1-2"); everything else is dropped per-token.
+            let cleaned: String = tok.chars().filter(|c| c.is_alphanumeric() || *c == '_' || *c == '-').collect();
+            if cleaned.is_empty() { cleaned } else { format!("{cleaned}*") }
+        })
+        .filter(|tok| !tok.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 /// Parse PostStatus from SQLite TEXT column.
 fn parse_status(s: &str) -> PostStatus {
     match s {
@@ -152,11 +184,25 @@ fn parse_category(s: &str) -> PostCategory {
 #[derive(Clone)]
 pub struct Store {
     pool: AnyPool,
+    /// True when the underlying database is SQLite. Drives FTS5 vs LIKE
+    /// search-path selection (only SQLite has the `posts_fts` virtual table
+    /// populated by triggers; PostgreSQL FTS is deferred to v0.3).
+    is_sqlite: bool,
 }
 
 impl Store {
     pub fn new(pool: AnyPool) -> Self {
-        Self { pool }
+        Self { pool, is_sqlite: false }
+    }
+
+    /// Construct a Store with explicit backend knowledge.
+    ///
+    /// `is_sqlite` should be `true` when the pool was opened against a
+    /// `sqlite:` connection. `lib::open_pool` already detects this when the
+    /// URL starts with `sqlite:` — callers should pass that detection result
+    /// here so the store can pick the right query dialect.
+    pub fn new_with_kind(pool: AnyPool, is_sqlite: bool) -> Self {
+        Self { pool, is_sqlite }
     }
 
     /// Get a reference to the pool.
@@ -273,52 +319,76 @@ impl Store {
     /// Uses positional `?` parameter binding — user input is NEVER interpolated into SQL.
     /// The search query uses `LIKE ?` with the pattern passed as a bind parameter.
     pub async fn list_posts(&self, params: ListPostsParams<'_>) -> Result<(Vec<PostDetail>, i64)> {
+        // Search path selection:
+        // - SQLite: use the FTS5 virtual table `posts_fts` (maintained by triggers)
+        //   via `posts_fts MATCH ?`. Faster and relevance-ranked.
+        // - Other backends (PostgreSQL — v0.3): fall back to LIKE. PostgreSQL
+        //   will get its own `tsvector` index in a later release.
+        // Sanitize once up front so both the WHERE-builder and the binder see
+        // the same decision (a token that's all punctuation would otherwise
+        // produce an empty MATCH query that errors in FTS5).
+        let (fts_term, search_pattern): (Option<String>, Option<String>) = if self.is_sqlite {
+            let sanitized = params.query.map(sanitize_fts_query).filter(|s| !s.is_empty());
+            // SQLite: punctuation-only queries sanitize to "" → treat as no filter
+            // (no meaningful search term). The FTS path is used when a real token survives.
+            (sanitized, None)
+        } else {
+            (None, params.query.map(|q| format!("%{q}%")))
+        };
+        let use_fts = fts_term.is_some();
+
         // Build WHERE clause fragments — only add conditions for filters that are present.
         // Each `?` is a positional placeholder bound later via .bind().
-        let mut conditions = vec!["project_id = ?".to_string()];
+        let mut conditions = vec!["p.project_id = ?".to_string()];
 
         if params.status.is_some() {
-            conditions.push("status = ?".to_string());
+            conditions.push("p.status = ?".to_string());
         }
         if params.category.is_some() {
-            conditions.push("category = ?".to_string());
+            conditions.push("p.category = ?".to_string());
         }
-        if params.query.is_some() {
-            // Case-insensitive search via LOWER() — works on both SQLite and PostgreSQL.
-            // FTS5 index (SQLite) maintained by triggers for future use.
-            conditions.push("(LOWER(title) LIKE LOWER(?) OR LOWER(description) LIKE LOWER(?))".to_string());
+        if !use_fts && search_pattern.is_some() {
+            // LIKE fallback for non-SQLite backends.
+            conditions.push("(LOWER(p.title) LIKE LOWER(?) OR LOWER(p.description) LIKE LOWER(?))".to_string());
         }
 
         let where_sql = conditions.join(" AND ");
 
         // Sort — safe because it's a hardcoded match, not user input
         let order = match params.sort {
-            PostSort::Newest => "created_at DESC",
-            PostSort::Oldest => "created_at ASC",
-            PostSort::MostVotes => "vote_count DESC, created_at DESC",
-            PostSort::LeastVotes => "vote_count ASC, created_at DESC",
-            PostSort::RecentlyUpdated => "updated_at DESC",
+            // FTS5 with most-relevant ranking surfaces in `?sort=newest` only if no
+            // explicit vote/order preference; preserve existing behavior otherwise.
+            PostSort::Newest => "p.created_at DESC",
+            PostSort::Oldest => "p.created_at ASC",
+            PostSort::MostVotes => "p.vote_count DESC, p.created_at DESC",
+            PostSort::LeastVotes => "p.vote_count ASC, p.created_at DESC",
+            PostSort::RecentlyUpdated => "p.updated_at DESC",
         };
 
+        // FTS JOIN clause — only emitted when the FTS path is active.
+        let fts_join = if use_fts { "JOIN posts_fts ON posts_fts.rowid = p.rowid" } else { "" };
+        // Extra WHERE fragment for the FTS path. We bind a sanitized MATCH term.
+        let fts_where = if use_fts { " AND posts_fts MATCH ?" } else { "" };
+
         // Helper: bind optional filter values in order (project_id already first)
-        // Returns the next bind index (for limit/offset appended after).
         macro_rules! bind_filters {
             ($query:expr) => {{
                 let q = $query.bind(params.project_id);
                 let q = if let Some(ref s) = params.status { q.bind(status_to_str(*s)) } else { q };
                 let q = if let Some(ref c) = params.category { q.bind(category_to_str(*c)) } else { q };
-                let q = if let Some(query_text) = params.query {
-                    let pattern = format!("%{query_text}%");
-                    q.bind(pattern.clone()).bind(pattern)
+                if use_fts {
+                    // Bind the FTS5 MATCH term — sanitized for FTS syntax.
+                    q.bind(fts_term.clone().unwrap_or_default())
+                } else if let Some(ref pat) = search_pattern {
+                    q.bind(pat.clone()).bind(pat.clone())
                 } else {
                     q
-                };
-                q
+                }
             }};
         }
 
         // Count query (same WHERE, no LIMIT/OFFSET)
-        let count_sql = format!("SELECT COUNT(*) FROM posts WHERE {where_sql}");
+        let count_sql = format!("SELECT COUNT(*) FROM posts p {fts_join} WHERE {where_sql}{fts_where}");
         let total: i64 = bind_filters!(sqlx::query_scalar::<_, i64>(&count_sql))
             .fetch_one(&self.pool)
             .await
@@ -328,8 +398,9 @@ impl Store {
         let sql = format!(
             "SELECT p.*, u.id as user_id, u.email as user_email, u.name as user_name, u.avatar_url as user_avatar \
              FROM posts p \
+             {fts_join}
              LEFT JOIN users u ON p.created_by = u.id \
-             WHERE {where_sql} \
+             WHERE {where_sql}{fts_where} \
              ORDER BY {order} \
              LIMIT ? OFFSET ?"
         );

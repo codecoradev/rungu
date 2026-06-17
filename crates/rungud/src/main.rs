@@ -68,16 +68,17 @@ async fn main() -> Result<()> {
     let pool = rungu_core::open_pool(&db_url).await?;
     rungu_core::run_migrations(&pool, &db_url).await?;
     info!("Database ready: {}", db_url);
+    let is_sqlite = rungu_core::is_sqlite_url(&db_url);
 
     let config = config::Config::from_env();
     info!("Auth providers: {} active", config.auth.active_providers().len());
 
     match cli.command {
         Some(Commands::Serve { listen }) => {
-            server::serve(config, pool, &listen).await?;
+            server::serve(config, pool, is_sqlite, &listen).await?;
         }
         Some(Commands::ProjectList) => {
-            let store = rungu_core::Store::new(pool);
+            let store = rungu_core::Store::new_with_kind(pool, is_sqlite);
             let projects = store.list_projects().await?;
             if projects.is_empty() {
                 println!("No projects found.");
@@ -88,23 +89,23 @@ async fn main() -> Result<()> {
             }
         }
         Some(Commands::ProjectAdd { name, slug, description }) => {
-            let store = rungu_core::Store::new(pool);
+            let store = rungu_core::Store::new_with_kind(pool, is_sqlite);
             let slug = slug.unwrap_or_else(|| name.to_lowercase().replace(' ', "-"));
             let project = store.create_project(&name, &slug, &description).await?;
             println!("Created project: {} ({})", project.name, project.slug);
         }
         Some(Commands::Healthcheck) => {
             // Simple health check — can we query the DB?
-            let store = rungu_core::Store::new(pool);
+            let store = rungu_core::Store::new_with_kind(pool, is_sqlite);
             let _ = store.list_projects().await?;
             println!("OK");
         }
         Some(Commands::Mcp) => {
-            rungu_mcp::run_server(pool).await?;
+            rungu_mcp::run_server(pool, is_sqlite).await?;
         }
         None => {
             // Default: serve
-            server::serve(config, pool, "0.0.0.0:3000").await?;
+            server::serve(config, pool, is_sqlite, "0.0.0.0:3000").await?;
         }
     }
 

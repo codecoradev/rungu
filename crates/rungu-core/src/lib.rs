@@ -64,3 +64,13 @@ pub async fn run_migrations(pool: &AnyPool, database_url: &str) -> Result<()> {
 pub fn new_id() -> String {
     uuid::Uuid::new_v4().to_string()
 }
+
+/// Returns `true` when `database_url` refers to a SQLite backend.
+///
+/// Used by `Store` to decide whether it can use SQLite-only features (FTS5)
+/// or must fall back to a portable query path. Detection is string-prefix
+/// based because that's how the rest of the crate decides driver selection
+/// too (see [`open_pool`]).
+pub fn is_sqlite_url(database_url: &str) -> bool {
+    database_url.starts_with("sqlite:")
+}
