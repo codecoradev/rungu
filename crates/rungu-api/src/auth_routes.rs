@@ -201,7 +201,19 @@ async fn callback(
         (StatusCode::BAD_GATEWAY, format!("Failed to fetch user info: {e}"))
     })?;
 
-    info!(provider = %provider, email = %identity.email, "OAuth identity fetched");
+    info!(provider = %provider, email = %identity.email, verified = identity.email_verified, "OAuth identity fetched");
+
+    // Hard gate: only link accounts when the provider asserts email ownership.
+    // This blocks cross-provider account takeover via unverified-email providers
+    // (e.g. attacker-controlled Keycloak realm, self-hosted IdP with admin-reassignable emails).
+    // See docs/auth/overview.md and issue #55.
+    if !identity.email_verified {
+        warn!(provider = %provider, email = %identity.email, "Rejecting login: email not verified by provider");
+        return Err((
+            StatusCode::FORBIDDEN,
+            "Email is not verified by the provider. Verify your email with the provider and try again.".to_string(),
+        ));
+    }
 
     // Find or create user (email dedup)
     let user = state
