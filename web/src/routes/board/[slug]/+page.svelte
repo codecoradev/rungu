@@ -1,5 +1,6 @@
 <script lang="ts">
     import { onMount } from 'svelte';
+    import { goto } from '$app/navigation';
     import { api, ApiError } from '$lib/api/client';
     import type { Project, PostDetail, PostStatus, PostCategory } from '$lib/api/types';
     import PostCard from '$lib/components/PostCard.svelte';
@@ -25,6 +26,10 @@
     let searchQuery = $state('');
     let showForm = $state(false);
     let authed = $state(false);
+
+    // Keyboard-shortcut focus state. Tracks the currently-focused post card
+    // so j/k navigation and Enter/v shortcuts have a target. -1 = none focused.
+    let focusedPostIndex = $state(-1);
 
     const sortOptions = [
         { value: 'newest', label: 'Newest' },
@@ -79,6 +84,86 @@
         initialized = true;
     });
 
+    /**
+     * Board-scope keyboard-shortcut handler. Receives `rungu:shortcut`
+     * events dispatched by +layout.svelte. Implements the board subset of
+     * the registry (see $lib/shortcuts.ts).
+     */
+    function onShortcut(e: Event) {
+        if (posts.length === 0 && (focusedPostIndex === -1)) {
+            // Still allow `/` to focus search even when the list is empty.
+        }
+        const { key, authRequired } = (e as CustomEvent).detail as {
+            key: string;
+            scope: string;
+            authRequired?: boolean;
+        };
+
+        switch (key) {
+            case '/': {
+                const el = document.getElementById('board-search');
+                if (el instanceof HTMLElement) el.focus();
+                break;
+            }
+            case 'c': {
+                if (!authed) return;
+                showForm = !showForm;
+                break;
+            }
+            case 'j': {
+                if (posts.length === 0) return;
+                focusedPostIndex = Math.min(focusedPostIndex + 1, posts.length - 1);
+                scrollFocusedIntoView();
+                break;
+            }
+            case 'k': {
+                if (posts.length === 0) return;
+                focusedPostIndex = Math.max(focusedPostIndex - 1, 0);
+                scrollFocusedIntoView();
+                break;
+            }
+            case 'Enter': {
+                const post = posts[focusedPostIndex];
+                if (post) goto(`/board/${slug}/post/${post.id}`);
+                break;
+            }
+            case 'v': {
+                if (!authed || authRequired === false) {
+                    if (!authed) return;
+                }
+                const post = posts[focusedPostIndex];
+                if (post) toggleVote(post);
+                break;
+            }
+        }
+    }
+
+    function scrollFocusedIntoView() {
+        if (focusedPostIndex < 0) return;
+        // Defer to after DOM updates.
+        queueMicrotask(() => {
+            const el = document.querySelector(`[data-post-index="${focusedPostIndex}"]`);
+            if (el instanceof HTMLElement) {
+                el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+            }
+        });
+    }
+
+    async function toggleVote(post: PostDetail) {
+        try {
+            const result = await api.toggleVote(post.id);
+            post.user_voted = result.voted;
+            post.vote_count = result.vote_count;
+        } catch {
+            // Silently ignore — vote failure isn't worth a banner here.
+        }
+    }
+
+    onMount(() => {
+        window.addEventListener('rungu:shortcut', onShortcut as EventListener);
+        return () => window.removeEventListener('rungu:shortcut', onShortcut as EventListener);
+    });
+
     async function handleCreatePost(data: { title: string; description: string; category: PostCategory }) {
         await api.createPost(slug, data);
         showForm = false;
@@ -128,6 +213,7 @@
         <div>
             <div class="mb-4 flex flex-wrap items-center gap-2">
                 <Input
+                    id="board-search"
                     bind:value={searchQuery}
                     placeholder="Search..."
                     class="flex-1"
@@ -155,8 +241,18 @@
             {/if}
 
             <div class="space-y-3">
-                {#each posts as post (post.id)}
-                    <PostCard {post} {slug} />
+                {#each posts as post, i (post.id)}
+                    <div
+                        data-post-index={i}
+                        class={cn(
+                            'rounded-xl transition-all',
+                            focusedPostIndex === i
+                                ? 'ring-2 ring-primary ring-offset-2 ring-offset-background'
+                                : '',
+                        )}
+                    >
+                        <PostCard {post} {slug} />
+                    </div>
                 {/each}
             </div>
 

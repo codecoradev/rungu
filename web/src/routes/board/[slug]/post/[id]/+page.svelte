@@ -73,6 +73,25 @@
         await loadData();
     });
 
+    /**
+     * Post-detail keyboard-shortcut handler. Currently just `r` → focus reply
+     * box (auth-gated). See $lib/shortcuts.ts for the full registry.
+     */
+    function onShortcut(e: Event) {
+        const { key } = (e as CustomEvent).detail as { key: string; scope: string };
+        if (key === 'r') {
+            if (!user) return;
+            const el = document.getElementById('post-reply');
+            if (el instanceof HTMLElement) el.focus();
+        }
+    }
+
+    onMount(() => {
+        const handler = onShortcut as EventListener;
+        window.addEventListener('rungu:shortcut', handler);
+        return () => window.removeEventListener('rungu:shortcut', handler);
+    });
+
     async function handleComment(e: Event) {
         e.preventDefault();
         if (!commentText.trim()) return;
@@ -225,6 +244,7 @@
                     </div>
                 {/if}
                 <Textarea
+                    id="post-reply"
                     bind:value={commentText}
                     placeholder={replyTo ? 'Write a reply...' : 'Share your thoughts...'}
                     rows="3"
