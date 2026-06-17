@@ -21,31 +21,48 @@
 - [x] Cloudflare Pages project rename
 - [x] AGENTS.md translated to English
 
-## v0.1.2 Security patch
+## v0.1.2 Security patch ✅ Released
 
-Critical/high-severity findings from `cora scan` v0.6.0 (2026-06-17). Ships as patch bump from 0.1.1 before v0.2.0 feature work.
+Critical/high-severity findings from `cora scan` v0.6.0 (2026-06-17). Patch bump from v0.1.1.
 
-- [ ] 🔴 [#54](https://github.com/codecoradev/rungu/issues/54) — MCP server documented as unauthenticated with direct DB access (auth bypass)
-- [ ] 🔴 [#55](https://github.com/codecoradev/rungu/issues/55) — Email-only account linking enables cross-provider account takeover
-- [ ] 🟠 [#57](https://github.com/codecoradev/rungu/issues/57) — OAuth flow: redirect lost, provider errors leaked, HTTP client rebuilt per request, weak cookie parse
-- [ ] [#53](https://github.com/codecoradev/rungu/issues/53) — Docs: correct misleading "first user becomes admin" (actual: `ADMIN_EMAILS` allowlist)
+- [x] 🔴 [#54](https://github.com/codecoradev/rungu/issues/54) — MCP server documented as unauthenticated with direct DB access (auth bypass)
+- [x] 🔴 [#55](https://github.com/codecoradev/rungu/issues/55) — Email-only account linking enables cross-provider account takeover
+- [x] 🟠 [#57](https://github.com/codecoradev/rungu/issues/57) — OAuth flow: redirect lost, provider errors leaked, HTTP client rebuilt per request, weak cookie parse
+- [x] [#53](https://github.com/codecoradev/rungu/issues/53) — Docs: correct misleading "first user becomes admin" (actual: `ADMIN_EMAILS` allowlist)
+
+Plus the four grouped scan issues [#56](https://github.com/codecoradev/rungu/issues/56), [#58](https://github.com/codecoradev/rungu/issues/58), [#59](https://github.com/codecoradev/rungu/issues/59), [#60](https://github.com/codecoradev/rungu/issues/60) and the docs-sync follow-up [#70](https://github.com/codecoradev/rungu/issues/70).
 
 Validation artifact: `.cora/scan-validation-2026-06-17.md`
 
 ## v0.2.0 Polish
 
-- [ ] MCP server — implement 12 tools with real data ([#28](https://github.com/codecoradev/rungu/issues/28))
-- [ ] [#56](https://github.com/codecoradev/rungu/issues/56) — API: silent filter drops, missing post-existence check, pagination edge cases
-- [ ] [#58](https://github.com/codecoradev/rungu/issues/58) — Frontend state: `$effect` duplicate fetches, stale admin check, orphaned comment replies
-- [ ] [#59](https://github.com/codecoradev/rungu/issues/59) — Frontend components: unsafe date handling, file-input bind, unvalidated `href`, missing creator fallback
-- [ ] [#60](https://github.com/codecoradev/rungu/issues/60) — Docs: CLI command-name inconsistencies, weak `APP_SECRET` placeholder, HTTP-default `APP_URL`, missing secret in Docker run
-- [ ] Full-text search with SQLite FTS5
-- [ ] Roadmap view (public status board)
-- [ ] Changelog auto-generation (from done posts)
-- [ ] Email notifications (new comments, status changes)
-- [ ] Post attachments (images)
-- [ ] Keyboard shortcuts
-- [ ] Dark mode toggle
+Feature polish for the feedback board. Issues are grouped by area; click through for full scope.
+
+### ✅ Already shipped (kept as history)
+
+- [x] MCP server — 12 tools with real data ([#28](https://github.com/codecoradev/rungu/issues/28))
+- [x] Dark mode toggle ([#42](https://github.com/codecoradev/rungu/issues/42))
+- [x] Scan-driven cleanup ([#56](https://github.com/codecoradev/rungu/issues/56), [#58](https://github.com/codecoradev/rungu/issues/58), [#59](https://github.com/codecoradev/rungu/issues/59), [#60](https://github.com/codecoradev/rungu/issues/60))
+
+### 🔎 Search & discovery
+
+- [ ] [#72](https://github.com/codecoradev/rungu/issues/72) — Complete FTS5 search (index + triggers exist, query path missing)
+- [ ] [#75](https://github.com/codecoradev/rungu/issues/75) — Public roadmap view (status board)
+- [ ] [#77](https://github.com/codecoradev/rungu/issues/77) — Auto-generated changelog from done posts
+
+### 💬 Engagement
+
+- [ ] [#73](https://github.com/codecoradev/rungu/issues/73) — Email notifications (new comments, status changes) — **largest item, consider splitting across PRs**
+- [ ] [#74](https://github.com/codecoradev/rungu/issues/74) — Image attachments on posts
+- [ ] [#76](https://github.com/codecoradev/rungu/issues/76) — Keyboard shortcuts (board navigation, help overlay) — **good standalone starter**
+
+### Suggested PR order
+
+1. #76 (keyboard shortcuts) — smallest, builds the action/help infrastructure other features can reuse.
+2. #72 (FTS5 search) — completes an already-advertised feature; high user value per LOC.
+3. #75 (roadmap view) + #77 (changelog) — share UI patterns, land together.
+4. #74 (attachments) — schema + storage work, self-contained.
+5. #73 (email notifications) — largest, multiple PRs; do last.
 
 ## v0.3.0 Production
 
