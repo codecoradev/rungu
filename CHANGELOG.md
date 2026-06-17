@@ -1,5 +1,124 @@
 # Changelog
 
+## [0.1.2] - 2026-06-17
+
+Security and correctness patch. Addresses the critical/high findings from the
+2026-06-17 `cora scan` (profile `rust-strict`) that were validated against
+source — 41 valid findings grouped into 8 issues (#53–#60), all resolved.
+
+This is a **patch release**: no breaking API changes, no schema migrations
+required, and the Docker entrypoint is unchanged. Operators should still review
+the Security section below.
+
+### Security
+
+- **🔴 Verified-email gate on OAuth account linking (#55, #64).** Accounts
+  are now linked by email **only** when the provider asserts `email_verified:
+  true`. Google/Keycloak read the standard userinfo claim; GitHub's
+  verification is determined from `/user/emails` (primary + verified).
+  Unverified emails are rejected with `HTTP 403` before any DB write. Prevents
+  cross-provider account takeover via an attacker-controlled or misconfigured
+  IdP (e.g. self-hosted Keycloak realm with admin-reassignable emails).
+- **🔴 MCP server trust boundary documented (#54, #62).** The MCP server is
+  intentionally unauthenticated — that posture is now documented loudly
+  (critical-warning banner + dedicated *Trust Boundary & Security* section in
+  `docs/integrations/mcp.md` and a security-model doc-comment on the crate
+  root). No behavior change; the doc previously normalized unsafe deployments.
+- **Strict `RUNGU_SECURE_COOKIE` parsing (#57, #65).** The env var now uses a
+  fail-fast boolean parser (`true|1|yes|on`, `false|0|no|off`, case-insensitive).
+  Typos like `False`, `0`, or `no` no longer silently enable secure cookies
+  and break local HTTP login; instead the process exits at startup with an
+  actionable error.
+- **OAuth redirect target preserved across the round-trip (#57, #65).** The
+  requested post-login destination is now carried in an HMAC-signed
+  `oauth_redirect` cookie (5-min expiry, verified server-side) instead of a
+  dead `redirect_target` query param that providers never echoed. The
+  callback no longer hardcodes `/`.
+- **Generic OAuth error responses (#57, #65).** Provider-reported errors are
+  logged internally but the client-facing body is now the generic
+  `"OAuth login failed"`, preventing reflection of untrusted provider strings.
+- **API docs hardened (#60, #69).** `APP_SECRET=your-secret-here` placeholder
+  replaced with `openssl rand -hex 32` guidance in quick-start, docker, and
+  from-source examples. Docker Compose default `APP_URL=http://localhost:3000`
+  is now explicitly labeled local-dev-only.
+
+### Fixed
+
+- **`list_posts` no longer silently drops unknown filters (#56, #66).**
+  `?status=opennnn` / `?category=notarealcategory` now return `400 Bad Request`
+  instead of `200 OK` with unfiltered results.
+- **`list_comments` verifies the parent post exists (#56, #66).** Requests for
+  a nonexistent post now return `404` instead of `200 OK` with an empty list.
+- **Empty-result pagination reports `total_pages: 1` (#56, #66).** A 1-based
+  API no longer returns the internally-inconsistent "page 1 of 0 pages".
+- **TS client serializes falsy `page` / `per_page` (#56, #66).**
+  `page: 0` is no longer dropped from the query string.
+- **`timeAgo()` / `formatDate()` validate dates (#59, #68).** Invalid input
+  returns `''` instead of leaking `"NaNy ago"` / locale-dependent
+  `"Invalid Date"` text into the UI.
+- **Board page `$effect` no longer self-triggers (#58, #67).** The effect
+  now depends only on `slug`; duplicate fetches and the fetch-loop risk are
+  gone.
+- **Admin page checks the fetched user directly (#58, #67).** Reads
+  `currentUser.role` instead of a lazily-recomputed `$derived(isAdmin)`, so
+  the in-tick check can't deny access to real admins.
+- **Deleting a comment prunes its descendants locally (#58, #67).** Replies
+  whose `parent_id` chain led to the deleted comment are removed from client
+  state (no more invisible-but-counted orphans).
+- **Creator display has a `'User'` fallback (#59, #68).**
+  `post.creator.name || post.creator.email || 'User'`.
+
+### Changed
+
+- **Shared HTTP client for OAuth calls (#57, #65).** `AppState` now holds a
+  single `reqwest::Client`, replacing the per-callback `Client::builder()`.
+- **Badge / Button sanitize `href` (#59, #68).** Unsafe schemes
+  (`javascript:`, `data:`, protocol-relative `//host`) are dropped via a
+  shared `sanitizeHref()` helper; unsafe values fall back to rendering a
+  `<span>` / `<button>`.
+- **File input no longer binds `value` (#59, #68).** Browser-restricted file
+  input value is no longer two-way bound; selection still flows through
+  `bind:files`.
+
+### Documentation
+
+- **Auth overview corrected (#53, #63).** The docs no longer claim "first user
+  is automatically admin". The actual mechanism — the `ADMIN_EMAILS` env
+  allowlist — is now documented, with the empty/unset behavior spelled out.
+- **Configuration reference synced with code (#70).** Removed nonexistent
+  `*_REDIRECT_URI` env vars; added `ADMIN_EMAILS`, `DATABASE_URL`, `RUST_LOG`;
+  expanded `APP_SECRET` / `RUNGU_SECURE_COOKIE` / `RUNGU_CORS_ORIGINS` docs;
+  added a **Security** subsection.
+- **CLI examples consistent (#60, #69).** `project-add` / `project-list`
+  everywhere (was `project add` / `project list` in the README).
+  `cargo run -p rungud -- serve` for contributors.
+- **API reference path notation standardized (#70).** `:slug` → `{slug}`
+  to match Axum's route syntax.
+- **Roadmap updated (#61).** Added the `v0.1.2 Security patch` section and
+  expanded `v0.2.0 Polish` with concrete issue links.
+
+### Quality
+
+- `cora` pre-commit hook installed (`cora hook install`) — every commit in
+  this release ran through `cora review` locally.
+- 10 new tests: 6 OAuth-parser unit tests (`rungu-auth` + `rungu-api`),
+  4 API validation integration tests, 12 frontend `sanitizeHref` / date tests.
+- Quality gate at release time: 0 critical, 0 security, 0 performance findings
+  on the net diff (the scan that motivated this patch reported 2 critical / 10
+  security findings — all resolved or documented).
+
+### Minimal upgrade notes
+
+- **No migrations.** SQLite schema is unchanged.
+- **No breaking API changes.** All endpoints, request shapes, and response
+  shapes are backwards-compatible.
+- **Operators of self-hosted Keycloak realms:** confirm email verification is
+  enabled upstream, otherwise end users will now see `HTTP 403` on login. This
+  is the intended behavior of #55.
+- **Anyone with `RUNGU_SECURE_COOKIE=False` / `0` / `no` in their env:**
+  update to the lowercase form or the process will exit at startup. This is
+  the intended behavior of #57.
+
 ## [0.1.1] - 2026-06-16
 
 ### Fixed
