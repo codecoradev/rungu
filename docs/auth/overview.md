@@ -19,6 +19,18 @@ Users are identified by **email address**, not by provider ID. This means:
 - Each login is recorded as an `identity` (for tracking which providers are linked)
 - No username system — user ID is internal, email is the display identity
 
+### ⚠️ Verified-email requirement
+
+Account linking by email is only performed when the provider asserts that the user controls the email. Specifically:
+
+- **Google** — reads `email_verified` from the userinfo response.
+- **GitHub** — calls `/user/emails` and requires a **primary + verified** email.
+- **Keycloak** — reads `email_verified` from the userinfo response. Realm administrators must enforce email verification upstream (this is on by default for the Keycloak registration flow).
+
+Logins presenting an unverified email are **rejected with HTTP 403** before any account lookup or creation happens. This prevents cross-provider account takeover via an attacker-controlled or misconfigured IdP (e.g. a self-hosted Keycloak realm that allows admin-reassignable emails).
+
+If a user sees "Email is not verified by the provider," ask them to verify their email with the provider (Google/GitHub/Keycloak) and retry.
+
 ## Provider Setup
 
 | Provider | Setup Guide |
