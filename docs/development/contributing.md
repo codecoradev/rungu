@@ -21,7 +21,10 @@ cargo test
 cd web && npm install && npm run dev
 
 # Run full stack
-cargo run -- serve
+# (binary crate is `rungud`; the produced binary is named `rungu`)
+cargo run -p rungud -- serve
+# or, after a release build:
+# ./target/release/rungu serve
 ```
 
 ## Project Structure
