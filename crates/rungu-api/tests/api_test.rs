@@ -16,7 +16,7 @@ use tower::ServiceExt;
 async fn setup_app() -> (axum::Router, Store) {
     let pool = open_pool("sqlite::memory:").await.unwrap();
     run_migrations(&pool, "sqlite::memory:").await.unwrap();
-    let store = Store::new(pool);
+    let store = Store::new_with_kind(pool, true);
     // Seed a project
     store.create_project("Test App", "test-app", "A test project").await.unwrap();
 

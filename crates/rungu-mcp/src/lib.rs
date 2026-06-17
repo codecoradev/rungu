@@ -34,7 +34,7 @@ use sqlx::AnyPool;
 const MAX_INPUT_LEN: usize = 1_048_576;
 
 /// Process a single JSON-RPC message and return the response string.
-pub async fn handle_message(input: &str, pool: &AnyPool) -> String {
+pub async fn handle_message(input: &str, pool: &AnyPool, is_sqlite: bool) -> String {
     if input.len() > MAX_INPUT_LEN {
         return serde_json::to_string(&json!({
             "jsonrpc": "2.0",
@@ -60,7 +60,7 @@ pub async fn handle_message(input: &str, pool: &AnyPool) -> String {
     let method = msg.get("method").and_then(|m| m.as_str()).unwrap_or("");
     let params = msg.get("params").cloned().unwrap_or(json!({}));
 
-    let store = Store::new(pool.clone());
+    let store = Store::new_with_kind(pool.clone(), is_sqlite);
     let result = handle_request(method, &params, &store).await;
 
     match result {
@@ -375,7 +375,7 @@ async fn get_trending(params: &Value, store: &Store) -> Result<Value, String> {
 }
 
 /// Run the MCP server, reading JSON-RPC from stdin and writing to stdout.
-pub async fn run_server(pool: AnyPool) -> Result<()> {
+pub async fn run_server(pool: AnyPool, is_sqlite: bool) -> Result<()> {
     let stdin = std::io::stdin();
     let stdout = std::io::stdout();
     let mut stdout = stdout.lock();
@@ -409,7 +409,7 @@ pub async fn run_server(pool: AnyPool) -> Result<()> {
             continue;
         }
 
-        let response = handle_message(&line, &pool).await;
+        let response = handle_message(&line, &pool, is_sqlite).await;
         if let Err(e) = writeln!(stdout, "{}", response) {
             tracing::error!("Failed to write MCP response: {e}");
             break;
@@ -428,7 +428,7 @@ mod tests {
     async fn test_handle_message_invalid_json() {
         sqlx::any::install_default_drivers();
         let pool = sqlx::AnyPool::connect("sqlite::memory:").await.unwrap();
-        let response = handle_message("not json", &pool).await;
+        let response = handle_message("not json", &pool, true).await;
         let parsed: Value = serde_json::from_str(&response).unwrap();
         assert_eq!(parsed["error"]["code"], -32700);
     }
@@ -438,7 +438,7 @@ mod tests {
         sqlx::any::install_default_drivers();
         let pool = sqlx::AnyPool::connect("sqlite::memory:").await.unwrap();
         let input = r#"{"jsonrpc":"2.0","method":"nonexistent","id":1}"#;
-        let response = handle_message(input, &pool).await;
+        let response = handle_message(input, &pool, true).await;
         let parsed: Value = serde_json::from_str(&response).unwrap();
         assert_eq!(parsed["error"]["code"], -32603);
         assert!(parsed["error"]["message"].as_str().unwrap().contains("Unknown method"));
@@ -449,7 +449,7 @@ mod tests {
         sqlx::any::install_default_drivers();
         let pool = sqlx::AnyPool::connect("sqlite::memory:").await.unwrap();
         let huge = "x".repeat(MAX_INPUT_LEN + 1);
-        let response = handle_message(&huge, &pool).await;
+        let response = handle_message(&huge, &pool, true).await;
         let parsed: Value = serde_json::from_str(&response).unwrap();
         assert_eq!(parsed["error"]["code"], -32600);
     }

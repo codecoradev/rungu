@@ -17,8 +17,8 @@ use crate::config::Config;
 use crate::spa::spa_handler;
 
 /// Build the Axum router and start serving.
-pub async fn serve(config: Config, pool: sqlx::AnyPool, listen: &str) -> anyhow::Result<()> {
-    let store = rungu_core::Store::new(pool);
+pub async fn serve(config: Config, pool: sqlx::AnyPool, is_sqlite: bool, listen: &str) -> anyhow::Result<()> {
+    let store = rungu_core::Store::new_with_kind(pool, is_sqlite);
 
     // Single shared HTTP client for outbound calls (OAuth token exchange, userinfo).
     // Reusing the client avoids per-request connection-pool and TLS setup.
