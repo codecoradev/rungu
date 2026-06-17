@@ -13,6 +13,12 @@ docker run -d \
 
 ## Docker Compose
 
+> The Compose snippet below uses `http://localhost:3000` as the default
+> `APP_URL` for **local development only**. For any deployment that's reachable
+> beyond your own machine, set `APP_URL` to an `https://…` origin and keep
+> `RUNGU_SECURE_COOKIE=true` (the default). Plain-HTTP deployments with secure
+> cookies will silently fail to send the session cookie and break login.
+
 ```yaml
 services:
   rungu:
@@ -26,7 +32,7 @@ services:
     environment:
       - RUNGU_DB=/data/rungu.db
       - RUNGU_LISTEN=0.0.0.0:3000
-      - APP_URL=${APP_URL:-http://localhost:3000}
+      - APP_URL=${APP_URL:-http://localhost:3000}   # local-dev default; override with https://… for production
       - APP_SECRET=${APP_SECRET:?Set APP_SECRET}
 
       # Auth providers (empty = disabled)
@@ -77,7 +83,12 @@ networks:
 
 ```bash
 docker build -t rungu .
-docker run -d -p 3000:3000 rungu
+
+# APP_SECRET is required — the process exits without it. Generate a strong one:
+docker run -d \
+  -p 3000:3000 \
+  -e APP_SECRET="$(openssl rand -hex 32)" \
+  rungu
 ```
 
 ## Health Check

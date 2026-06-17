@@ -24,10 +24,12 @@ chmod +x rungu
 ```bash
 docker pull ghcr.io/codecoradev/rungu:latest
 
+# Generate a strong APP_SECRET — this signs JWT session tokens and MUST be unique
+# per deployment. Never reuse or commit a real secret.
 docker run -d \
   -p 3000:3000 \
   -v rungu-data:/data \
-  -e APP_SECRET=your-secret-here \
+  -e APP_SECRET="$(openssl rand -hex 32)" \
   -e GOOGLE_CLIENT_ID=xxx \
   -e GOOGLE_CLIENT_SECRET=xxx \
   ghcr.io/codecoradev/rungu:latest
