@@ -34,33 +34,33 @@ Cookie: session=<JWT token>
 |--------|------|------|-------------|
 | GET | `/projects` | No | List all projects |
 | POST | `/projects` | Admin | Create project |
-| GET | `/projects/:slug` | No | Project detail |
-| PATCH | `/projects/:slug` | Admin | Update project |
-| DELETE | `/projects/:slug` | Admin | Delete project |
+| GET | `/projects/{slug}` | No | Project detail |
+| PATCH | `/projects/{slug}` | Admin | Update project |
+| DELETE | `/projects/{slug}` | Admin | Delete project |
 
 ### Posts
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| GET | `/projects/:slug/posts` | No | List posts (sort, filter, search, paginate) |
-| POST | `/projects/:slug/posts` | Member | Create post |
-| GET | `/posts/:id` | No | Post detail + comments |
-| PATCH | `/posts/:id` | Admin | Update status/category |
-| DELETE | `/posts/:id` | Admin/Creator | Delete post |
+| GET | `/projects/{slug}/posts` | No | List posts (sort, filter, search, paginate) |
+| POST | `/projects/{slug}/posts` | Member | Create post |
+| GET | `/posts/{id}` | No | Post detail + comments |
+| PATCH | `/posts/{id}` | Admin | Update status/category |
+| DELETE | `/posts/{id}` | Admin/Creator | Delete post |
 
 ### Votes
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| POST | `/posts/:id/vote` | Member | Toggle vote |
+| POST | `/posts/{id}/vote` | Member | Toggle vote |
 
 ### Comments
 
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
-| GET | `/posts/:id/comments` | No | List comments (threaded) |
-| POST | `/posts/:id/comments` | Member | Add comment |
-| DELETE | `/comments/:id` | Admin/Creator | Delete comment |
+| GET | `/posts/{id}/comments` | No | List comments (threaded) |
+| POST | `/posts/{id}/comments` | Member | Add comment |
+| DELETE | `/comments/{id}` | Admin/Creator | Delete comment |
 
 ### Auth
 
@@ -68,8 +68,8 @@ Cookie: session=<JWT token>
 |--------|------|------|-------------|
 | GET | `/auth/providers` | No | List active OAuth providers |
 | GET | `/auth/me` | Member | Current user info |
-| GET | `/auth/:provider/login` | No | Start OAuth flow |
-| GET | `/auth/:provider/callback` | No | OAuth callback |
+| GET | `/auth/{provider}/login` | No | Start OAuth flow |
+| GET | `/auth/{provider}/callback` | No | OAuth callback |
 | GET | `/auth/logout` | No | Logout |
 
 ## Query Parameters (Posts)
