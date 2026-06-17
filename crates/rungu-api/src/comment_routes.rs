@@ -36,6 +36,11 @@ pub async fn list_comments(
     State(state): State<AppState>,
     Path(post_id): Path<String>,
 ) -> Result<impl IntoResponse, ApiError> {
+    // Verify the parent post exists — otherwise a request for a nonexistent post
+    // would return 200 with an empty list, indistinguishable from a valid post
+    // with no comments. Mirrors create_comment behavior.
+    let _post = state.store.get_post(&post_id, None).await?.ok_or_else(|| ApiError::not_found("Post not found"))?;
+
     let comments = state.store.list_comments(&post_id).await?;
     Ok(Json(serde_json::json!({ "data": comments })))
 }

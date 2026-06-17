@@ -382,3 +382,52 @@ async fn test_auth_providers_endpoint() {
     // No providers configured → empty array
     assert_eq!(json["providers"].as_array().unwrap().len(), 0);
 }
+
+#[tokio::test]
+async fn test_list_posts_invalid_status_returns_400() {
+    let (app, _store) = setup_app().await;
+    let response = app
+        .oneshot(Request::builder().uri("/projects/test-app/posts?status=opennnn").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    // Unknown status filter must be rejected, not silently dropped.
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn test_list_posts_invalid_category_returns_400() {
+    let (app, _store) = setup_app().await;
+    let response = app
+        .oneshot(
+            Request::builder().uri("/projects/test-app/posts?category=notarealcategory").body(Body::empty()).unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn test_list_posts_empty_result_total_pages_is_at_least_1() {
+    let (app, _store) = setup_app().await;
+    let response =
+        app.oneshot(Request::builder().uri("/projects/test-app/posts").body(Body::empty()).unwrap()).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    // Empty result must still report a logically-consistent page count (>=1),
+    // not 0, to match a 1-based pagination contract.
+    assert_eq!(json["pagination"]["total"], 0);
+    let total_pages = json["pagination"]["total_pages"].as_i64().unwrap();
+    assert!(total_pages >= 1, "total_pages should be at least 1 for empty results, got {total_pages}");
+}
+
+#[tokio::test]
+async fn test_list_comments_nonexistent_post_returns_404() {
+    let (app, _store) = setup_app().await;
+    let response = app
+        .oneshot(Request::builder().uri("/posts/nonexistent-id/comments").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    // Listing comments for a nonexistent post must 404, not 200 with empty list.
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+}
