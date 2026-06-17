@@ -104,8 +104,8 @@ export const api = {
         if (params?.status) query.set('status', params.status);
         if (params?.category) query.set('category', params.category);
         if (params?.q) query.set('q', params.q);
-        if (params?.page) query.set('page', String(params.page));
-        if (params?.per_page) query.set('per_page', String(params.per_page));
+        if (params?.page !== undefined) query.set('page', String(params.page));
+        if (params?.per_page !== undefined) query.set('per_page', String(params.per_page));
         const qs = query.toString();
         return request<PaginatedResponse<PostDetail>>(
             `/api/projects/${slug}/posts${qs ? `?${qs}` : ''}`,

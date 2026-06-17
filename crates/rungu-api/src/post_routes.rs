@@ -65,11 +65,23 @@ pub async fn list_posts(
     let per_page = query.per_page.unwrap_or(20).clamp(1, 100);
     let offset = (page - 1) * per_page;
 
+    // Validate filter values explicitly rather than silently dropping unknown
+    // values — otherwise a typo like `?status=opennnn` returns 200 with unfiltered
+    // results and hides client bugs. Mirrors update_post_status behavior.
+    let status = match query.status.as_deref() {
+        Some(s) => Some(parse_status(s).ok_or_else(|| ApiError::bad_request("Invalid status filter"))?),
+        None => None,
+    };
+    let category = match query.category.as_deref() {
+        Some(c) => Some(parse_category(c).ok_or_else(|| ApiError::bad_request("Invalid category filter"))?),
+        None => None,
+    };
+
     let params = rungu_proto::ListPostsParams {
         project_id: &project.id,
         sort: parse_sort(query.sort.as_deref()),
-        status: query.status.as_deref().and_then(parse_status),
-        category: query.category.as_deref().and_then(parse_category),
+        status,
+        category,
         query: query.q.as_deref(),
         offset,
         limit: per_page,
@@ -83,7 +95,7 @@ pub async fn list_posts(
             "page": page,
             "per_page": per_page,
             "total": total,
-            "total_pages": (total as f64 / per_page as f64).ceil() as i64,
+            "total_pages": ((total as f64 / per_page as f64).ceil() as i64).max(1),
         }
     })))
 }
