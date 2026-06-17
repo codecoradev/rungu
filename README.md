@@ -71,11 +71,13 @@ KEYCLOAK_CLIENT_SECRET=your-keycloak-secret
 
 ```bash
 rungu serve --db rungu.db --listen 0.0.0.0:3000
-rungu project-add --name "My App" --slug "myapp"
+rungu project-add "My App" --slug myapp
 rungu project-list
 rungu healthcheck
 rungu mcp
 ```
+
+See [CLI Reference](https://rungu.pages.dev/cli-reference) for full options.
 
 ## MCP Tools
 
