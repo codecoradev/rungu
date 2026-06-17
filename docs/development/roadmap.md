@@ -21,10 +21,24 @@
 - [x] Cloudflare Pages project rename
 - [x] AGENTS.md translated to English
 
+## v0.1.2 Security patch
+
+Critical/high-severity findings from `cora scan` v0.6.0 (2026-06-17). Ships as patch bump from 0.1.1 before v0.2.0 feature work.
+
+- [ ] 🔴 [#54](https://github.com/codecoradev/rungu/issues/54) — MCP server documented as unauthenticated with direct DB access (auth bypass)
+- [ ] 🔴 [#55](https://github.com/codecoradev/rungu/issues/55) — Email-only account linking enables cross-provider account takeover
+- [ ] 🟠 [#57](https://github.com/codecoradev/rungu/issues/57) — OAuth flow: redirect lost, provider errors leaked, HTTP client rebuilt per request, weak cookie parse
+- [ ] [#53](https://github.com/codecoradev/rungu/issues/53) — Docs: correct misleading "first user becomes admin" (actual: `ADMIN_EMAILS` allowlist)
+
+Validation artifact: `.cora/scan-validation-2026-06-17.md`
+
 ## v0.2.0 Polish
 
 - [ ] MCP server — implement 12 tools with real data ([#28](https://github.com/codecoradev/rungu/issues/28))
-- [ ] Robustness fixes from cora scan ([#33](https://github.com/codecoradev/rungu/issues/33))
+- [ ] [#56](https://github.com/codecoradev/rungu/issues/56) — API: silent filter drops, missing post-existence check, pagination edge cases
+- [ ] [#58](https://github.com/codecoradev/rungu/issues/58) — Frontend state: `$effect` duplicate fetches, stale admin check, orphaned comment replies
+- [ ] [#59](https://github.com/codecoradev/rungu/issues/59) — Frontend components: unsafe date handling, file-input bind, unvalidated `href`, missing creator fallback
+- [ ] [#60](https://github.com/codecoradev/rungu/issues/60) — Docs: CLI command-name inconsistencies, weak `APP_SECRET` placeholder, HTTP-default `APP_URL`, missing secret in Docker run
 - [ ] Full-text search with SQLite FTS5
 - [ ] Roadmap view (public status board)
 - [ ] Changelog auto-generation (from done posts)
