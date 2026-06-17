@@ -48,10 +48,19 @@ KEYCLOAK_CLIENT_SECRET=xxx
 
 | Role | Description |
 |------|-------------|
-| `member` | Can submit posts, vote, and comment |
-| `admin` | Can also change post status, delete posts, manage projects |
+| `member` | Default role — can submit posts, vote, and comment |
+| `admin` | Granted via the `ADMIN_EMAILS` env var — can also change post status, delete posts, and manage projects |
 
-First user is automatically `admin`. New users default to `member`.
+Admins are configured explicitly via the `ADMIN_EMAILS` environment variable (comma-separated email allowlist). There is **no implicit admin grant** — the first user to sign up does **not** become admin, and there is no self-serve privilege escalation path.
+
+New users default to `member`. Existing users who later appear in `ADMIN_EMAILS` are auto-promoted on their next login.
+
+```env
+# Grant admin to specific email addresses
+ADMIN_EMAILS=owner@example.com,teammate@example.com
+```
+
+If `ADMIN_EMAILS` is unset or empty, **no users are admin** (the instance is effectively read-only for status/project management until an admin is configured).
 
 ## API: Check Auth Status
 
