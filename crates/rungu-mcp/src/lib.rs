@@ -83,8 +83,10 @@ async fn handle_request(method: &str, params: &Value, store: &Store) -> Result<V
         "get_changelog" => get_changelog(params, store).await,
         "list_comments" => list_comments(params, store).await,
         "add_comment" => add_comment(params, store).await,
+        "delete_comment" => delete_comment(params, store).await,
         "get_stats" => get_stats(params, store).await,
         "get_trending" => get_trending(params, store).await,
+        "list_attachments" => list_attachments(params, store).await,
         _ => Err(format!("Unknown method: {method}")),
     }
 }
@@ -461,6 +463,21 @@ pub async fn run_server(pool: AnyPool, is_sqlite: bool) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Delete a comment by ID.
+async fn delete_comment(params: &Value, store: &Store) -> Result<Value, String> {
+    let comment_id = get_str(params, "comment_id")?;
+    store.delete_comment(comment_id).await.map_err(|e| e.to_string())?;
+    Ok(json!({ "deleted": true, "comment_id": comment_id }))
+}
+
+/// List attachments for a post.
+async fn list_attachments(params: &Value, store: &Store) -> Result<Value, String> {
+    let post_id = get_str(params, "post_id")?;
+    let attachments = store.list_attachments(post_id).await.map_err(|e| e.to_string())?;
+    let total = attachments.len();
+    Ok(json!({ "attachments": attachments, "total": total }))
 }
 
 #[cfg(test)]

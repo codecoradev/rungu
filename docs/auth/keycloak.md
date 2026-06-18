@@ -32,4 +32,4 @@ KEYCLOAK_CLIENT_SECRET=your-keycloak-secret
 
 Default: `{KEYCLOAK_URL}/realms/{KEYCLOAK_REALM}` → callback at `{APP_URL}/auth/keycloak/callback`
 
-You can override with `KEYCLOAK_REDIRECT_URI` env var.
+There is no `KEYCLOAK_REDIRECT_URI` override — the redirect URI is always derived from `APP_URL`.

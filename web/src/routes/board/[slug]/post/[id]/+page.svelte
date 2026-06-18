@@ -223,7 +223,7 @@
     </Card.Root>
 
     <section class="mt-4">
-        <AttachmentGallery postId={post.id} canEdit={!!currentUser && (currentUser.id === post.created_by || currentUser.role === 'admin')} />
+        <AttachmentGallery postId={post.id} canEdit={!!user && (user.id === post.created_by || user.role === 'admin')} />
     </section>
 
     <section class="mt-6">

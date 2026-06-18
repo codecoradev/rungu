@@ -46,15 +46,15 @@ Feature polish for the feedback board. Issues are grouped by area; click through
 
 ### 🔎 Search & discovery
 
-- [ ] [#72](https://github.com/codecoradev/rungu/issues/72) — Complete FTS5 search (index + triggers exist, query path missing)
-- [ ] [#75](https://github.com/codecoradev/rungu/issues/75) — Public roadmap view (status board)
-- [ ] [#77](https://github.com/codecoradev/rungu/issues/77) — Auto-generated changelog from done posts
+- [x] [#72](https://github.com/codecoradev/rungu/issues/72) — Complete FTS5 search (index + triggers exist, query path missing)
+- [x] [#75](https://github.com/codecoradev/rungu/issues/75) — Public roadmap view (status board)
+- [x] [#77](https://github.com/codecoradev/rungu/issues/77) — Auto-generated changelog from done posts
 
 ### 💬 Engagement
 
 - [ ] [#73](https://github.com/codecoradev/rungu/issues/73) — Email notifications (new comments, status changes) — **largest item, consider splitting across PRs**
-- [ ] [#74](https://github.com/codecoradev/rungu/issues/74) — Image attachments on posts
-- [ ] [#76](https://github.com/codecoradev/rungu/issues/76) — Keyboard shortcuts (board navigation, help overlay) — **good standalone starter**
+- [x] [#74](https://github.com/codecoradev/rungu/issues/74) — Image attachments on posts
+- [x] [#76](https://github.com/codecoradev/rungu/issues/76) — Keyboard shortcuts (board navigation, help overlay) — **good standalone starter**
 
 ### Suggested PR order
 

@@ -9,11 +9,15 @@ Lightweight, self-hosted feedback board. Collect feature requests, bug reports, 
 - **Multi-provider auth** — Google, GitHub, Keycloak (ENV-driven, mix-and-match)
 - **Email-based identity** — same email across providers = one user
 - **Vote & comment** — upvote the features you want
+- **Image attachments** — screenshots and mockups on posts (PNG/JPEG/WebP/GIF, max 10MB)
 - **Categories & status** — feedback, bug, feature, question → open, planned, in progress, done
-- **MCP server** — AI agent tools for Claude Code, Cursor, Windsurf (experimental — tools are stubs, full implementation planned post-MVP)
-- **REST API** — full CRUD for posts, votes, comments
+- **Full-text search** — FTS5-powered search across all posts
+- **Dark mode** — light/dark/system theme toggle
+- **Keyboard shortcuts** — full board navigation without a mouse
+- **MCP server** — 15 AI agent tools for Claude Code, Cursor, Windsurf
+- **REST API** — full CRUD for posts, votes, comments, attachments
+- **Dual database** — SQLite (default) or PostgreSQL via `DATABASE_URL`
 - **Single binary** — embedded SPA, Docker ready
-- **SQLite** — zero external database dependency
 
 ## Quick Start
 

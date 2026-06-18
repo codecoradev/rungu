@@ -26,4 +26,4 @@ GITHUB_CLIENT_SECRET=your-github-secret
 
 Default: `{APP_URL}/auth/github/callback`
 
-You can override with `GITHUB_REDIRECT_URI` env var.
+There is no `GITHUB_REDIRECT_URI` override — the redirect URI is always derived from `APP_URL`.

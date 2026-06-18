@@ -62,6 +62,15 @@ Cookie: session=<JWT token>
 | POST | `/posts/{id}/comments` | Member | Add comment |
 | DELETE | `/comments/{id}` | Admin/Creator | Delete comment |
 
+### Attachments
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/posts/{id}/attachments` | No | List attachments for a post |
+| POST | `/posts/{id}/attachments` | Author/Admin | Upload image (multipart, max 10MB) |
+| GET | `/attachments/{id}` | No | Serve/download an image |
+| DELETE | `/attachments/{id}` | Author/Admin | Delete an attachment |
+
 ### Auth
 
 | Method | Path | Auth | Description |

@@ -125,7 +125,7 @@ pub async fn upload_attachment(
             created_at: attachment.created_at,
         };
 
-        return Ok((StatusCode::CREATED, Json(response)));
+        return Ok((StatusCode::CREATED, Json(serde_json::json!({ "data": response }))));
     }
 
     Err(ApiError::bad_request("No file field in multipart data"))
@@ -145,6 +145,14 @@ pub async fn list_attachments(
     State(state): State<AppState>,
     Path(post_id): Path<String>,
 ) -> Result<impl IntoResponse, ApiError> {
+    // Verify post exists
+    let _ = state
+        .store
+        .get_post(&post_id, None)
+        .await
+        .map_err(|_| ApiError::internal_default())?
+        .ok_or_else(|| ApiError::not_found("Post not found"))?;
+
     let attachments = state.store.list_attachments(&post_id).await.map_err(|_| ApiError::internal_default())?;
 
     let data: Vec<AttachmentResponse> = attachments

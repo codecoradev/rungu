@@ -107,3 +107,16 @@ See [`.env.example`](https://github.com/codecoradev/rungu/blob/develop/.env.exam
 - **`APP_SECRET` is required and must be unique.** It signs JWT session tokens — never reuse across deployments, never commit a real value.
 
 See [Auth Overview](/auth/overview) for the full identity model.
+
+## File Storage (Attachments)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `STORAGE_DRIVER` | `fs` | Storage backend: `fs` (filesystem) or `s3` (S3-compatible, planned) |
+| `RUNGU_STORAGE_DIR` | `./uploads` | Directory for uploaded files (filesystem driver only) |
+
+**Docker:** Set `RUNGU_STORAGE_DIR=/data/uploads` to use the persisted volume.
+
+**S3-compatible (MinIO, R2, AWS S3):** The `s3` driver is accepted but not yet implemented. It will be available in v0.3.
+
+See [Attachments](/features/attachments) for format support and security details.

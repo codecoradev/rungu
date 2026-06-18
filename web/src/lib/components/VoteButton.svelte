@@ -22,14 +22,27 @@
 
     async function toggle() {
         if (disabled || loading) return;
+
+        // Optimistic update — revert on failure
+        const prevVoted = voted;
+        const prevCount = count;
+        voted = !voted;
+        count = voted ? count + 1 : count - 1;
+        onvote?.(voted, count);
+
         loading = true;
         error = '';
         try {
             const result = await api.toggleVote(postId);
+            // Reconcile with server response
             voted = result.voted;
             count = result.vote_count;
             onvote?.(result.voted, result.vote_count);
         } catch (e) {
+            // Revert optimistic update
+            voted = prevVoted;
+            count = prevCount;
+            onvote?.(prevVoted, prevCount);
             error = e instanceof ApiError && e.status === 401 ? 'Login to vote' : 'Failed to vote';
         } finally {
             loading = false;
@@ -42,9 +55,12 @@
     size="sm"
     {disabled}
     onclick={toggle}
-    class={cn('gap-1.5', loading && 'opacity-50')}
+    class={cn('gap-1.5 transition-opacity', loading && 'opacity-50')}
     title={error || undefined}
 >
+    {#if error}
+        <span class="text-destructive text-xs">{error}</span>
+    {/if}
     <svg
         class="size-4"
         xmlns="http://www.w3.org/2000/svg"

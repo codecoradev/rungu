@@ -1,5 +1,30 @@
 # Changelog
 
+## [Unreleased] - v0.2.0 Polish
+
+### Added
+
+- **Image attachments** (#74) — Upload PNG/JPEG/WebP/GIF images to posts. Magic byte verification, 10 MB max, filesystem storage with S3-ready trait. API: `POST/GET /api/posts/{id}/attachments`, `GET/DELETE /api/attachments/{id}`.
+- **Full-text search** (#41) — FTS5 virtual table with auto-sync triggers (SQLite). Case-insensitive search across both databases.
+- **Dark mode toggle** (#42) — Three-mode theme cycler (light/dark/system) with localStorage persistence.
+- **PostgreSQL support** (#40) — Dual-driver via `sqlx::AnyPool`. `DATABASE_URL` env var selects SQLite or PostgreSQL.
+- **Keyboard shortcuts** (#76) — Full keyboard navigation on boards and post detail. `?` for help overlay.
+- **Roadmap & Changelog pages** — Kanban-style roadmap view and paginated changelog timeline.
+- **MCP tools** — Added `list_attachments`, `delete_comment` tools.
+
+### Fixed
+
+- Search/filter changes now trigger API refetch with 300ms debounce.
+- Comment threading supports unlimited reply nesting (recursive snippet rendering).
+- `AttachmentGallery` `canEdit` prop now correctly checks `user` instead of undefined `currentUser`.
+- `StatusBadge` uses `statusColor()` utility for visual differentiation.
+- `ThemeToggle` reads initial value from localStorage.
+- Landing page shows error state instead of silent "No projects".
+- `AuthProviderButtons` distinguishes network error from "no providers configured".
+- `VoteButton` optimistic update with revert on failure.
+- Upload attachment response wrapped in `{ data: ... }` for consistency.
+- `list_attachments` now verifies post existence before listing.
+
 ## [0.1.2] - 2026-06-17
 
 Security and correctness patch. Addresses the critical/high findings from the

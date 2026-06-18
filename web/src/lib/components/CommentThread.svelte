@@ -5,18 +5,17 @@
 
     let {
         comments,
-        postId,
         currentUserId,
         onreply,
         ondelete,
     }: {
         comments: Comment[];
-        postId: string;
         currentUserId?: string;
         onreply?: (parentId: string) => void;
         ondelete?: (id: string) => void;
     } = $props();
 
+    // Build parent → children map
     const threads = $derived(buildThreads(comments));
 
     function buildThreads(items: Comment[]): Map<string, Comment[]> {
@@ -32,20 +31,36 @@
     function getReplies(parentId: string | null): Comment[] {
         return threads.get(parentId ?? 'root') ?? [];
     }
+
+    function avatarChar(c: Comment): string {
+        return (c.creator?.name || c.creator?.email || c.created_by)[0]?.toUpperCase() ?? '?';
+    }
+
+    function displayName(c: Comment): string {
+        return c.creator?.name || c.creator?.email || 'User';
+    }
 </script>
 
-<div class="space-y-4">
-    {#each getReplies(null) as comment (comment.id)}
-        {@const replies = getReplies(comment.id)}
-        <div class="rounded-lg border border-border bg-card p-4">
+{#snippet replyTree(parentId: string | null, depth: number)}
+    {@const replies = getReplies(parentId)}
+    {#each replies as comment (comment.id)}
+        <div
+            class={depth === 0
+                ? 'rounded-lg border border-border bg-card p-4'
+                : 'rounded-lg bg-muted p-3'}
+        >
             <div class="flex items-center gap-2 text-sm">
-                <div class="flex size-8 items-center justify-center rounded-full bg-muted text-xs font-medium text-muted-foreground">
-                    {(comment.creator?.name || comment.creator?.email || comment.created_by)[0]?.toUpperCase()}
+                <div
+                    class={depth === 0
+                        ? 'flex size-8 items-center justify-center rounded-full bg-muted text-xs font-medium text-muted-foreground'
+                        : 'flex size-6 items-center justify-center rounded-full bg-background text-xs font-medium text-muted-foreground'}
+                >
+                    {avatarChar(comment)}
                 </div>
-                <span class="font-medium">{comment.creator?.name || comment.creator?.email || 'User'}</span>
+                <span class="font-medium">{displayName(comment)}</span>
                 <span class="text-muted-foreground">· {timeAgo(comment.created_at)}</span>
             </div>
-            <p class="mt-2 whitespace-pre-wrap text-sm text-muted-foreground">{comment.content}</p>
+            <p class="mt-1.5 whitespace-pre-wrap text-sm text-muted-foreground">{comment.content}</p>
             <div class="mt-2 flex gap-2">
                 {#if onreply}
                     <Button variant="ghost" size="xs" onclick={() => onreply(comment.id)}>
@@ -59,29 +74,17 @@
                 {/if}
             </div>
 
-            {#if replies.length > 0}
-                <div class="mt-4 ml-10 space-y-3 border-l-2 border-border pl-4">
-                    {#each replies as reply (reply.id)}
-                        <div class="rounded-lg bg-muted p-3">
-                            <div class="flex items-center gap-2 text-sm">
-                                <div class="flex size-6 items-center justify-center rounded-full bg-background text-xs font-medium text-muted-foreground">
-                                    {(reply.creator?.name || reply.creator?.email || reply.created_by)[0]?.toUpperCase()}
-                                </div>
-                                <span class="font-medium">{reply.creator?.name || reply.creator?.email || 'User'}</span>
-                                <span class="text-muted-foreground">· {timeAgo(reply.created_at)}</span>
-                            </div>
-                            <p class="mt-1.5 whitespace-pre-wrap text-sm text-muted-foreground">{reply.content}</p>
-                            {#if ondelete && reply.created_by === currentUserId}
-                                <Button variant="ghost" size="xs" class="mt-1 text-destructive" onclick={() => ondelete(reply.id)}>
-                                    Delete
-                                </Button>
-                            {/if}
-                        </div>
-                    {/each}
+            {#if getReplies(comment.id).length > 0}
+                <div class="mt-3 ml-10 space-y-3 border-l-2 border-border pl-4">
+                    {@render replyTree(comment.id, depth + 1)}
                 </div>
             {/if}
         </div>
     {/each}
+{/snippet}
+
+<div class="space-y-4">
+    {@render replyTree(null, 0)}
 </div>
 
 {#if comments.length === 0}
