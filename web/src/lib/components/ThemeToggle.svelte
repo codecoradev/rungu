@@ -1,15 +1,18 @@
 <script lang="ts">
     import { Button } from '$lib/components/ui/button';
+    import { browser } from '$app/environment';
 
     let {
         theme = $bindable(
-            (() => {
-                try {
-                    const saved = localStorage.getItem('rungu-theme');
-                    if (saved === 'light' || saved === 'dark' || saved === 'system') return saved;
-                } catch {}
-                return 'system' as const;
-            })()
+            browser
+                ? (() => {
+                      try {
+                          const saved = localStorage.getItem('rungu-theme');
+                          if (saved === 'light' || saved === 'dark' || saved === 'system') return saved;
+                      } catch {}
+                      return 'system' as const;
+                  })()
+                : 'system'
         ),
     }: { theme?: 'light' | 'dark' | 'system' } = $props();
 
