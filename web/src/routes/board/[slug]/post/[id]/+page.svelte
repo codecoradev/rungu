@@ -6,6 +6,7 @@
     import CategoryBadge from '$lib/components/CategoryBadge.svelte';
     import VoteButton from '$lib/components/VoteButton.svelte';
     import CommentThread from '$lib/components/CommentThread.svelte';
+    import AttachmentGallery from '$lib/components/AttachmentGallery.svelte';
     import { Button } from '$lib/components/ui/button';
     import { Textarea } from '$lib/components/ui/textarea';
     import * as Card from '$lib/components/ui/card';
@@ -220,6 +221,10 @@
             </Card.Content>
         {/if}
     </Card.Root>
+
+    <section class="mt-4">
+        <AttachmentGallery postId={post.id} canEdit={!!currentUser && (currentUser.id === post.created_by || currentUser.role === 'admin')} />
+    </section>
 
     <section class="mt-6">
         <h2 class="mb-4 text-sm font-semibold">Comments ({comments.length})</h2>

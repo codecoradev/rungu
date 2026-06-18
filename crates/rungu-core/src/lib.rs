@@ -6,8 +6,10 @@
 use anyhow::{Context, Result};
 use sqlx::AnyPool;
 
+pub mod storage;
 pub mod store;
 
+pub use storage::{ALLOWED_MIME_TYPES, FsStorage, MAX_UPLOAD_SIZE, Storage, create_storage, storage_key, verify_image};
 pub use store::Store;
 
 /// Open a database connection pool.
