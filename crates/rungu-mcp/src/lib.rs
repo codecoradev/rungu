@@ -475,6 +475,12 @@ async fn delete_comment(params: &Value, store: &Store) -> Result<Value, String> 
 /// List attachments for a post.
 async fn list_attachments(params: &Value, store: &Store) -> Result<Value, String> {
     let post_id = get_str(params, "post_id")?;
+    // Verify post exists (consistent with REST API behavior)
+    store
+        .get_post(post_id, None)
+        .await
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("Post not found: {post_id}"))?;
     let attachments = store.list_attachments(post_id).await.map_err(|e| e.to_string())?;
     let total = attachments.len();
     Ok(json!({ "attachments": attachments, "total": total }))

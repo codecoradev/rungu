@@ -194,6 +194,11 @@
         searchTimer = setTimeout(() => {
             loadBoard();
         }, sq ? 300 : 0);
+
+        // Cleanup on re-run or unmount
+        return () => {
+            if (searchTimer) clearTimeout(searchTimer);
+        };
     });
 </script>
 

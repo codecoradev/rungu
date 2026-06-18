@@ -2,16 +2,19 @@
     import { Button } from '$lib/components/ui/button';
 
     let {
-        theme = $bindable(
-            (() => {
-                try {
-                    const saved = localStorage.getItem('rungu-theme');
-                    if (saved === 'light' || saved === 'dark' || saved === 'system') return saved;
-                } catch {}
-                return 'system' as const;
-            })()
-        ),
+        theme = $bindable('system'),
     }: { theme?: 'light' | 'dark' | 'system' } = $props();
+
+    // Read saved theme on mount (not during SSR)
+    import { onMount } from 'svelte';
+    onMount(() => {
+        try {
+            const saved = localStorage.getItem('rungu-theme');
+            if (saved === 'light' || saved === 'dark' || saved === 'system') {
+                theme = saved;
+            }
+        } catch {}
+    });
 
     function cycle() {
         const order: Array<'light' | 'dark' | 'system'> = ['light', 'dark', 'system'];
