@@ -356,3 +356,30 @@ pub struct VoteToggleResponse {
 pub struct VoteStatusResponse {
     pub voted: bool,
 }
+
+// ── Attachments ───────────────────────────────────────────────────────
+
+/// Attachment metadata stored in DB.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
+pub struct Attachment {
+    pub id: String,
+    pub post_id: String,
+    pub filename: String,
+    pub mime: String,
+    pub size: i64,
+    pub created_by: String,
+    pub created_at: String,
+}
+
+/// Response returned after upload or when listing attachments.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
+pub struct AttachmentResponse {
+    pub id: String,
+    pub post_id: String,
+    pub filename: String,
+    pub mime: String,
+    pub size: i64,
+    pub url: String,
+    pub created_by: String,
+    pub created_at: String,
+}

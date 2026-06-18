@@ -44,6 +44,10 @@ impl ApiError {
         Self { status: StatusCode::INTERNAL_SERVER_ERROR, message: msg.into() }
     }
 
+    pub fn payload_too_large(msg: impl Into<String>) -> Self {
+        Self { status: StatusCode::PAYLOAD_TOO_LARGE, message: msg.into() }
+    }
+
     /// Check if the current user is the owner of a resource or an admin.
     /// Returns 403 Forbidden if neither.
     pub fn check_owner_or_admin(user: &CurrentUser, owner_id: &str, msg: &str) -> Result<(), Self> {
@@ -76,5 +80,25 @@ impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let body = Json(serde_json::json!({ "error": self.message }));
         (self.status, body).into_response()
+    }
+}
+
+// ── Convenience constructors (no arguments) ──────────────────────────
+
+impl ApiError {
+    pub fn not_found_default() -> Self {
+        Self::not_found("Resource not found")
+    }
+
+    pub fn forbidden_default() -> Self {
+        Self::forbidden("Access denied")
+    }
+
+    pub fn internal_default() -> Self {
+        Self::internal("Internal server error")
+    }
+
+    pub fn payload_too_large_default() -> Self {
+        Self::payload_too_large("File too large")
     }
 }

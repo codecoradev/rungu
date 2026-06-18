@@ -2,6 +2,7 @@
 //!
 //! REST API routes — Axum handlers for projects, posts, votes, comments, auth.
 
+pub mod attachment_routes;
 pub mod auth_routes;
 pub mod comment_routes;
 pub mod error;
@@ -26,6 +27,8 @@ pub struct AppState {
     /// expensive to rebuild per request. Constructed once at startup and shared
     /// across all handlers that need outbound HTTP.
     pub http_client: reqwest::Client,
+    /// Storage backend for file attachments.
+    pub storage: std::sync::Arc<dyn rungu_core::Storage>,
 }
 
 impl FromRef<AppState> for rungu_auth::AuthConfig {
@@ -47,4 +50,5 @@ pub fn api_routes() -> Router<AppState> {
         .merge(post_routes::router())
         .merge(vote_routes::router())
         .merge(comment_routes::router())
+        .merge(attachment_routes::router())
 }

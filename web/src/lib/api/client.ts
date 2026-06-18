@@ -14,6 +14,8 @@ import type {
     RoadmapResponse,
     VoteResponse,
     ProviderInfo,
+    Attachment,
+    AttachmentListResponse,
 } from './types';
 
 const BASE = '';
@@ -173,6 +175,28 @@ export const api = {
 
     deleteComment: (id: string) =>
         request<void>(`/api/comments/${id}`, { method: 'DELETE' }),
+
+    // Attachments
+    listAttachments: (postId: string) =>
+        request<AttachmentListResponse>(`/api/posts/${postId}/attachments`).then((r) => r.data),
+
+    uploadAttachment: async (postId: string, file: File) => {
+        const formData = new FormData();
+        formData.append('file', file);
+        const res = await fetch(`/api/posts/${postId}/attachments`, {
+            method: 'POST',
+            body: formData,
+            credentials: 'include',
+        });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({ error: 'Upload failed' }));
+            throw new ApiError(err.error || 'Upload failed', res.status);
+        }
+        return res.json() as Promise<Attachment>;
+    },
+
+    deleteAttachment: (id: string) =>
+        request<void>(`/api/attachments/${id}`, { method: 'DELETE' }),
 };
 
 export { ApiError };

@@ -112,3 +112,20 @@ export interface RoadmapResponse {
     done_total: number;
     limit: number;
 }
+
+// ── Attachments ───────────────────────────────────────────────────────
+
+export interface Attachment {
+    id: string;
+    post_id: string;
+    filename: string;
+    mime: string;
+    size: number;
+    url: string;
+    created_by: string;
+    created_at: string;
+}
+
+export interface AttachmentListResponse {
+    data: Attachment[];
+}

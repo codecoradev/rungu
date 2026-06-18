@@ -96,3 +96,16 @@ CREATE TRIGGER IF NOT EXISTS posts_au AFTER UPDATE ON posts BEGIN
     INSERT INTO posts_fts(rowid, title, description)
     VALUES (new.rowid, new.title, new.description);
 END;
+
+-- Post attachments (images)
+CREATE TABLE IF NOT EXISTS post_attachments (
+    id           TEXT PRIMARY KEY,
+    post_id      TEXT NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+    filename     TEXT NOT NULL,
+    mime         TEXT NOT NULL,
+    size         INTEGER NOT NULL,
+    storage_path TEXT NOT NULL,
+    created_by   TEXT NOT NULL REFERENCES users(id),
+    created_at   TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_attachments_post ON post_attachments(post_id);

@@ -70,3 +70,16 @@ CREATE TABLE IF NOT EXISTS comments (
     created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 CREATE INDEX IF NOT EXISTS idx_comments_post ON comments(post_id, created_at);
+
+-- Post attachments (images)
+CREATE TABLE IF NOT EXISTS post_attachments (
+    id           TEXT PRIMARY KEY,
+    post_id      TEXT NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+    filename     TEXT NOT NULL,
+    mime         TEXT NOT NULL,
+    size         BIGINT NOT NULL,
+    storage_path TEXT NOT NULL,
+    created_by   TEXT NOT NULL REFERENCES users(id),
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_attachments_post ON post_attachments(post_id);

@@ -27,7 +27,12 @@ pub async fn serve(config: Config, pool: sqlx::AnyPool, is_sqlite: bool, listen:
         .build()
         .map_err(|e| anyhow::anyhow!("Failed to build HTTP client: {e}"))?;
 
-    let state = AppState { store, config: config.auth.clone(), http_client };
+    let state = AppState {
+        store,
+        config: config.auth.clone(),
+        http_client,
+        storage: std::sync::Arc::from(rungu_core::create_storage()?),
+    };
 
     // CORS — secure by default.
     // If RUNGU_CORS_ORIGINS is empty, only allow the APP_URL origin.
