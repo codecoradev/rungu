@@ -52,8 +52,10 @@ Add to your MCP configuration:
 | `search_posts` | Full-text search across posts |
 | `list_comments` | Get comments for a post |
 | `add_comment` | Add comment to a post |
+| `delete_comment` | Delete a comment by ID |
 | `get_stats` | Project stats (total posts, by status, by category) |
 | `get_trending` | Top voted posts in last 7 days |
+| `list_attachments` | List image attachments for a post |
 
 ## Example Usage
 

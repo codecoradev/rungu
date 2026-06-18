@@ -26,4 +26,4 @@ GOOGLE_CLIENT_SECRET=GOCSPX-xxxx
 
 Default: `{APP_URL}/auth/google/callback`
 
-You can override with `GOOGLE_REDIRECT_URI` env var.
+There is no `GOOGLE_REDIRECT_URI` override — the redirect URI is always derived from `APP_URL`.

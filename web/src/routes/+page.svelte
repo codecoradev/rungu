@@ -3,14 +3,16 @@
     import { api } from '$lib/api/client';
     import type { Project } from '$lib/api/types';
     import * as Card from '$lib/components/ui/card';
+    import { Button } from '$lib/components/ui/button';
 
     let projects = $state<Project[]>([]);
+    let loadError = $state('');
 
     onMount(async () => {
         try {
             projects = await api.listProjects();
-        } catch {
-            projects = [];
+        } catch (e) {
+            loadError = (e as Error).message || 'Failed to load boards';
         }
     });
 </script>
@@ -30,7 +32,12 @@
 <div class="py-6">
     <h2 class="mb-4 text-lg font-semibold">Boards</h2>
 
-    {#if projects.length === 0}
+    {#if loadError}
+        <div class="rounded-xl border border-destructive/50 bg-destructive/10 py-12 text-center">
+            <p class="text-destructive">{loadError}</p>
+            <Button variant="outline" size="sm" class="mt-3" onclick={() => location.reload()}>Retry</Button>
+        </div>
+    {:else if projects.length === 0}
         <div class="rounded-xl border border-dashed border-border py-12 text-center">
             <p class="text-muted-foreground">No projects yet.</p>
         </div>

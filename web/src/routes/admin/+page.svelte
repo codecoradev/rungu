@@ -147,11 +147,10 @@
                     <p class="text-sm text-destructive">{createError}</p>
                 {/if}
                 <div class="grid gap-3 sm:grid-cols-2">
-                    <Input bind:value={newName} placeholder="Project name" required oninput={() => { if (!newSlug) {} }} />
+                    <Input bind:value={newName} placeholder="Project name" required oninput={() => { if (!newSlug) newSlug = slugify(newName); }} />
                     <Input
                         bind:value={newSlug}
                         placeholder="slug (auto from name)"
-                        oninput={() => {}}
                     />
                 </div>
                 <Textarea bind:value={newDesc} placeholder="Description (optional)" rows="2" />

@@ -6,9 +6,9 @@ Rungu supports multiple projects/boards. Each project has its own feedback space
 
 ```bash
 # CLI
-rungu project add "My SaaS Product" --slug "my-saas" --description "Customer feedback"
-rungu project add "Mobile App" --slug "mobile" --description "App store reviews & feedback"
-rungu project add "Documentation" --slug "docs" --description "Docs feedback"
+rungu project-add "My SaaS Product" --slug "my-saas" --description "Customer feedback"
+rungu project-add "Mobile App" --slug "mobile" --description "App store reviews & feedback"
+rungu project-add "Documentation" --slug "docs" --description "Docs feedback"
 ```
 
 ## Accessing Boards

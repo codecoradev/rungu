@@ -5,13 +5,14 @@
     import { onMount } from 'svelte';
 
     let providers: ProviderInfo[] = $state([]);
+    let loadError = $state(false);
 
     onMount(async () => {
         try {
             const result = await api.getProviders();
             providers = result.providers;
         } catch {
-            providers = [];
+            loadError = true;
         }
     });
 
@@ -37,6 +38,8 @@
     {/each}
 
     {#if providers.length === 0}
-        <p class="text-center text-sm text-muted-foreground">No auth providers configured.</p>
+        <p class="text-center text-sm text-muted-foreground">
+            {loadError ? 'Failed to load auth providers. Check your connection.' : 'No auth providers configured.'}
+        </p>
     {/if}
 </div>

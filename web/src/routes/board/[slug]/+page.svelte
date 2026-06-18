@@ -177,10 +177,23 @@
     // on first resolve. We also guard against running before mount completes
     // via the `initialized` flag set at the end of onMount.
     let initialized = $state(false);
+    // Reload board when filters or slug change.
+    // Search is debounced to avoid excessive API calls while typing.
+    let searchTimer: ReturnType<typeof setTimeout> | null = null;
     $effect(() => {
         if (!initialized) return;
-        void slug; // track slug only
-        loadBoard();
+        // Touch all reactive deps so $effect re-runs when any changes
+        void slug;
+        void statusFilter;
+        void categoryFilter;
+        void sort;
+
+        // Debounce search input
+        const sq = searchQuery;
+        if (searchTimer) clearTimeout(searchTimer);
+        searchTimer = setTimeout(() => {
+            loadBoard();
+        }, sq ? 300 : 0);
     });
 </script>
 

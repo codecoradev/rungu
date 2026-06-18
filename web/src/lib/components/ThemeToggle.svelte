@@ -2,7 +2,15 @@
     import { Button } from '$lib/components/ui/button';
 
     let {
-        theme = $bindable('system'),
+        theme = $bindable(
+            (() => {
+                try {
+                    const saved = localStorage.getItem('rungu-theme');
+                    if (saved === 'light' || saved === 'dark' || saved === 'system') return saved;
+                } catch {}
+                return 'system' as const;
+            })()
+        ),
     }: { theme?: 'light' | 'dark' | 'system' } = $props();
 
     function cycle() {

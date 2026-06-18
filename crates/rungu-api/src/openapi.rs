@@ -34,6 +34,11 @@ use utoipa::OpenApi;
         crate::comment_routes::list_comments,
         crate::comment_routes::create_comment,
         crate::comment_routes::delete_comment,
+        // Attachments
+        crate::attachment_routes::list_attachments,
+        crate::attachment_routes::upload_attachment,
+        crate::attachment_routes::get_attachment_file,
+        crate::attachment_routes::delete_attachment,
     ),
     components(schemas(
         rungu_proto::Post,
@@ -53,12 +58,15 @@ use utoipa::OpenApi;
         rungu_proto::UpdateProjectBody,
         rungu_proto::VoteToggleResponse,
         rungu_proto::VoteStatusResponse,
+        rungu_proto::Attachment,
+        rungu_proto::AttachmentResponse,
     )),
     tags(
         (name = "projects", description = "Project management endpoints"),
         (name = "posts", description = "Feedback post endpoints"),
         (name = "votes", description = "Voting endpoints"),
         (name = "comments", description = "Comment endpoints"),
+        (name = "attachments", description = "Image attachment endpoints"),
     ),
 )]
 pub struct ApiDoc;
