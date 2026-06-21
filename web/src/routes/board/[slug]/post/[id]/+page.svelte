@@ -252,7 +252,7 @@
                     id="post-reply"
                     bind:value={commentText}
                     placeholder={replyTo ? 'Write a reply...' : 'Share your thoughts...'}
-                    rows="3"
+                    rows={3}
                 />
                 <div class="mt-2 flex justify-end">
                     <Button type="submit" disabled={!commentText.trim() || commentLoading}>
@@ -270,7 +270,6 @@
 
         <CommentThread
             {comments}
-            postId={post.id}
             currentUserId={user?.id}
             onreply={(parentId) => (replyTo = parentId)}
             ondelete={handleDeleteComment}

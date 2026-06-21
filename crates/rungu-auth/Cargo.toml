@@ -22,3 +22,6 @@ jsonwebtoken = { workspace = true }
 chrono = { workspace = true }
 uuid = { workspace = true }
 url = { workspace = true }
+
+[lints]
+workspace = true

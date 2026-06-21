@@ -58,9 +58,9 @@
                 <p class="text-sm text-destructive">{error}</p>
             {/if}
 
-            <Input bind:value={title} placeholder="What's your feedback?" maxlength="200" />
+            <Input bind:value={title} placeholder="What's your feedback?" maxlength={200} />
 
-            <Textarea bind:value={description} placeholder="Add more details (optional)" rows="3" />
+            <Textarea bind:value={description} placeholder="Add more details (optional)" rows={3} />
 
             <!-- Category: vertical list, no overflow -->
             <div class="space-y-1.5">

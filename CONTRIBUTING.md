@@ -6,7 +6,7 @@ Thanks for your interest in contributing!
 
 ```bash
 # Prerequisites
-rustup (Rust 1.86+)
+rustup (Rust 1.88+)
 Node.js 22+ (for frontend)
 
 # Clone & build

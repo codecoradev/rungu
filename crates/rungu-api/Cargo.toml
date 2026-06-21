@@ -30,3 +30,6 @@ tokio = { workspace = true }
 anyhow = { workspace = true }
 rungu_core = { workspace = true }
 tempfile = "3"
+
+[lints]
+workspace = true

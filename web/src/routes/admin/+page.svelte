@@ -153,7 +153,7 @@
                         placeholder="slug (auto from name)"
                     />
                 </div>
-                <Textarea bind:value={newDesc} placeholder="Description (optional)" rows="2" />
+                <Textarea bind:value={newDesc} placeholder="Description (optional)" rows={2} />
                 <Button type="submit" disabled={creating || !newName.trim()}>
                     {creating ? 'Creating...' : 'Create Project'}
                 </Button>
@@ -170,7 +170,7 @@
                 {#if editing === project.slug}
                     <Card.Content class="space-y-3 pt-6">
                         <Input bind:value={editName} placeholder="Name" />
-                        <Textarea bind:value={editDesc} placeholder="Description" rows="2" />
+                        <Textarea bind:value={editDesc} placeholder="Description" rows={2} />
                         <div class="flex gap-2">
                             <Button size="sm" onclick={() => saveEdit(project.slug)}>Save</Button>
                             <Button variant="outline" size="sm" onclick={() => (editing = null)}>Cancel</Button>

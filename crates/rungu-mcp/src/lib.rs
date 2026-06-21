@@ -455,7 +455,7 @@ pub async fn run_server(pool: AnyPool, is_sqlite: bool) -> Result<()> {
         }
 
         let response = handle_message(&line, &pool, is_sqlite).await;
-        if let Err(e) = writeln!(stdout, "{}", response) {
+        if let Err(e) = writeln!(stdout, "{response}") {
             tracing::error!("Failed to write MCP response: {e}");
             break;
         }

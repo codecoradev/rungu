@@ -32,9 +32,9 @@ pub async fn open_pool(database_url: &str) -> Result<AnyPool> {
             && !database_url.contains("?mode=")
         {
             if database_url.contains("?") {
-                format!("{}&mode=rwc", database_url)
+                format!("{database_url}&mode=rwc")
             } else {
-                format!("{}?mode=rwc", database_url)
+                format!("{database_url}?mode=rwc")
             }
         } else {
             database_url.to_string()
