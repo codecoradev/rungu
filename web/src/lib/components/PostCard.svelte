@@ -12,6 +12,7 @@
 <a href={`/board/${slug}/post/${post.id}`} class="block">
     <Card.Root class="transition-shadow hover:shadow-md">
         <Card.Header class="flex-row items-start gap-3">
+            <!-- svelte-ignore a11y_click_events_have_key_events,a11y_no_static_element_interactions -->
             <div class="shrink-0" onclick={(e) => e.preventDefault()}>
                 <VoteButton postId={post.id} voted={post.user_voted} count={post.vote_count} />
             </div>

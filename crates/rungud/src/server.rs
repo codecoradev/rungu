@@ -4,7 +4,7 @@ use axum::{Router, routing::get};
 use rungu_api::AppState;
 use rungu_api::openapi::ApiDoc;
 use rungu_api::{api_routes, auth_routes};
-// Rate limiting removed — external crates require rustc >1.86.
+// Rate limiting removed — external crates require rustc >1.88.
 // Will implement simple in-memory limiter in a future release.
 use tower_http::cors::Any;
 use tower_http::cors::CorsLayer;

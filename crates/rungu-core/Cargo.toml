@@ -23,3 +23,6 @@ async-trait = "0.1"
 tokio = { workspace = true }
 anyhow = { workspace = true }
 tempfile = "3"
+
+[lints]
+workspace = true

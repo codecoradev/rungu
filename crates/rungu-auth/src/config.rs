@@ -59,7 +59,7 @@ impl AuthConfig {
         Some(ProviderConfig {
             client_id: client_id.clone(),
             client_secret,
-            redirect_uri: format!("{}/auth/google/callback", app_url),
+            redirect_uri: format!("{app_url}/auth/google/callback"),
             auth_url: "https://accounts.google.com/o/oauth2/v2/auth".to_string(),
             token_url: "https://oauth2.googleapis.com/token".to_string(),
             userinfo_url: Some("https://www.googleapis.com/oauth2/v2/userinfo".to_string()),
@@ -72,7 +72,7 @@ impl AuthConfig {
         Some(ProviderConfig {
             client_id: client_id.clone(),
             client_secret,
-            redirect_uri: format!("{}/auth/github/callback", app_url),
+            redirect_uri: format!("{app_url}/auth/github/callback"),
             auth_url: "https://github.com/login/oauth/authorize".to_string(),
             token_url: "https://github.com/login/oauth/access_token".to_string(),
             userinfo_url: Some("https://api.github.com/user".to_string()),
@@ -84,14 +84,14 @@ impl AuthConfig {
         let realm = std::env::var("KEYCLOAK_REALM").ok().filter(|s| !s.is_empty())?;
         let client_id = std::env::var("KEYCLOAK_CLIENT_ID").ok().filter(|s| !s.is_empty())?;
         let client_secret = std::env::var("KEYCLOAK_CLIENT_SECRET").ok().filter(|s| !s.is_empty())?;
-        let realm_url = format!("{}/realms/{}", base_url, realm);
+        let realm_url = format!("{base_url}/realms/{realm}");
         Some(ProviderConfig {
             client_id,
             client_secret,
-            redirect_uri: format!("{}/auth/keycloak/callback", app_url),
-            auth_url: format!("{}/protocol/openid-connect/auth", realm_url),
-            token_url: format!("{}/protocol/openid-connect/token", realm_url),
-            userinfo_url: Some(format!("{}/protocol/openid-connect/userinfo", realm_url)),
+            redirect_uri: format!("{app_url}/auth/keycloak/callback"),
+            auth_url: format!("{realm_url}/protocol/openid-connect/auth"),
+            token_url: format!("{realm_url}/protocol/openid-connect/token"),
+            userinfo_url: Some(format!("{realm_url}/protocol/openid-connect/userinfo")),
         })
     }
 

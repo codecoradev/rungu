@@ -18,7 +18,7 @@
         try {
             loading = true;
             const res = await api.listAttachments(postId);
-            attachments = res.data;
+            attachments = res;
         } catch (e) {
             error = (e as Error).message;
         } finally {

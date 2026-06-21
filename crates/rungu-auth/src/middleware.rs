@@ -149,7 +149,7 @@ mod tests {
         let user = test_user();
         let token = issue_jwt(&user, &config.app_secret).unwrap();
 
-        let req = Request::builder().header("cookie", format!("session={}", token)).body(Body::empty()).unwrap();
+        let req = Request::builder().header("cookie", format!("session={token}")).body(Body::empty()).unwrap();
         let mut parts = extract_parts(req).await;
         let state = TestState { auth: config };
 
@@ -190,7 +190,7 @@ mod tests {
         let user = test_user();
         let token = issue_jwt(&user, &config.app_secret).unwrap();
 
-        let req = Request::builder().header("cookie", format!("session={}", token)).body(Body::empty()).unwrap();
+        let req = Request::builder().header("cookie", format!("session={token}")).body(Body::empty()).unwrap();
         let mut parts = extract_parts(req).await;
         let state = TestState { auth: config };
 

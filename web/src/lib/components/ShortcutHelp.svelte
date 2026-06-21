@@ -33,7 +33,7 @@
 <svelte:window onclick={onWindowClick} onkeydown={(e) => e.key === 'Escape' && close()} />
 
 {#if open}
-    <!-- svelte-ignore a11y_click_events_have_keyevents, a11y_no_static_element_interactions -->
+    <!-- svelte-ignore a11y_click_events_have_key_events,a11y_no_static_element_interactions -->
     <div
         class="fixed inset-0 z-50 flex items-start justify-center bg-background/80 p-4 backdrop-blur-sm sm:pt-20"
         role="dialog"

@@ -190,9 +190,9 @@ export const api = {
         });
         if (!res.ok) {
             const err = await res.json().catch(() => ({ error: 'Upload failed' }));
-            throw new ApiError(err.error || 'Upload failed', res.status);
+            throw new ApiError(res.status, err.error || 'Upload failed');
         }
-        return res.json() as Promise<Attachment>;
+        return res.json().then((r: { data: Attachment }) => r.data);
     },
 
     deleteAttachment: (id: string) =>

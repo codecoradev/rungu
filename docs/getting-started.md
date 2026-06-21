@@ -2,7 +2,7 @@
 
 ## Prerequisites
 
-- **Rust** 1.86+ (recommended: use [rustup](https://rustup.rs))
+- **Rust** 1.88+ (recommended: use [rustup](https://rustup.rs))
 - **Node.js** 22+ (only needed for frontend development)
 
 ## Download Binary
