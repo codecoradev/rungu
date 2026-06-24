@@ -5,6 +5,7 @@ export default defineConfig({
   description: 'Lightweight, self-hosted feedback board. Collect feature requests, bug reports, and suggestions with voting and prioritization.',
   lang: 'en',
   cleanUrls: true,
+  base: '/docs/rungu/',
   head: [
     ['link', { rel: 'icon', href: '/favicon.svg' }],
     ['meta', { property: 'og:type', content: 'website' }],
