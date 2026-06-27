@@ -92,7 +92,15 @@ fn main() -> Result<()> {
 }
 
 async fn async_main(cli: Cli) -> Result<()> {
-    let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| format!("sqlite:{}", cli.db.display()));
+    // If no explicit --db or DATABASE_URL, use standardised data directory.
+    let db_path = if cli.db.to_string_lossy() == "rungu.db" {
+        let dir = config::Config::default_data_dir();
+        config::Config::ensure_data_dir(&dir).expect("failed to create data directory");
+        config::Config::default_db_path().into()
+    } else {
+        cli.db.clone()
+    };
+    let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| format!("sqlite:{}", db_path.display()));
     let pool = rungu_core::open_pool(&db_url).await?;
     rungu_core::run_migrations(&pool, &db_url).await?;
     info!("Database ready: {}", db_url);
