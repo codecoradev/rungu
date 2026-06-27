@@ -16,9 +16,8 @@ pub struct Config {
 impl Config {
     /// Build config from environment variables.
     pub fn from_env() -> Self {
-        let db_path = std::env::var("RUNGU_DB")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| PathBuf::from(Self::default_db_path()));
+        let db_path =
+            std::env::var("RUNGU_DB").map(PathBuf::from).unwrap_or_else(|_| PathBuf::from(Self::default_db_path()));
 
         let cors_origins = std::env::var("RUNGU_CORS_ORIGINS")
             .unwrap_or_default()
@@ -43,9 +42,7 @@ impl Config {
         if let Ok(dir) = std::env::var("RUNGU_DATA_DIR") {
             return PathBuf::from(dir);
         }
-        let home = std::env::var("HOME")
-            .or_else(|_| std::env::var("USERPROFILE"))
-            .unwrap_or_else(|_| ".".into());
+        let home = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")).unwrap_or_else(|_| ".".into());
         PathBuf::from(home).join(".codecora").join("rungu")
     }
 
