@@ -16,7 +16,8 @@ pub struct Config {
 impl Config {
     /// Build config from environment variables.
     pub fn from_env() -> Self {
-        let db_path = std::env::var("RUNGU_DB").map(PathBuf::from).unwrap_or_else(|_| PathBuf::from("rungu.db"));
+        let db_path =
+            std::env::var("RUNGU_DB").map(PathBuf::from).unwrap_or_else(|_| PathBuf::from(Self::default_db_path()));
 
         let cors_origins = std::env::var("RUNGU_CORS_ORIGINS")
             .unwrap_or_default()
@@ -32,5 +33,30 @@ impl Config {
             cors_origins,
             sentry_dsn: std::env::var("SENTRY_DSN").ok(),
         }
+    }
+
+    /// Returns the default data directory: `~/.codecora/rungu/`.
+    ///
+    /// Override with `RUNGU_DATA_DIR` env var.
+    pub fn default_data_dir() -> PathBuf {
+        if let Ok(dir) = std::env::var("RUNGU_DATA_DIR") {
+            return PathBuf::from(dir);
+        }
+        let home = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")).unwrap_or_else(|_| ".".into());
+        PathBuf::from(home).join(".codecora").join("rungu")
+    }
+
+    /// Returns the default database path: `~/.codecora/rungu/rungu.db`.
+    pub fn default_db_path() -> String {
+        Self::default_data_dir().join("rungu.db").to_string_lossy().to_string()
+    }
+
+    /// Ensure the data directory exists, creating it if necessary.
+    pub fn ensure_data_dir(dir: &PathBuf) -> std::io::Result<()> {
+        if !dir.exists() {
+            std::fs::create_dir_all(dir)?;
+            tracing::info!("Created data directory: {}", dir.display());
+        }
+        Ok(())
     }
 }
