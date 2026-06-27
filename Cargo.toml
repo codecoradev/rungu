@@ -62,6 +62,17 @@ rust-embed = { version = "8", features = ["include-exclude"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
+# Error monitoring (TrapFall integration)
+sentry = { version = "0.35", default-features = false, features = ["reqwest", "rustls", "tracing"] }
+sentry-tracing = { version = "0.35", default-features = false }
+sentry-tower = { version = "0.35", default-features = false, features = ["http"] }
+
+# Pin quinn-proto >= 0.11.15 (RUSTSEC-2026-0185: memory exhaustion)
+# Transitive via sentry → reqwest → hyper-rustls → quinn-proto
+quinn-proto = ">=0.11.15"
+
+
+
 # MCP
 serde_jsonrpc = "0.2"
 

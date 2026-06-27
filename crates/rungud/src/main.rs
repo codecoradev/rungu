@@ -10,6 +10,7 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 use tracing::info;
+use tracing_subscriber::prelude::*;
 
 #[derive(Parser, Debug)]
 #[command(name = "rungu", version, about = "Rungu — lightweight feedback board daemon")]
@@ -53,17 +54,44 @@ enum Commands {
     Mcp,
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    // Init tracing
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| cli.log_level.clone().into()),
-        )
-        .init();
+    // Init Sentry (must happen BEFORE tokio runtime).
+    // If SENTRY_DSN is not set, Sentry is a no-op — no events are sent.
+    let _sentry_guard = {
+        let mut opts = sentry::ClientOptions::default();
+        if let Ok(dsn_str) = std::env::var("SENTRY_DSN") {
+            opts.dsn = dsn_str.parse().ok();
+        }
+        opts.release = sentry::release_name!();
+        sentry::init(opts)
+    };
 
+    let sentry_active = sentry::Hub::main().client().is_some();
+    if sentry_active {
+        info!("Sentry enabled (DSN configured)");
+    } else {
+        info!("Sentry disabled (no SENTRY_DSN)");
+    }
+
+    // Init tracing (with Sentry bridge if active).
+    let filter = tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| cli.log_level.clone().into());
+    let registry = tracing_subscriber::registry().with(filter);
+    if sentry_active {
+        registry.with(sentry_tracing::layer()).with(tracing_subscriber::fmt::layer()).init();
+    } else {
+        registry.with(tracing_subscriber::fmt::layer()).init();
+    }
+
+    // Manual tokio runtime — required because sentry::init() must
+    // precede the runtime, and #[tokio::main] hides the construction.
+    let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build()?;
+
+    rt.block_on(async_main(cli))
+}
+
+async fn async_main(cli: Cli) -> Result<()> {
     let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| format!("sqlite:{}", cli.db.display()));
     let pool = rungu_core::open_pool(&db_url).await?;
     rungu_core::run_migrations(&pool, &db_url).await?;
@@ -95,7 +123,6 @@ async fn main() -> Result<()> {
             println!("Created project: {} ({})", project.name, project.slug);
         }
         Some(Commands::Healthcheck) => {
-            // Simple health check — can we query the DB?
             let store = rungu_core::Store::new_with_kind(pool, is_sqlite);
             let _ = store.list_projects().await?;
             println!("OK");
@@ -104,7 +131,6 @@ async fn main() -> Result<()> {
             rungu_mcp::run_server(pool, is_sqlite).await?;
         }
         None => {
-            // Default: serve
             server::serve(config, pool, is_sqlite, "0.0.0.0:3000").await?;
         }
     }

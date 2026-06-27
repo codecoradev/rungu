@@ -32,6 +32,9 @@ mime_guess = { workspace = true }
 utoipa-swagger-ui = { workspace = true }
 # axum-governor removed — MSRV incompatible
 utoipa = { workspace = true }
+sentry = { workspace = true }
+sentry-tracing = { workspace = true }
+sentry-tower = { workspace = true }
 
 [lints]
 workspace = true
