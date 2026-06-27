@@ -1,6 +1,22 @@
 # Changelog
 
-## [Unreleased] - v0.2.0 Polish
+## [Unreleased]
+
+## [0.2.1] - 2026-06-27
+
+### Added
+
+- **Sentry SDK integration** (#90): self-hosted error monitoring via
+  TrapFall. ENV-based `SENTRY_DSN` config — set DSN to point to your
+  TrapFall instance. Includes `sentry-tracing` and `sentry-tower`
+  (rustls, no OpenSSL dependency).
+
+### Fixed
+
+- **quinn-proto RUSTSEC-2026-0185**: bumped 0.11.14 → 0.11.15 to
+  resolve medium-severity advisory.
+
+## [0.2.0]
 
 ### Added
 
