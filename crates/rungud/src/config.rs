@@ -9,6 +9,8 @@ pub struct Config {
     pub auth: AuthConfig,
     /// Allowed CORS origins. Empty = allow all (development only).
     pub cors_origins: Vec<String>,
+    /// Sentry DSN. None = Sentry disabled (no events sent).
+    pub sentry_dsn: Option<String>,
 }
 
 impl Config {
@@ -28,6 +30,7 @@ impl Config {
             listen_addr: std::env::var("RUNGU_LISTEN").unwrap_or_else(|_| "0.0.0.0:3000".to_string()),
             auth: AuthConfig::from_env(),
             cors_origins,
+            sentry_dsn: std::env::var("SENTRY_DSN").ok(),
         }
     }
 }
