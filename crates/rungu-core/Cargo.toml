@@ -18,6 +18,7 @@ tracing = { workspace = true }
 thiserror = { workspace = true }
 anyhow = { workspace = true }
 async-trait = "0.1"
+moka = { workspace = true }
 
 [dev-dependencies]
 tokio = { workspace = true }

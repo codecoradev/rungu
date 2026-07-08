@@ -1,17 +1,21 @@
 //! HTTP server — Axum router, API routes, SPA handler, Swagger UI.
 
+use axum::middleware::from_fn_with_state;
 use axum::{Router, routing::get};
 use rungu_api::AppState;
 use rungu_api::openapi::ApiDoc;
 use rungu_api::{api_routes, auth_routes};
-// Rate limiting removed — external crates require rustc >1.88.
-// Will implement simple in-memory limiter in a future release.
+// In-memory rate limiting — no external crate (governor was MSRV-incompatible).
+use crate::ratelimit::{RateLimiter, rate_limit_middleware};
 use tower_http::cors::Any;
 use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 use tracing::info;
 use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
+
+use std::net::SocketAddr;
+use std::time::Duration;
 
 use crate::config::Config;
 use crate::spa::spa_handler;
@@ -57,9 +61,34 @@ pub async fn serve(config: Config, pool: sqlx::AnyPool, is_sqlite: bool, listen:
             .allow_headers(Any)
     };
 
+    // ── Rate limiters ───────────────────────────────────────────────────
+    // Two independent per-IP limiters: a strict one for `/auth/*` (OAuth
+    // login/callback abuse) and a looser one for `/api/*`. Both are `0`-able
+    // via env to disable. Each limiter also spawns a pruner task so the IP
+    // map can't grow unbounded.
+    let api_routes = if config.rate_limit_per_min > 0 {
+        let limiter = RateLimiter::new(config.rate_limit_per_min, Duration::from_secs(60), config.trust_proxy);
+        limiter.spawn_pruner();
+        tracing::info!("API rate limit: {} req/min per IP", config.rate_limit_per_min);
+        api_routes().layer(from_fn_with_state(limiter, rate_limit_middleware))
+    } else {
+        tracing::info!("API rate limit: disabled (RUNGU_RATE_LIMIT_PER_MIN=0)");
+        api_routes()
+    };
+
+    let auth_routes = if config.auth_rate_limit_per_min > 0 {
+        let limiter = RateLimiter::new(config.auth_rate_limit_per_min, Duration::from_secs(60), config.trust_proxy);
+        limiter.spawn_pruner();
+        tracing::info!("Auth rate limit: {} req/min per IP", config.auth_rate_limit_per_min);
+        auth_routes().layer(from_fn_with_state(limiter, rate_limit_middleware))
+    } else {
+        tracing::info!("Auth rate limit: disabled (RUNGU_AUTH_RATE_LIMIT_PER_MIN=0)");
+        auth_routes()
+    };
+
     let app = Router::new()
-        .nest("/api", api_routes())
-        .merge(auth_routes())
+        .nest("/api", api_routes)
+        .merge(auth_routes)
         .merge(SwaggerUi::new("/swagger-ui").url("/api-docs/openapi.json", ApiDoc::openapi()))
         .route("/health", get(health_check))
         .fallback(spa_handler)
@@ -74,7 +103,9 @@ pub async fn serve(config: Config, pool: sqlx::AnyPool, is_sqlite: bool, listen:
     info!("Rungu listening on {listen}");
     info!("Swagger UI:  http://{listen}/swagger-ui");
     info!("OpenAPI spec: http://{listen}/api-docs/openapi.json");
-    axum::serve(listener, app).await?;
+    // `into_make_service_with_connect_info` exposes the peer `SocketAddr` to
+    // the rate-limit middleware via `ConnectInfo<SocketAddr>`.
+    axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>()).await?;
 
     Ok(())
 }

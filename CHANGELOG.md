@@ -2,6 +2,29 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Rate limiting** (in-memory, per-IP fixed window): two independent
+  limiters — strict on `/auth/*` (default 30/min) and broader on `/api/*`
+  (default 300/min). Configurable via `RUNGU_AUTH_RATE_LIMIT_PER_MIN` /
+  `RUNGU_RATE_LIMIT_PER_MIN`; `0` disables. Previously deferred (#52) due
+  to an MSRV-blocked `governor` dependency — reimplemented without external
+  crates. Closes #43.
+
+### Changed
+
+- **`list_posts` now populates `user_voted`** for the requesting user via a
+  single batched lookup. Previously the board list always reported
+  `user_voted: false`, so it could not show which posts the current user had
+  voted on (only `GET /posts/{id}` set it). Replaces the latent N+1 with one
+  indexed query over the `votes` primary key.
+- **PostgreSQL full-text search**: the Postgres backend now uses a generated
+  `tsvector` column + GIN index (`search_tsv @@ plainto_tsquery(?)`) instead
+  of an unindexed `LOWER(...) LIKE` full scan. SQLite still uses FTS5.
+- **`get_project_by_slug` is cached** (5-minute TTL, in-memory `moka`) — it
+  was hit on nearly every board/vote/comment request. Create/update/delete
+  invalidate the cache.
+
 ## [0.2.1] - 2026-06-27
 
 ### Added

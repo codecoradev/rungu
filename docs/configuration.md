@@ -10,6 +10,9 @@ All configuration is done via environment variables.
 | `RUNGU_DB` | `rungu.db` | SQLite database path |
 | `DATABASE_URL` | _(unset)_ | Override the database connection. When set, takes precedence over `RUNGU_DB`. Format: `sqlite:path.db` or `postgres://user:pass@host/db`. |
 | `RUNGU_CORS_ORIGINS` | _(APP_URL only)_ | Comma-separated CORS origins. Default: only `APP_URL`. Set to `*` to allow all (dev only). |
+| `RUNGU_RATE_LIMIT_PER_MIN` | `300` | Max `/api/*` requests per minute per client IP (fixed window). `0` disables the limiter. Client IP is taken from `X-Forwarded-For` (first hop) when present, else the socket address. |
+| `RUNGU_AUTH_RATE_LIMIT_PER_MIN` | `30` | Max `/auth/*` requests per minute per client IP. Stricter than the API limiter to blunt OAuth/login abuse. `0` disables it. |
+| `RUNGU_TRUST_PROXY` | `false` | Honor `X-Forwarded-For` when resolving rate-limit client IPs. Enable only behind a trusted reverse proxy that overwrites the header; otherwise clients can spoof it. When `false`, the socket address is used. |
 | `RUNGU_SECURE_COOKIE` | `true` | Set `false` for HTTP (no Secure flag on cookies). Accepts (case-insensitive): `true\|1\|yes\|on`, `false\|0\|no\|off`. Any other value exits with a fatal error — see [Security](#security). |
 | `RUST_LOG` | `rungu=info` | Log level (trace, debug, info, warn, error). Supports `tracing_subscriber`'s [`EnvFilter`](https://docs.rs/tracing-subscriber/latest/tracing_subscriber/filter/struct.EnvFilter.html) syntax. |
 

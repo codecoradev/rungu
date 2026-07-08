@@ -258,6 +258,10 @@ pub struct ListPostsParams<'a> {
     /// endpoint for incremental pulls ("what shipped since my last sync?").
     /// When `None`, no `updated_at` filter is applied.
     pub since: Option<DateTime<Utc>>,
+    /// When set, each returned [`PostDetail::user_voted`] is populated for this
+    /// user via a single batched lookup (avoids N+1). When `None`, all entries
+    /// are left `false` (anonymous / public endpoints).
+    pub user_id: Option<&'a str>,
     pub offset: i64,
     pub limit: i64,
 }

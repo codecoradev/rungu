@@ -186,6 +186,7 @@ async fn list_posts(params: &Value, store: &Store) -> Result<Value, String> {
             category,
             query,
             since: None,
+            user_id: None,
             offset: 0,
             limit,
         })
@@ -276,6 +277,7 @@ async fn search_posts(params: &Value, store: &Store) -> Result<Value, String> {
             category: None,
             query: Some(query),
             since: None,
+            user_id: None,
             offset: 0,
             limit,
         })
@@ -306,6 +308,7 @@ async fn get_changelog(params: &Value, store: &Store) -> Result<Value, String> {
             category: None,
             query: None,
             since: None,
+            user_id: None,
             offset: 0,
             limit,
         })
@@ -356,6 +359,7 @@ async fn get_stats(params: &Value, store: &Store) -> Result<Value, String> {
             category: None,
             query: None,
             since: None,
+            user_id: None,
             offset: 0,
             limit: 1000,
         })
@@ -410,6 +414,7 @@ async fn get_trending(params: &Value, store: &Store) -> Result<Value, String> {
             category: None,
             query: None,
             since: None,
+            user_id: None,
             offset: 0,
             limit,
         })
