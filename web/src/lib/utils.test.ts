@@ -102,4 +102,20 @@ describe('sanitizeHref', () => {
     it('rejects non-URL garbage', () => {
         expect(sanitizeHref('not a url at all')).toBeUndefined();
     });
+
+    it('rejects backslash-based open-redirect bypass', () => {
+        // Browsers normalize `\` to `/`, so `/\\evil.com` would resolve to the
+        // protocol-relative `//evil.com` and navigate off-site.
+        expect(sanitizeHref('/\\evil.com')).toBeUndefined();
+        expect(sanitizeHref('\\\\evil.com')).toBeUndefined();
+        expect(sanitizeHref('/foo\\bar')).toBeUndefined();
+    });
+
+    it('strips ASCII tab/newline/CR before checking (smuggling bypass)', () => {
+        // Browsers ignore embedded tab/newline/CR in URLs; without stripping,
+        // `java\tscript:` could slip a dangerous scheme past the check.
+        expect(sanitizeHref('java\tscript:alert(1)')).toBeUndefined();
+        expect(sanitizeHref('java\nscript:alert(1)')).toBeUndefined();
+        expect(sanitizeHref('  \t https://ok.com')).toBe('https://ok.com');
+    });
 });

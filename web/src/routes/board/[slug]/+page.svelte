@@ -26,6 +26,10 @@
     let searchQuery = $state('');
     let showForm = $state(false);
     let authed = $state(false);
+    // Set true once the initial onMount load finishes; gates the filter $effect
+    // so it doesn't fire before the first board fetch completes. Declared up
+    // here (before onMount) to avoid a forward reference / TDZ smell.
+    let initialized = $state(false);
 
     // Keyboard-shortcut focus state. Tracks the currently-focused post card
     // so j/k navigation and Enter/v shortcuts have a target. -1 = none focused.
@@ -128,9 +132,9 @@
                 break;
             }
             case 'v': {
-                if (!authed || authRequired === false) {
-                    if (!authed) return;
-                }
+                // Voting always requires auth. `authRequired` is irrelevant
+                // here (there's no anonymous vote path), so just guard on auth.
+                if (!authed) return;
                 const post = posts[focusedPostIndex];
                 if (post) toggleVote(post);
                 break;
@@ -176,7 +180,6 @@
     // `loadBoard()` is safe to call before `project` is set; it sets `project`
     // on first resolve. We also guard against running before mount completes
     // via the `initialized` flag set at the end of onMount.
-    let initialized = $state(false);
     // Reload board when filters or slug change.
     // Search is debounced to avoid excessive API calls while typing.
     let searchTimer: ReturnType<typeof setTimeout> | null = null;

@@ -82,8 +82,19 @@ const SAFE_URL_PROTOCOLS = new Set(['http:', 'https:', 'mailto:', 'tel:']);
 export function sanitizeHref(href: string | undefined | null): string | undefined {
     if (href == null || href === '') return undefined;
 
-    const trimmed = href.trim();
+    // Browsers strip ASCII tab/newline/CR from URLs *before* parsing, so an
+    // attacker can smuggle a scheme past naive string checks (e.g.
+    // `java\tscript:`). Remove them up front so our check sees what the
+    // browser will actually execute.
+    const stripped = href.replace(/[\t\n\r]/g, '');
+    const trimmed = stripped.trim();
     if (trimmed === '') return undefined;
+
+    // Browsers normalize backslash to forward slash in URL contexts. That means
+    // a value that looks relative — `/\\evil.com` — becomes the
+    // protocol-relative `//evil.com` and navigates off-site. Reject any
+    // backslash outright; no legitimate in-app href needs one.
+    if (trimmed.includes('\\')) return undefined;
 
     // Relative URLs are always safe (path, query, hash).
     // Note: protocol-relative `//host` is NOT relative — it inherits the
