@@ -112,6 +112,7 @@ async fn test_list_posts_with_filters() {
             category: None,
             query: None,
             since: None,
+            user_id: None,
             offset: 0,
             limit: 20,
         })
@@ -129,6 +130,7 @@ async fn test_list_posts_with_filters() {
             category: Some(PostCategory::Bug),
             query: None,
             since: None,
+            user_id: None,
             offset: 0,
             limit: 20,
         })
@@ -146,6 +148,7 @@ async fn test_list_posts_with_filters() {
             category: None,
             query: None,
             since: None,
+            user_id: None,
             offset: 0,
             limit: 20,
         })
@@ -163,6 +166,7 @@ async fn test_list_posts_with_filters() {
             category: None,
             query: Some("dark"),
             since: None,
+            user_id: None,
             offset: 0,
             limit: 20,
         })
@@ -191,6 +195,7 @@ async fn test_list_posts_search_with_sql_injection_chars() {
             category: None,
             query: Some("'; DROP TABLE posts; --"),
             since: None,
+            user_id: None,
             offset: 0,
             limit: 20,
         })
@@ -208,6 +213,7 @@ async fn test_list_posts_search_with_sql_injection_chars() {
             category: None,
             query: None,
             since: None,
+            user_id: None,
             offset: 0,
             limit: 20,
         })
@@ -257,6 +263,7 @@ async fn test_list_posts_search_fts5_multitoken() {
             category: None,
             query: Some("dark mode"),
             since: None,
+            user_id: None,
             offset: 0,
             limit: 20,
         })
@@ -285,6 +292,7 @@ async fn test_list_posts_search_punctuation_only_drops_to_noop() {
             category: None,
             query: Some("!!!"),
             since: None,
+            user_id: None,
             offset: 0,
             limit: 20,
         })
@@ -315,6 +323,7 @@ async fn test_list_posts_pagination() {
             category: None,
             query: None,
             since: None,
+            user_id: None,
             offset: 0,
             limit: 2,
         })
@@ -332,6 +341,7 @@ async fn test_list_posts_pagination() {
             category: None,
             query: None,
             since: None,
+            user_id: None,
             offset: 4,
             limit: 2,
         })
@@ -456,4 +466,90 @@ async fn test_get_current_user() {
 
     // Non-existent user
     assert!(store.get_current_user("nonexistent").await.is_err());
+}
+
+// ── user_voted batch population (list_posts) ───────────────────────────
+
+#[tokio::test]
+async fn test_list_posts_populates_user_voted_batch() {
+    // Regression: `list_posts` previously left `user_voted` always `false`.
+    // It should now batch-populate it via a single indexed lookup.
+    let store = setup().await;
+    let project = store.create_project("App", "app", "").await.unwrap();
+    let alice = store.find_or_create_user("alice@t.com", None, None, &[]).await.unwrap();
+    let bob = store.find_or_create_user("bob@t.com", None, None, &[]).await.unwrap();
+
+    let p1 = store.create_post(&project.id, "Post 1", "", PostCategory::Feedback, &alice.id).await.unwrap();
+    let p2 = store.create_post(&project.id, "Post 2", "", PostCategory::Feature, &bob.id).await.unwrap();
+
+    // Alice votes on p1 only.
+    store.toggle_vote(&alice.id, &p1.id).await.unwrap();
+
+    let (posts, _total) = store
+        .list_posts(ListPostsParams {
+            project_id: &project.id,
+            sort: PostSort::Newest,
+            status: None,
+            category: None,
+            query: None,
+            since: None,
+            user_id: Some(&alice.id),
+            offset: 0,
+            limit: 20,
+        })
+        .await
+        .unwrap();
+
+    let by_id: std::collections::HashMap<&str, bool> =
+        posts.iter().map(|pd| (pd.post.id.as_str(), pd.user_voted)).collect();
+    assert_eq!(by_id.get(p1.id.as_str()), Some(&true), "alice voted on p1");
+    assert_eq!(by_id.get(p2.id.as_str()), Some(&false), "alice did not vote on p2");
+}
+
+#[tokio::test]
+async fn test_list_posts_user_voted_none_when_anonymous() {
+    // Without `user_id`, every entry must keep `user_voted == false`.
+    let store = setup().await;
+    let project = store.create_project("App", "app", "").await.unwrap();
+    let user = store.find_or_create_user("u@t.com", None, None, &[]).await.unwrap();
+    let post = store.create_post(&project.id, "P", "", PostCategory::Feedback, &user.id).await.unwrap();
+    store.toggle_vote(&user.id, &post.id).await.unwrap();
+
+    let (posts, _total) = store
+        .list_posts(ListPostsParams {
+            project_id: &project.id,
+            sort: PostSort::Newest,
+            status: None,
+            category: None,
+            query: None,
+            since: None,
+            user_id: None,
+            offset: 0,
+            limit: 20,
+        })
+        .await
+        .unwrap();
+    assert!(posts.iter().all(|p| !p.user_voted));
+}
+
+// ── project-by-slug cache ──────────────────────────────────────────────
+
+#[tokio::test]
+async fn test_project_cache_invalidated_on_update_and_delete() {
+    // The cache must not serve stale rows after a project is renamed or deleted.
+    let store = setup().await;
+    let project = store.create_project("Original", "slug-a", "").await.unwrap();
+
+    // Prime the cache.
+    let _ = store.get_project_by_slug("slug-a").await.unwrap().unwrap();
+
+    // Rename → description change goes through update_project, which clears
+    // the cache; the next read must reflect the new value.
+    store.update_project(&project.id, Some("Renamed"), None).await.unwrap();
+    let after = store.get_project_by_slug("slug-a").await.unwrap().unwrap();
+    assert_eq!(after.name, "Renamed");
+
+    // Delete → cached reads must observe the deletion immediately.
+    store.delete_project(&project.id).await.unwrap();
+    assert!(store.get_project_by_slug("slug-a").await.unwrap().is_none());
 }

@@ -159,6 +159,20 @@ fn sanitize_fts_query(input: &str) -> String {
         .join(" ")
 }
 
+/// Which full-text search path `list_posts` should use, if any.
+///
+/// Kept as a small enum (rather than two `Option`s) so the JOIN, WHERE
+/// fragment, and bind value all branch on a single decision.
+enum Search {
+    /// SQLite FTS5: bind a sanitized prefix-token MATCH expression.
+    Fts5(String),
+    /// PostgreSQL: bind the raw query to `plainto_tsquery` against the
+    /// generated `search_tsv` column.
+    PgTsv(String),
+    /// No search filter applied.
+    None,
+}
+
 /// Parse PostStatus from SQLite TEXT column.
 fn parse_status(s: &str) -> PostStatus {
     match s {
@@ -184,15 +198,28 @@ fn parse_category(s: &str) -> PostCategory {
 #[derive(Clone)]
 pub struct Store {
     pool: AnyPool,
-    /// True when the underlying database is SQLite. Drives FTS5 vs LIKE
-    /// search-path selection (only SQLite has the `posts_fts` virtual table
-    /// populated by triggers; PostgreSQL FTS is deferred to v0.3).
+    /// True when the underlying database is SQLite. Drives FTS5 vs PostgreSQL
+    /// `tsvector` search-path selection (SQLite has the `posts_fts` virtual
+    /// table populated by triggers; PostgreSQL uses a generated `tsvector`
+    /// column + GIN index).
     is_sqlite: bool,
+    /// Short-TTL cache for `get_project_by_slug`. Project slugs are resolved
+    /// on nearly every board/vote/comment request, but rarely change, so a
+    /// small cache eliminates most of those round-trips. Mutations to projects
+    /// (`create`/`update`/`delete`) invalidate the whole cache — projects are
+    /// few and the simplicity beats per-key tracking.
+    project_cache: moka::future::Cache<String, Project>,
 }
+
+/// How long a cached `Project` row stays fresh before re-hitting the DB.
+const PROJECT_CACHE_TTL: std::time::Duration = std::time::Duration::from_secs(5 * 60);
+/// Upper bound on cached projects. Projects are few in practice; this just
+/// caps memory if a caller enumerates many slugs (including misses).
+const PROJECT_CACHE_MAX_ENTRIES: u64 = 256;
 
 impl Store {
     pub fn new(pool: AnyPool) -> Self {
-        Self { pool, is_sqlite: false }
+        Self::build(pool, false)
     }
 
     /// Construct a Store with explicit backend knowledge.
@@ -202,7 +229,15 @@ impl Store {
     /// URL starts with `sqlite:` — callers should pass that detection result
     /// here so the store can pick the right query dialect.
     pub fn new_with_kind(pool: AnyPool, is_sqlite: bool) -> Self {
-        Self { pool, is_sqlite }
+        Self::build(pool, is_sqlite)
+    }
+
+    fn build(pool: AnyPool, is_sqlite: bool) -> Self {
+        let project_cache = moka::future::Cache::builder()
+            .time_to_live(PROJECT_CACHE_TTL)
+            .max_capacity(PROJECT_CACHE_MAX_ENTRIES)
+            .build();
+        Self { pool, is_sqlite, project_cache }
     }
 
     /// Get a reference to the pool.
@@ -222,13 +257,25 @@ impl Store {
     }
 
     /// Get a project by slug.
+    ///
+    /// Serves from a short-TTL in-memory cache; misses fall through to the DB
+    /// and populate the cache. Negative results (slug not found) are **not**
+    /// cached — a subsequent create with the same slug should be visible
+    /// immediately.
     pub async fn get_project_by_slug(&self, slug: &str) -> Result<Option<Project>> {
+        if let Some(cached) = self.project_cache.get(slug).await {
+            return Ok(Some(cached));
+        }
         let row = sqlx::query("SELECT id, slug, name, description, created_at FROM projects WHERE slug = ?")
             .bind(slug)
             .fetch_optional(&self.pool)
             .await
             .context("Failed to get project")?;
-        Ok(row.as_ref().map(map_project))
+        let project = row.as_ref().map(map_project);
+        if let Some(ref p) = project {
+            self.project_cache.insert(slug.to_string(), p.clone()).await;
+        }
+        Ok(project)
     }
 
     /// Get a project by ID.
@@ -254,6 +301,12 @@ impl Store {
             .execute(&self.pool)
             .await
             .context("Failed to create project")?;
+
+        // Defensive cache invalidation: a negative (miss) result is never
+        // cached, so this is strictly unnecessary today — but keep the cache
+        // correct regardless of future caching-policy changes.
+        self.project_cache.invalidate_all();
+
         Ok(Project {
             id,
             slug: slug.to_string(),
@@ -296,6 +349,11 @@ impl Store {
                 .context("Failed to update project description")?;
         }
 
+        // Invalidate the project cache — name/description changed. We clear
+        // the whole cache rather than one key because `update_project` is
+        // called by id (the cached key is the slug).
+        self.project_cache.invalidate_all();
+
         // Fetch and return the updated row
         self.get_project_by_id(project_id).await?.context("Project disappeared after update")
     }
@@ -309,6 +367,9 @@ impl Store {
             .execute(&self.pool)
             .await
             .context("Failed to delete project")?;
+        // Invalidate the project cache so a re-create with the same slug is
+        // visible immediately and a stale row isn't served post-delete.
+        self.project_cache.invalidate_all();
         Ok(())
     }
 
@@ -320,22 +381,25 @@ impl Store {
     /// The search query uses `LIKE ?` with the pattern passed as a bind parameter.
     pub async fn list_posts(&self, params: ListPostsParams<'_>) -> Result<(Vec<PostDetail>, i64)> {
         // Search path selection:
-        // - SQLite: use the FTS5 virtual table `posts_fts` (maintained by triggers)
-        //   via `posts_fts MATCH ?`. Faster and relevance-ranked.
-        // - Other backends (PostgreSQL — v0.3): fall back to LIKE. PostgreSQL
-        //   will get its own `tsvector` index in a later release.
-        // Sanitize once up front so both the WHERE-builder and the binder see
-        // the same decision (a token that's all punctuation would otherwise
-        // produce an empty MATCH query that errors in FTS5).
-        let (fts_term, search_pattern): (Option<String>, Option<String>) = if self.is_sqlite {
-            let sanitized = params.query.map(sanitize_fts_query).filter(|s| !s.is_empty());
-            // SQLite: punctuation-only queries sanitize to "" → treat as no filter
-            // (no meaningful search term). The FTS path is used when a real token survives.
-            (sanitized, None)
-        } else {
-            (None, params.query.map(|q| format!("%{q}%")))
+        // - SQLite: FTS5 virtual table `posts_fts` (maintained by triggers) via
+        //   `posts_fts MATCH ?`. Faster and relevance-ranked. User input is
+        //   sanitized into prefix tokens so FTS5 query syntax can't error out
+        //   or do expensive work.
+        // - PostgreSQL: generated `search_tsv` tsvector column + GIN index via
+        //   `p.search_tsv @@ plainto_tsquery(?)`. `plainto_tsquery` already
+        //   rejects unsafe syntax, so we bind the raw (trimmed) query.
+        // - Empty / punctuation-only input → no search filter.
+        let search = match (self.is_sqlite, params.query) {
+            (true, Some(q)) => {
+                let sanitized = sanitize_fts_query(q);
+                if sanitized.is_empty() { Search::None } else { Search::Fts5(sanitized) }
+            }
+            (false, Some(q)) => {
+                let trimmed = q.trim();
+                if trimmed.is_empty() { Search::None } else { Search::PgTsv(trimmed.to_string()) }
+            }
+            _ => Search::None,
         };
-        let use_fts = fts_term.is_some();
 
         // Build WHERE clause fragments — only add conditions for filters that are present.
         // Each `?` is a positional placeholder bound later via .bind().
@@ -346,10 +410,6 @@ impl Store {
         }
         if params.category.is_some() {
             conditions.push("p.category = ?".to_string());
-        }
-        if !use_fts && search_pattern.is_some() {
-            // LIKE fallback for non-SQLite backends.
-            conditions.push("(LOWER(p.title) LIKE LOWER(?) OR LOWER(p.description) LIKE LOWER(?))".to_string());
         }
         if params.since.is_some() {
             // Incremental-pull lower bound on `updated_at` (used by changelog).
@@ -369,24 +429,23 @@ impl Store {
             PostSort::RecentlyUpdated => "p.updated_at DESC",
         };
 
-        // FTS JOIN clause — only emitted when the FTS path is active.
-        let fts_join = if use_fts { "JOIN posts_fts ON posts_fts.rowid = p.rowid" } else { "" };
-        // Extra WHERE fragment for the FTS path. We bind a sanitized MATCH term.
-        let fts_where = if use_fts { " AND posts_fts MATCH ?" } else { "" };
+        // Search JOIN + WHERE fragment, emitted only when a search path is active.
+        // SQLite joins the FTS5 table; PostgreSQL filters on its generated tsvector.
+        let (search_join, search_where): (&str, &str) = match &search {
+            Search::Fts5(_) => ("JOIN posts_fts ON posts_fts.rowid = p.rowid", " AND posts_fts MATCH ?"),
+            Search::PgTsv(_) => ("", " AND p.search_tsv @@ plainto_tsquery(?)"),
+            Search::None => ("", ""),
+        };
 
-        // Helper: bind optional filter values in order (project_id already first)
+        // Helper: bind optional filter values in order (project_id is first).
         macro_rules! bind_filters {
             ($query:expr) => {{
                 let q = $query.bind(params.project_id);
                 let q = if let Some(ref s) = params.status { q.bind(status_to_str(*s)) } else { q };
                 let q = if let Some(ref c) = params.category { q.bind(category_to_str(*c)) } else { q };
-                let q = if use_fts {
-                    // Bind the FTS5 MATCH term — sanitized for FTS syntax.
-                    q.bind(fts_term.clone().unwrap_or_default())
-                } else if let Some(ref pat) = search_pattern {
-                    q.bind(pat.clone()).bind(pat.clone())
-                } else {
-                    q
+                let q = match &search {
+                    Search::Fts5(t) | Search::PgTsv(t) => q.bind(t.clone()),
+                    Search::None => q,
                 };
                 if let Some(ts) = params.since {
                     // Bind the `updated_at >= ?` lower bound as an RFC3339 string.
@@ -398,7 +457,7 @@ impl Store {
         }
 
         // Count query (same WHERE, no LIMIT/OFFSET)
-        let count_sql = format!("SELECT COUNT(*) FROM posts p {fts_join} WHERE {where_sql}{fts_where}");
+        let count_sql = format!("SELECT COUNT(*) FROM posts p {search_join} WHERE {where_sql}{search_where}");
         let total: i64 = bind_filters!(sqlx::query_scalar::<_, i64>(&count_sql))
             .fetch_one(&self.pool)
             .await
@@ -408,9 +467,9 @@ impl Store {
         let sql = format!(
             "SELECT p.*, u.id as user_id, u.email as user_email, u.name as user_name, u.avatar_url as user_avatar \
              FROM posts p \
-             {fts_join}
+             {search_join}
              LEFT JOIN users u ON p.created_by = u.id \
-             WHERE {where_sql}{fts_where} \
+             WHERE {where_sql}{search_where} \
              ORDER BY {order} \
              LIMIT ? OFFSET ?"
         );
@@ -418,8 +477,29 @@ impl Store {
         let query = bind_filters!(sqlx::query(&sql)).bind(params.limit).bind(params.offset);
 
         let rows = query.fetch_all(&self.pool).await.context("Failed to list posts")?;
+        let mut posts: Vec<PostDetail> = rows.iter().map(map_post_detail).collect();
 
-        let posts = rows.iter().map(map_post_detail).collect();
+        // Batch-populate `user_voted` for the requesting user. Previously this
+        // was always `false` in list views (only `get_post` set it per row),
+        // which left the board unable to show which posts the current user had
+        // voted on. A naive per-row lookup would be N+1; instead we do one
+        // indexed query over the `votes` (user_id, post_id) primary key.
+        if let Some(uid) = params.user_id {
+            if !posts.is_empty() {
+                let placeholders = std::iter::repeat_n("?", posts.len()).collect::<Vec<_>>().join(",");
+                let sql = format!("SELECT post_id FROM votes WHERE user_id = ? AND post_id IN ({placeholders})");
+                let mut q = sqlx::query_scalar::<_, String>(&sql).bind(uid);
+                for p in &posts {
+                    q = q.bind(&p.post.id);
+                }
+                let voted_ids: std::collections::HashSet<String> =
+                    q.fetch_all(&self.pool).await.context("Failed to look up votes")?.into_iter().collect();
+                for p in posts.iter_mut() {
+                    p.user_voted = voted_ids.contains(&p.post.id);
+                }
+            }
+        }
+
         Ok((posts, total))
     }
 

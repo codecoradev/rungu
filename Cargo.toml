@@ -86,6 +86,9 @@ clap = { version = "4", features = ["derive"] }
 # Time
 chrono = { version = "0.4", features = ["serde"] }
 
+# In-memory cache (project-by-slug lookup cache)
+moka = { version = "0.12", features = ["future"] }
+
 # UUID
 uuid = { version = "1", features = ["v4", "serde"] }
 

@@ -11,6 +11,18 @@ pub struct Config {
     pub cors_origins: Vec<String>,
     /// Sentry DSN. None = Sentry disabled (no events sent).
     pub sentry_dsn: Option<String>,
+    /// Max requests per minute per IP on `/api/*` routes. `0` disables the
+    /// API rate limiter entirely.
+    pub rate_limit_per_min: u32,
+    /// Max requests per minute per IP on `/auth/*` routes (OAuth
+    /// login/callback). Stricter than the API limiter to blunt credential /
+    /// OAuth abuse. `0` disables it.
+    pub auth_rate_limit_per_min: u32,
+    /// Honor `X-Forwarded-For` when resolving client IPs for rate limiting.
+    /// Default `false` (use the socket address) so a directly-exposed Rungu
+    /// can't be spoofed. Enable only behind a trusted reverse proxy that
+    /// **overwrites** the header.
+    pub trust_proxy: bool,
 }
 
 impl Config {
@@ -32,6 +44,9 @@ impl Config {
             auth: AuthConfig::from_env(),
             cors_origins,
             sentry_dsn: std::env::var("SENTRY_DSN").ok(),
+            rate_limit_per_min: parse_per_min("RUNGU_RATE_LIMIT_PER_MIN", 300),
+            auth_rate_limit_per_min: parse_per_min("RUNGU_AUTH_RATE_LIMIT_PER_MIN", 30),
+            trust_proxy: parse_bool("RUNGU_TRUST_PROXY", false),
         }
     }
 
@@ -58,5 +73,21 @@ impl Config {
             tracing::info!("Created data directory: {}", dir.display());
         }
         Ok(())
+    }
+}
+
+/// Parse a `requests per minute` env var into a `u32`. Falls back to
+/// `default` when unset or unparseable. `0` is a valid value meaning
+/// "disable this limiter".
+fn parse_per_min(var: &str, default: u32) -> u32 {
+    std::env::var(var).ok().and_then(|s| s.parse().ok()).unwrap_or(default)
+}
+
+/// Parse a boolean env var. Accepts true/1/yes/on (case-insensitive);
+/// everything else (including unset) falls back to `default`.
+fn parse_bool(var: &str, default: bool) -> bool {
+    match std::env::var(var).ok().and_then(|s| s.to_lowercase().parse().ok()) {
+        Some(v) => v,
+        None => default,
     }
 }

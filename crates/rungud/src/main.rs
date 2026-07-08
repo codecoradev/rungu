@@ -3,6 +3,7 @@
 //! Main binary: CLI subcommands + HTTP server.
 
 pub mod config;
+pub mod ratelimit;
 pub mod server;
 pub mod spa;
 

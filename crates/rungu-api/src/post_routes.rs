@@ -59,6 +59,7 @@ pub async fn list_posts(
     State(state): State<AppState>,
     Path(slug): Path<String>,
     Query(query): Query<ListPostsQuery>,
+    user: rungu_auth::OptionalCurrentUser,
 ) -> Result<impl IntoResponse, ApiError> {
     let project =
         state.store.get_project_by_slug(&slug).await?.ok_or_else(|| ApiError::not_found("Project not found"))?;
@@ -86,6 +87,7 @@ pub async fn list_posts(
         category,
         query: query.q.as_deref(),
         since: None,
+        user_id: user.user.as_ref().map(|cu| cu.id.as_str()),
         offset,
         limit: per_page,
     };
@@ -336,6 +338,7 @@ async fn fetch_bucket(
         category: None,
         query: None,
         since: None,
+        user_id: None,
         offset: 0,
         limit,
     };
@@ -407,6 +410,7 @@ pub async fn get_project_changelog(
         category: None,
         query: None,
         since,
+        user_id: None,
         offset,
         limit: per_page,
     };
