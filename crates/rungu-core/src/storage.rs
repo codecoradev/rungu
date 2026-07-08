@@ -88,11 +88,26 @@ impl FsStorage {
     }
 
     fn resolve_path(&self, key: &str) -> Result<PathBuf> {
-        // Prevent path traversal — reject keys with .. or absolute paths
-        if key.contains("..") || key.starts_with('/') {
+        // Path-traversal defense. The authoritative gate is the *component*
+        // check below: reject absolute keys and any key containing a
+        // `ParentDir` ("..") component. Storage keys are uuid-derived
+        // (see `storage_key`), so after this check the joined path can only
+        // descend under `base_dir` — it cannot escape.
+        //
+        // We intentionally check *components*, not a naive `contains("..")`
+        // substring: the substring form both misses some traversals and
+        // falsely rejects legitimate filenames containing consecutive dots
+        // (e.g. "my..file.png").
+        //
+        // `canonicalize()` is intentionally NOT used here: it requires the
+        // target to already exist, which is false on the write path (the file
+        // is about to be created), and the keyspace is internal/uuid so there
+        // is no user-controlled filename reaching this function.
+        let key_path = std::path::Path::new(key);
+        if key_path.is_absolute() || key_path.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
             bail!("Invalid storage key");
         }
-        Ok(self.base_dir.join(key))
+        Ok(self.base_dir.join(key_path))
     }
 }
 

@@ -58,8 +58,11 @@ pub async fn exchange_code(client: &reqwest::Client, cfg: &ProviderConfig, code:
     let status = resp.status();
     if !status.is_success() {
         let body = resp.text().await.unwrap_or_default();
-        // Redact potential secrets — only log first 200 chars, never full error body
-        let redacted = if body.len() > 200 { &body[..200] } else { &body };
+        // Redact potential secrets — only log a short preview, never the full
+        // error body. Bound by *characters* not bytes: a byte slice
+        // (`&body[..200]`) would panic if byte 200 falls inside a multibyte
+        // UTF-8 sequence, which is common in provider error responses.
+        let redacted = preview(&body, 200);
         tracing::error!(status = %status, url = %cfg.token_url, body_preview = %redacted, "Token exchange failed");
         bail!("Token exchange failed: HTTP {status}");
     }
@@ -91,7 +94,7 @@ pub async fn fetch_identity(
     let status = resp.status();
     if !status.is_success() {
         let body = resp.text().await.unwrap_or_default();
-        let redacted = if body.len() > 200 { &body[..200] } else { &body };
+        let redacted = preview(&body, 200);
         tracing::error!(status = %status, url = %userinfo_url, body_preview = %redacted, "Userinfo fetch failed");
         bail!("Userinfo fetch failed: HTTP {status}");
     }
@@ -235,6 +238,13 @@ fn parse_keycloak(v: &serde_json::Value) -> Result<OAuthIdentity> {
     })
 }
 
+/// Take up to `max_chars` characters from the start of `s`. Used to preview
+/// provider error bodies for logging without risking a panic on multibyte
+/// UTF-8 (which a byte-length slice like `&s[..n]` would cause).
+fn preview(s: &str, max_chars: usize) -> String {
+    s.chars().take(max_chars).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -321,5 +331,16 @@ mod tests {
             _ => "https://api.github.com/user/emails".to_string(),
         };
         assert_eq!(derived, "https://api.github.com/user/emails");
+    }
+
+    #[test]
+    fn preview_never_panics_on_multibyte_and_truncates_by_char() {
+        // "é" is 2 bytes; a byte slice at an odd length would panic.
+        let s = "éééabc";
+        assert_eq!(preview(s, 3), "ééé");
+        // Shorter than the cap → returned whole.
+        assert_eq!(preview(s, 100), s);
+        // Empty input is fine.
+        assert_eq!(preview("", 5), "");
     }
 }
