@@ -20,6 +20,10 @@ import type {
 
 const BASE = '';
 
+/** Encode a single path segment so a caller-supplied slug/id can never inject
+ *  `..` or `/` and traverse to a different route (e.g. `/api/projects/../auth/me`). */
+const seg = (s: string) => encodeURIComponent(s);
+
 class ApiError extends Error {
     constructor(
         public status: number,
@@ -66,7 +70,7 @@ export const api = {
     getCurrentUser: () => request<DataResponse<CurrentUser>>('/auth/me').then((r) => r.data),
 
     login: (provider: string) => {
-        window.location.href = `${BASE}/auth/${provider}/login`;
+        window.location.href = `${BASE}/auth/${seg(provider)}/login`;
     },
 
     logout: () =>
@@ -76,7 +80,7 @@ export const api = {
     listProjects: () => request<{ data: Project[] }>('/api/projects').then((r) => r.data),
 
     getProject: (slug: string) =>
-        request<DataResponse<Project>>(`/api/projects/${slug}`).then((r) => r.data),
+        request<DataResponse<Project>>(`/api/projects/${seg(slug)}`).then((r) => r.data),
 
     createProject: (body: { name: string; slug?: string; description?: string }) =>
         request<DataResponse<Project>>('/api/projects', {
@@ -85,13 +89,13 @@ export const api = {
         }).then((r) => r.data),
 
     updateProject: (slug: string, body: { name?: string; description?: string }) =>
-        request<DataResponse<Project>>(`/api/projects/${slug}`, {
+        request<DataResponse<Project>>(`/api/projects/${seg(slug)}`, {
             method: 'PATCH',
             body: JSON.stringify(body),
         }).then((r) => r.data),
 
     deleteProject: (slug: string) =>
-        request<void>(`/api/projects/${slug}`, { method: 'DELETE' }),
+        request<void>(`/api/projects/${seg(slug)}`, { method: 'DELETE' }),
 
     // Posts
     listPosts: (slug: string, params?: {
@@ -111,14 +115,14 @@ export const api = {
         if (params?.per_page !== undefined) query.set('per_page', String(params.per_page));
         const qs = query.toString();
         return request<PaginatedResponse<PostDetail>>(
-            `/api/projects/${slug}/posts${qs ? `?${qs}` : ''}`,
+            `/api/projects/${seg(slug)}/posts${qs ? `?${qs}` : ''}`,
         );
     },
 
     /** Fetch the public roadmap (posts grouped by lifecycle status). Public endpoint. */
     getRoadmap: (slug: string, limit?: number) => {
         const qs = limit !== undefined ? `?limit=${limit}` : '';
-        return request<DataResponse<RoadmapResponse>>(`/api/projects/${slug}/roadmap${qs}`).then((r) => r.data);
+        return request<DataResponse<RoadmapResponse>>(`/api/projects/${seg(slug)}/roadmap${qs}`).then((r) => r.data);
     },
 
     /** Fetch the changelog (done posts, newest ship first). Public, paginated. */
@@ -128,62 +132,62 @@ export const api = {
         if (params?.per_page !== undefined) query.set('per_page', String(params.per_page));
         if (params?.since) query.set('since', params.since);
         const qs = query.toString();
-        return request<PaginatedResponse<PostDetail>>(`/api/projects/${slug}/changelog${qs ? `?${qs}` : ''}`);
+        return request<PaginatedResponse<PostDetail>>(`/api/projects/${seg(slug)}/changelog${qs ? `?${qs}` : ''}`);
     },
 
     getPost: (id: string) =>
-        request<DataResponse<PostDetail>>(`/api/posts/${id}`).then((r) => r.data),
+        request<DataResponse<PostDetail>>(`/api/posts/${seg(id)}`).then((r) => r.data),
 
     createPost: (slug: string, body: { title: string; description?: string; category?: PostCategory }) =>
-        request<DataResponse<Post>>(`/api/projects/${slug}/posts`, {
+        request<DataResponse<Post>>(`/api/projects/${seg(slug)}/posts`, {
             method: 'POST',
             body: JSON.stringify(body),
         }).then((r) => r.data),
 
     updatePostStatus: (id: string, status: PostStatus) =>
-        request<DataResponse<PostDetail>>(`/api/posts/${id}`, {
+        request<DataResponse<PostDetail>>(`/api/posts/${seg(id)}`, {
             method: 'PATCH',
             body: JSON.stringify({ status }),
         }).then((r) => r.data),
 
     updatePostCategory: (id: string, category: PostCategory) =>
-        request<DataResponse<PostDetail>>(`/api/posts/${id}`, {
+        request<DataResponse<PostDetail>>(`/api/posts/${seg(id)}`, {
             method: 'PATCH',
             body: JSON.stringify({ category }),
         }).then((r) => r.data),
 
-    deletePost: (id: string) => request<void>(`/api/posts/${id}`, { method: 'DELETE' }),
+    deletePost: (id: string) => request<void>(`/api/posts/${seg(id)}`, { method: 'DELETE' }),
 
     // Votes
     toggleVote: (id: string) =>
-        request<DataResponse<VoteResponse>>(`/api/posts/${id}/vote`, {
+        request<DataResponse<VoteResponse>>(`/api/posts/${seg(id)}/vote`, {
             method: 'POST',
         }).then((r) => r.data),
 
     checkVoted: (id: string) =>
-        request<DataResponse<{ voted: boolean }>>(`/api/posts/${id}/vote`).then((r) => r.data),
+        request<DataResponse<{ voted: boolean }>>(`/api/posts/${seg(id)}/vote`).then((r) => r.data),
 
     // Comments
     listComments: (postId: string) =>
-        request<{ data: Comment[] }>(`/api/posts/${postId}/comments`).then((r) => r.data),
+        request<{ data: Comment[] }>(`/api/posts/${seg(postId)}/comments`).then((r) => r.data),
 
     createComment: (postId: string, body: { content: string; parent_id?: string }) =>
-        request<DataResponse<Comment>>(`/api/posts/${postId}/comments`, {
+        request<DataResponse<Comment>>(`/api/posts/${seg(postId)}/comments`, {
             method: 'POST',
             body: JSON.stringify(body),
         }).then((r) => r.data),
 
     deleteComment: (id: string) =>
-        request<void>(`/api/comments/${id}`, { method: 'DELETE' }),
+        request<void>(`/api/comments/${seg(id)}`, { method: 'DELETE' }),
 
     // Attachments
     listAttachments: (postId: string) =>
-        request<AttachmentListResponse>(`/api/posts/${postId}/attachments`).then((r) => r.data),
+        request<AttachmentListResponse>(`/api/posts/${seg(postId)}/attachments`).then((r) => r.data),
 
     uploadAttachment: async (postId: string, file: File) => {
         const formData = new FormData();
         formData.append('file', file);
-        const res = await fetch(`/api/posts/${postId}/attachments`, {
+        const res = await fetch(`/api/posts/${seg(postId)}/attachments`, {
             method: 'POST',
             body: formData,
             credentials: 'include',
@@ -196,7 +200,7 @@ export const api = {
     },
 
     deleteAttachment: (id: string) =>
-        request<void>(`/api/attachments/${id}`, { method: 'DELETE' }),
+        request<void>(`/api/attachments/${seg(id)}`, { method: 'DELETE' }),
 };
 
 export { ApiError };
