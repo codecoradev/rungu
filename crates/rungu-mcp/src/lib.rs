@@ -13,8 +13,9 @@
 //! This means:
 //! - Any process that can spawn this binary can read and write all feedback data.
 //! - There is **no row-level authorization** and **no user impersonation check**.
-//! - Mutating tools (`create_post`, `update_post_status`, `vote_post`,
-//!   `add_comment`) execute as the built-in `mcp@rungu.local` system user.
+//! - Mutating tools (`create_post`, `update_post_status`, `update_post_category`,
+//!   `delete_post`, `vote_post`, `add_comment`, `delete_comment`, `delete_attachment`)
+//!   execute as the built-in `mcp@rungu.local` system user.
 //! - The HTTP API's OAuth/session/role model does **not** apply here.
 //!
 //! Never expose this server over the network, never share the database file
@@ -87,6 +88,10 @@ async fn handle_request(method: &str, params: &Value, store: &Store) -> Result<V
         "get_stats" => get_stats(params, store).await,
         "get_trending" => get_trending(params, store).await,
         "list_attachments" => list_attachments(params, store).await,
+        "delete_post" => delete_post(params, store).await,
+        "update_post_category" => update_post_category(params, store).await,
+        "get_roadmap" => get_roadmap(params, store).await,
+        "delete_attachment" => delete_attachment(params, store).await,
         _ => Err(format!("Unknown method: {method}")),
     }
 }
@@ -468,6 +473,85 @@ pub async fn run_server(pool: AnyPool, is_sqlite: bool) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Delete a post by ID.
+async fn delete_post(params: &Value, store: &Store) -> Result<Value, String> {
+    let id = get_str(params, "id")?;
+    store.delete_post(id).await.map_err(|e| format!("Failed to delete post: {e}"))?;
+    Ok(json!({ "deleted": true, "id": id }))
+}
+
+/// Update a post's category.
+async fn update_post_category(params: &Value, store: &Store) -> Result<Value, String> {
+    let id = get_str(params, "id")?;
+    let category_str = get_str(params, "category")?;
+    let category = parse_category(category_str);
+
+    store.update_post_category(id, category).await.map_err(|e| format!("Failed to update post category: {e}"))?;
+
+    Ok(json!({ "updated": true, "id": id, "category": category_str }))
+}
+
+/// Get a project roadmap — posts grouped by lifecycle status (planned, in_progress, done).
+///
+/// Mirrors the REST `GET /projects/{slug}/roadmap` endpoint.
+async fn get_roadmap(params: &Value, store: &Store) -> Result<Value, String> {
+    let slug = get_str(params, "slug")?;
+    let per_bucket = get_optional_u64(params, "limit").unwrap_or(10).clamp(1, 50) as i64;
+
+    let project = store
+        .get_project_by_slug(slug)
+        .await
+        .map_err(|e| format!("Failed to get project: {e}"))?
+        .ok_or_else(|| format!("Project not found: {slug}"))?;
+
+    let planned = fetch_roadmap_bucket(store, &project.id, PostStatus::Planned, per_bucket).await?;
+    let in_progress = fetch_roadmap_bucket(store, &project.id, PostStatus::InProgress, per_bucket).await?;
+    let done = fetch_roadmap_bucket(store, &project.id, PostStatus::Done, per_bucket).await?;
+
+    Ok(json!({
+        "data": {
+            "planned": planned.0,
+            "planned_total": planned.1,
+            "in_progress": in_progress.0,
+            "in_progress_total": in_progress.1,
+            "done": done.0,
+            "done_total": done.1,
+            "limit": per_bucket,
+        }
+    }))
+}
+
+/// Helper: fetch a single roadmap bucket (top-N most-voted posts for a status).
+async fn fetch_roadmap_bucket(
+    store: &Store,
+    project_id: &str,
+    status: PostStatus,
+    limit: i64,
+) -> Result<(Vec<PostDetail>, i64), String> {
+    let (posts, total) = store
+        .list_posts(ListPostsParams {
+            project_id,
+            sort: PostSort::MostVotes,
+            status: Some(status),
+            category: None,
+            query: None,
+            since: None,
+            user_id: None,
+            offset: 0,
+            limit,
+        })
+        .await
+        .map_err(|e| format!("Failed to fetch roadmap bucket: {e}"))?;
+    Ok((posts, total))
+}
+
+/// Delete an attachment by ID.
+async fn delete_attachment(params: &Value, store: &Store) -> Result<Value, String> {
+    let attachment_id = get_str(params, "id")?;
+    store.delete_attachment(attachment_id).await.map_err(|e| format!("Failed to delete attachment: {e}"))?;
+    Ok(json!({ "deleted": true, "id": attachment_id }))
 }
 
 /// Delete a comment by ID.

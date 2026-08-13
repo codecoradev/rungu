@@ -85,13 +85,13 @@ See [CLI Reference](https://rungu.pages.dev/cli-reference) for full options.
 
 ## MCP Tools
 
-15 tools available via stdio (JSON-RPC 2.0) for AI coding agents:
+19 tools available via stdio (JSON-RPC 2.0) for AI coding agents:
 
 **Projects:** `list_projects`, `get_project`
-**Posts:** `list_posts`, `get_post`, `create_post`, `update_post_status`, `vote_post`, `search_posts`
+**Posts:** `list_posts`, `get_post`, `create_post`, `update_post_status`, `update_post_category`, `delete_post`, `vote_post`, `search_posts`, `get_roadmap`
 **Comments:** `list_comments`, `add_comment`, `delete_comment`
 **Changelog:** `get_changelog`
-**Attachments:** `list_attachments`
+**Attachments:** `list_attachments`, `delete_attachment`
 **Insights:** `get_stats`, `get_trending`
 
 Connect from any MCP-compatible client (Claude Desktop, Cursor, etc.):
