@@ -30,6 +30,7 @@ export default defineConfig({
           { text: 'CLI Reference', link: '/cli-reference' },
           { text: 'Configuration', link: '/configuration' },
           { text: 'Docker', link: '/docker' },
+          { text: 'Production Deployment', link: '/production-deploy' },
         ],
       },
       {
