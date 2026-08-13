@@ -2,6 +2,8 @@
 
 > **Rungu — Listen. Prioritize. Build.**
 
+- MCP Registry name: `mcp-name: io.github.codecoradev/rungu`
+
 Lightweight, self-hosted feedback board. Collect feature requests, bug reports, and suggestions from your users — with voting, commenting, and prioritization. Built with Rust + SvelteKit.
 
 ## Features

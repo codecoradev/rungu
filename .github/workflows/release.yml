@@ -130,6 +130,8 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=raw,value=latest
+          labels: |
+            io.modelcontextprotocol.server.name=io.github.codecoradev/rungu
       - name: Setup Docker Buildx
         uses: docker/setup-buildx-action@v3
       - name: Login to GHCR
