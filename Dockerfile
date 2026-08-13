@@ -38,6 +38,8 @@ RUN touch crates/*/src/*.rs && cargo build --release --bin rungu
 # ── Stage 3: Scratch runtime (zero OS overhead) ───────────────────────
 FROM scratch
 
+LABEL io.modelcontextprotocol.server.name="io.github.codecoradev/rungu"
+
 # Copy CA certs for HTTPS (reqwest needs this for OAuth calls)
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 
