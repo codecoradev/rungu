@@ -48,14 +48,18 @@ Add to your MCP configuration:
 | `get_post` | Get post detail with comments |
 | `create_post` | Submit a new feedback post |
 | `update_post_status` | Change post status (open → planned → done) |
+| `update_post_category` | Change post category (bug, feature, question, feedback) |
+| `delete_post` | Delete a post by ID |
 | `vote_post` | Toggle vote on a post |
 | `search_posts` | Full-text search across posts |
+| `get_roadmap` | Posts grouped by lifecycle status (planned, in_progress, done) |
 | `list_comments` | Get comments for a post |
 | `add_comment` | Add comment to a post |
 | `delete_comment` | Delete a comment by ID |
 | `get_stats` | Project stats (total posts, by status, by category) |
 | `get_trending` | Top voted posts in last 7 days |
 | `list_attachments` | List image attachments for a post |
+| `delete_attachment` | Delete an attachment by ID |
 
 ## Example Usage
 
@@ -81,7 +85,7 @@ The MCP server uses **stdio** transport (stdin/stdout). No HTTP server needed �
 The MCP server intentionally has **no authentication**. This is safe only because of a strict trust assumption:
 
 - **The MCP subprocess inherits the privileges of whatever launches it.** Any agent, editor plugin, or script that can spawn `rungu mcp` can read and mutate the entire SQLite database.
-- **There is no row-level authorization.** `update_post_status`, `create_post`, `vote_post`, and `add_comment` execute as a built-in MCP user with full write access.
+- **There is no row-level authorization.** `create_post`, `update_post_status`, `update_post_category`, `delete_post`, `vote_post`, `add_comment`, `delete_comment`, and `delete_attachment` execute as a built-in MCP user with full write access.
 
 ### Safe deployments
 
@@ -98,7 +102,7 @@ The MCP server intentionally has **no authentication**. This is safe only becaus
 ### Future hardening
 
 Planned guardrails (tracked separately) include:
-- An `RUNGU_MCP_READ_ONLY` mode that disables mutating tools (`create_post`, `update_post_status`, `vote_post`, `add_comment`).
+- An `RUNGU_MCP_READ_ONLY` mode that disables mutating tools (`create_post`, `update_post_status`, `update_post_category`, `delete_post`, `vote_post`, `add_comment`, `delete_comment`, `delete_attachment`).
 - An explicit `RUNGU_MCP_ALLOW_WRITES=true` opt-in before mutating tools are registered.
 - Scoped capability tokens for multi-tenant or shared-workstation use cases.
 
