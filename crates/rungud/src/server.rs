@@ -91,6 +91,7 @@ pub async fn serve(config: Config, pool: sqlx::AnyPool, is_sqlite: bool, listen:
         .merge(auth_routes)
         .merge(SwaggerUi::new("/swagger-ui").url("/api-docs/openapi.json", ApiDoc::openapi()))
         .route("/health", get(health_check))
+        .merge(crate::embed::router())
         .fallback(spa_handler)
         // Sentry layer: capture HTTP request context and errors.
         // No-op when SENTRY_DSN is not set.
