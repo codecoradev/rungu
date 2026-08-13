@@ -11,6 +11,8 @@ pub mod openapi;
 pub mod post_routes;
 pub mod project_routes;
 pub mod vote_routes;
+pub mod webhook;
+pub mod webhook_routes;
 
 use axum::Router;
 use axum::extract::FromRef;
@@ -51,4 +53,5 @@ pub fn api_routes() -> Router<AppState> {
         .merge(vote_routes::router())
         .merge(comment_routes::router())
         .merge(attachment_routes::router())
+        .merge(webhook_routes::router())
 }

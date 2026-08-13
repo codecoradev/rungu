@@ -39,6 +39,13 @@ use utoipa::OpenApi;
         crate::attachment_routes::upload_attachment,
         crate::attachment_routes::get_attachment_file,
         crate::attachment_routes::delete_attachment,
+        // Webhooks
+        crate::webhook_routes::list_webhooks,
+        crate::webhook_routes::create_webhook,
+        crate::webhook_routes::get_webhook,
+        crate::webhook_routes::update_webhook,
+        crate::webhook_routes::delete_webhook,
+        crate::webhook_routes::list_deliveries,
         // Auth
         crate::auth_routes::list_providers,
         crate::auth_routes::login,
@@ -66,6 +73,11 @@ use utoipa::OpenApi;
         rungu_proto::VoteStatusResponse,
         rungu_proto::Attachment,
         rungu_proto::AttachmentResponse,
+        rungu_proto::Webhook,
+        rungu_proto::WebhookEventType,
+        rungu_proto::WebhookDelivery,
+        rungu_proto::CreateWebhookBody,
+        rungu_proto::UpdateWebhookBody,
         rungu_proto::CurrentUser,
     )),
     tags(
@@ -74,6 +86,7 @@ use utoipa::OpenApi;
         (name = "votes", description = "Voting endpoints"),
         (name = "comments", description = "Comment endpoints"),
         (name = "attachments", description = "Image attachment endpoints"),
+        (name = "webhooks", description = "Webhook subscription and delivery endpoints"),
         (name = "auth", description = "Authentication endpoints (OAuth2)"),
     ),
 )]

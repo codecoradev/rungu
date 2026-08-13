@@ -387,3 +387,67 @@ pub struct AttachmentResponse {
     pub created_by: String,
     pub created_at: String,
 }
+
+// ── Webhooks ──────────────────────────────────────────────────────────
+
+/// Webhook event types supported by Rungu.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum WebhookEventType {
+    PostCreated,
+    PostStatusChanged,
+    CommentCreated,
+}
+
+impl WebhookEventType {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::PostCreated => "post.created",
+            Self::PostStatusChanged => "post.status_changed",
+            Self::CommentCreated => "comment.created",
+        }
+    }
+}
+
+/// A webhook subscription.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct Webhook {
+    pub id: String,
+    pub project_id: String,
+    pub url: String,
+    pub events: String,
+    pub is_active: bool,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// Request body for creating a webhook.
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct CreateWebhookBody {
+    pub url: String,
+    pub events: Option<String>,
+    pub secret: Option<String>,
+}
+
+/// Request body for updating a webhook.
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct UpdateWebhookBody {
+    pub url: Option<String>,
+    pub events: Option<String>,
+    pub is_active: Option<bool>,
+}
+
+/// Webhook delivery record (audit trail).
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct WebhookDelivery {
+    pub id: String,
+    pub webhook_id: String,
+    pub event_type: String,
+    pub payload: String,
+    pub status_code: Option<i32>,
+    pub success: bool,
+    pub attempts: i32,
+    pub last_error: String,
+    pub created_at: String,
+    pub delivered_at: Option<String>,
+}

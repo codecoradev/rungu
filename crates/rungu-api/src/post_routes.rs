@@ -146,6 +146,23 @@ pub async fn create_post(
         .create_post(&project.id, title, body.description.unwrap_or_default().as_str(), category, &user.id)
         .await?;
 
+    // Fire webhook event: post.created
+    crate::webhook::dispatch_event(
+        std::sync::Arc::new(state.store.clone()),
+        state.http_client.clone(),
+        project.id.clone(),
+        rungu_proto::WebhookEventType::PostCreated,
+        serde_json::json!({
+            "event": "post.created",
+            "data": {
+                "id": &post.id,
+                "title": &post.title,
+                "project_id": &post.project_id,
+                "category": &post.category,
+            }
+        }),
+    );
+
     Ok((StatusCode::CREATED, Json(serde_json::json!({ "data": post }))))
 }
 
@@ -209,6 +226,24 @@ pub async fn update_post(
     if let Some(status_str) = &body.status {
         let status = parse_status(status_str).ok_or_else(|| ApiError::bad_request("Invalid status"))?;
         state.store.update_post_status(&id, status).await?;
+
+        // Fire webhook event: post.status_changed
+        crate::webhook::dispatch_event(
+            std::sync::Arc::new(state.store.clone()),
+            state.http_client.clone(),
+            existing.post.project_id.clone(),
+            rungu_proto::WebhookEventType::PostStatusChanged,
+            serde_json::json!({
+                "event": "post.status_changed",
+                "data": {
+                    "id": &existing.post.id,
+                    "title": &existing.post.title,
+                    "project_id": &existing.post.project_id,
+                    "old_status": &existing.post.status,
+                    "new_status": status_str,
+                }
+            }),
+        );
     }
 
     if let Some(category_str) = &body.category {

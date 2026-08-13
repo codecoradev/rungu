@@ -91,6 +91,23 @@ pub async fn create_comment(
 
     let comment = state.store.create_comment(&post_id, content, body.parent_id.as_deref(), &user.id).await?;
 
+    // Fire webhook event: comment.created
+    crate::webhook::dispatch_event(
+        std::sync::Arc::new(state.store.clone()),
+        state.http_client.clone(),
+        _post.post.project_id.clone(),
+        rungu_proto::WebhookEventType::CommentCreated,
+        serde_json::json!({
+            "event": "comment.created",
+            "data": {
+                "id": &comment.comment.id,
+                "post_id": &post_id,
+                "post_title": &_post.post.title,
+                "project_id": &_post.post.project_id,
+            }
+        }),
+    );
+
     Ok((StatusCode::CREATED, Json(serde_json::json!({ "data": comment }))))
 }
 
