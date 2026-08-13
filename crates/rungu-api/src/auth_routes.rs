@@ -14,6 +14,7 @@ use rungu_proto::AuthProvider;
 use serde::Deserialize;
 use std::collections::HashMap;
 use tracing::{error, info, warn};
+use utoipa::ToSchema;
 
 use crate::AppState;
 use crate::oauth;
@@ -60,14 +61,22 @@ pub fn auth_routes() -> Router<AppState> {
 // ── Handlers ────────────────────────────────────────────────────────────
 
 /// `GET /auth/providers` — list active providers for login buttons.
-async fn list_providers(State(state): State<AppState>) -> Json<serde_json::Value> {
+#[utoipa::path(
+    get,
+    path = "/auth/providers",
+    tag = "auth",
+    responses(
+        (status = 200, description = "List of active authentication providers"),
+    ),
+)]
+pub async fn list_providers(State(state): State<AppState>) -> Json<serde_json::Value> {
     let providers = state.config.active_providers();
     Json(serde_json::json!({ "providers": providers }))
 }
 
 /// Query params for the login endpoint.
-#[derive(Debug, Deserialize)]
-struct LoginQuery {
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct LoginQuery {
     /// Optional redirect path after successful auth (default: "/").
     redirect: Option<String>,
 }
@@ -76,7 +85,19 @@ struct LoginQuery {
 ///
 /// Generates a random CSRF state token, stores it in a short-lived HttpOnly cookie,
 /// and redirects (302) the user to the OAuth provider's consent screen.
-async fn login(
+#[utoipa::path(
+    get,
+    path = "/auth/{provider}/login",
+    tag = "auth",
+    params(
+        ("provider" = String, Path, description = "OAuth provider name (google, github, keycloak)"),
+    ),
+    responses(
+        (status = 302, description = "Redirect to provider authorization URL"),
+        (status = 404, description = "Provider not configured"),
+    ),
+)]
+pub async fn login(
     State(state): State<AppState>,
     Path(provider): Path<String>,
     Query(query): Query<LoginQuery>,
@@ -142,8 +163,8 @@ async fn login(
 }
 
 /// Query params for the OAuth callback.
-#[derive(Debug, Deserialize)]
-struct CallbackQuery {
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct CallbackQuery {
     code: Option<String>,
     state: Option<String>,
     error: Option<String>,
@@ -153,7 +174,22 @@ struct CallbackQuery {
 ///
 /// Validates state, exchanges code for access token, fetches user identity,
 /// creates/finds user in DB, issues JWT, sets session cookie, redirects to "/".
-async fn callback(
+#[utoipa::path(
+    get,
+    path = "/auth/{provider}/callback",
+    tag = "auth",
+    params(
+        ("provider" = String, Path, description = "OAuth provider name (google, github, keycloak)"),
+    ),
+    responses(
+        (status = 302, description = "Login successful, redirect to app"),
+        (status = 400, description = "Missing or invalid OAuth parameters"),
+        (status = 403, description = "Email not verified by provider"),
+        (status = 404, description = "Provider not configured"),
+        (status = 502, description = "Token exchange or identity fetch failed"),
+    ),
+)]
+pub async fn callback(
     State(state): State<AppState>,
     Path(provider): Path<String>,
     Query(query): Query<CallbackQuery>,
@@ -277,7 +313,15 @@ async fn callback(
 /// `POST /auth/logout` — clear session cookie.
 ///
 /// Returns 200 with cleared cookie. Client should redirect to "/".
-async fn logout(State(state): State<AppState>) -> impl IntoResponse {
+#[utoipa::path(
+    post,
+    path = "/auth/logout",
+    tag = "auth",
+    responses(
+        (status = 200, description = "Logged out successfully"),
+    ),
+)]
+pub async fn logout(State(state): State<AppState>) -> impl IntoResponse {
     let clear_session = clear_cookie(SESSION_COOKIE, state.config.secure_cookie);
 
     info!("User logout");
@@ -288,7 +332,16 @@ async fn logout(State(state): State<AppState>) -> impl IntoResponse {
 /// `GET /auth/me` — return current user info from JWT session.
 ///
 /// Returns 401 if not authenticated.
-async fn me(State(state): State<AppState>, headers: HeaderMap) -> Result<Json<serde_json::Value>, StatusCode> {
+#[utoipa::path(
+    get,
+    path = "/auth/me",
+    tag = "auth",
+    responses(
+        (status = 200, description = "Current authenticated user info"),
+        (status = 401, description = "Not authenticated"),
+    ),
+)]
+pub async fn me(State(state): State<AppState>, headers: HeaderMap) -> Result<Json<serde_json::Value>, StatusCode> {
     let token = extract_cookie_value(&headers, SESSION_COOKIE).ok_or(StatusCode::UNAUTHORIZED)?;
 
     let current_user = session::validate_jwt(&token, &state.config.app_secret).map_err(|e| {
