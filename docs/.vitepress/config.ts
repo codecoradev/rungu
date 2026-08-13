@@ -58,6 +58,7 @@ export default defineConfig({
           { text: 'MCP Server', link: '/integrations/mcp' },
           { text: 'REST API', link: '/integrations/api' },
           { text: 'Webhooks', link: '/integrations/webhooks' },
+          { text: 'Migrate from Astuto', link: '/integrations/migrate-from-astuto' },
         ],
       },
       {
