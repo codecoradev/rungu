@@ -22,6 +22,8 @@ anyhow = { workspace = true }
 chrono = { workspace = true }
 url = { workspace = true }
 urlencoding = "2.1"
+hmac = { workspace = true }
+sha2 = { workspace = true }
 utoipa = { workspace = true }
 
 [dev-dependencies]
