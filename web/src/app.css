@@ -1,26 +1,34 @@
 @import 'tailwindcss';
 
+/*
+ * Bind the `dark:` utility variant to a `.dark` class on <html> instead of the
+ * OS media query. This is the universal Tailwind v4 convention and keeps the
+ * variant in lockstep with the CSS-variable swap below (both react to the same
+ * class), so manual light/dark toggling never desyncs from `dark:` utilities.
+ */
+@custom-variant dark (&:is(.dark *));
+
 @theme inline {
-    /* Dark mode (default) */
-    --color-background: oklch(0.145 0.015 265);
-    --color-foreground: oklch(0.985 0 0);
-    --color-card: oklch(0.18 0.015 265);
-    --color-card-foreground: oklch(0.985 0 0);
-    --color-popover: oklch(0.18 0.015 265);
-    --color-popover-foreground: oklch(0.985 0 0);
-    --color-primary: oklch(0.55 0.2 250);
+    /* Light mode = default token values */
+    --color-background: oklch(0.985 0 0);
+    --color-foreground: oklch(0.145 0.015 265);
+    --color-card: oklch(0.985 0 0);
+    --color-card-foreground: oklch(0.145 0.015 265);
+    --color-popover: oklch(0.985 0 0);
+    --color-popover-foreground: oklch(0.145 0.015 265);
+    --color-primary: oklch(0.5 0.2 250);
     --color-primary-foreground: oklch(0.985 0 0);
-    --color-secondary: oklch(0.27 0.015 265);
-    --color-secondary-foreground: oklch(0.985 0 0);
-    --color-muted: oklch(0.27 0.015 265);
-    --color-muted-foreground: oklch(0.7 0.015 265);
-    --color-accent: oklch(0.27 0.015 265);
-    --color-accent-foreground: oklch(0.985 0 0);
+    --color-secondary: oklch(0.96 0.005 265);
+    --color-secondary-foreground: oklch(0.25 0.015 265);
+    --color-muted: oklch(0.96 0.005 265);
+    --color-muted-foreground: oklch(0.55 0.015 265);
+    --color-accent: oklch(0.96 0.005 265);
+    --color-accent-foreground: oklch(0.25 0.015 265);
     --color-destructive: oklch(0.55 0.22 25);
     --color-destructive-foreground: oklch(0.985 0 0);
-    --color-border: oklch(0.35 0.015 265);
-    --color-input: oklch(0.35 0.015 265);
-    --color-ring: oklch(0.6 0.15 250);
+    --color-border: oklch(0.87 0.005 265);
+    --color-input: oklch(0.87 0.005 265);
+    --color-ring: oklch(0.45 0.15 250);
     --radius-sm: 0.25rem;
     --radius-md: 0.375rem;
     --radius-lg: 0.5rem;
@@ -38,26 +46,32 @@
         font-family: system-ui, -apple-system, sans-serif;
     }
 
-    /* Light mode — applied via .light class on <html> */
-    :root.light {
-        --color-background: oklch(0.985 0 0);
-        --color-foreground: oklch(0.145 0.015 265);
-        --color-card: oklch(0.985 0 0);
-        --color-card-foreground: oklch(0.145 0.015 265);
-        --color-popover: oklch(0.985 0 0);
-        --color-popover-foreground: oklch(0.145 0.015 265);
-        --color-primary: oklch(0.5 0.2 250);
+    /* Native UI (scrollbars, <select>, autofill, form controls) follows the theme. */
+    :root {
+        color-scheme: light;
+    }
+
+    /* Dark mode — applied via .dark class on <html> */
+    .dark {
+        color-scheme: dark;
+        --color-background: oklch(0.145 0.015 265);
+        --color-foreground: oklch(0.985 0 0);
+        --color-card: oklch(0.18 0.015 265);
+        --color-card-foreground: oklch(0.985 0 0);
+        --color-popover: oklch(0.18 0.015 265);
+        --color-popover-foreground: oklch(0.985 0 0);
+        --color-primary: oklch(0.55 0.2 250);
         --color-primary-foreground: oklch(0.985 0 0);
-        --color-secondary: oklch(0.96 0.005 265);
-        --color-secondary-foreground: oklch(0.25 0.015 265);
-        --color-muted: oklch(0.96 0.005 265);
-        --color-muted-foreground: oklch(0.55 0.015 265);
-        --color-accent: oklch(0.96 0.005 265);
-        --color-accent-foreground: oklch(0.25 0.015 265);
+        --color-secondary: oklch(0.27 0.015 265);
+        --color-secondary-foreground: oklch(0.985 0 0);
+        --color-muted: oklch(0.27 0.015 265);
+        --color-muted-foreground: oklch(0.7 0.015 265);
+        --color-accent: oklch(0.27 0.015 265);
+        --color-accent-foreground: oklch(0.985 0 0);
         --color-destructive: oklch(0.55 0.22 25);
         --color-destructive-foreground: oklch(0.985 0 0);
-        --color-border: oklch(0.87 0.005 265);
-        --color-input: oklch(0.87 0.005 265);
-        --color-ring: oklch(0.45 0.15 250);
+        --color-border: oklch(0.35 0.015 265);
+        --color-input: oklch(0.35 0.015 265);
+        --color-ring: oklch(0.6 0.15 250);
     }
 }

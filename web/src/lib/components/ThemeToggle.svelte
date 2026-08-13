@@ -1,49 +1,34 @@
 <script lang="ts">
     import { Button } from '$lib/components/ui/button';
     import { browser } from '$app/environment';
+    import {
+        getStoredTheme,
+        applyTheme,
+        setTheme,
+        cycleTheme,
+        watchSystemTheme,
+        type Theme,
+    } from '$lib/theme';
 
-    let {
-        theme = $bindable(
-            browser
-                ? (() => {
-                      try {
-                          const saved = localStorage.getItem('rungu-theme');
-                          if (saved === 'light' || saved === 'dark' || saved === 'system') return saved;
-                      } catch {}
-                      return 'system' as const;
-                  })()
-                : 'system'
-        ),
-    }: { theme?: 'light' | 'dark' | 'system' } = $props();
+    // Read the persisted theme once on the client; 'system' during SSR so the
+    // server-rendered markup matches the pre-hydration FOUC script output.
+    let theme = $state<Theme>(browser ? getStoredTheme() : 'system');
 
     function cycle() {
-        const order: Array<'light' | 'dark' | 'system'> = ['light', 'dark', 'system'];
-        const idx = order.indexOf(theme);
-        theme = order[(idx + 1) % order.length];
-        applyTheme();
+        theme = cycleTheme(theme);
+        setTheme(theme);
     }
 
-    function applyTheme() {
-        const root = document.documentElement;
-        const prefersLight = window.matchMedia('(prefers-color-scheme: light)').matches;
-
-        const isLight = theme === 'light' || (theme === 'system' && prefersLight);
-
-        if (isLight) {
-            root.classList.add('light');
-        } else {
-            root.classList.remove('light');
-        }
-
-        try {
-            localStorage.setItem('rungu-theme', theme);
-        } catch {
-            // localStorage unavailable
-        }
-    }
-
+    // Apply on mount and whenever the user changes modes.
     $effect(() => {
-        applyTheme();
+        applyTheme(theme);
+    });
+
+    // When following the OS, react to live changes without a reload.
+    $effect(() => {
+        if (theme !== 'system') return;
+        const stop = watchSystemTheme(() => applyTheme('system'));
+        return stop;
     });
 </script>
 

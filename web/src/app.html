@@ -5,17 +5,23 @@
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E🛡️%3C/text%3E%3C/svg%3E" />
         <script>
-            // Prevent flash of wrong theme — runs before page render
+            // Prevent flash of wrong theme — runs before page render.
+            // Mirrors the logic in src/lib/theme.ts: 'system' resolves via the
+            // OS preference, so we must NOT treat a stored 'system' value as a
+            // concrete dark choice (that caused a dark→light flash for
+            // system + light-OS users).
             (function () {
                 try {
                     var stored = localStorage.getItem('rungu-theme');
-                    var prefersLight = window.matchMedia('(prefers-color-scheme: light)').matches;
-                    var isLight = stored ? stored === 'light' : prefersLight;
-                    if (isLight) {
-                        document.documentElement.classList.add('light');
+                    var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+                    var isDark =
+                        stored === 'dark' ||
+                        ((!stored || stored === 'system') && prefersDark);
+                    if (isDark) {
+                        document.documentElement.classList.add('dark');
                     }
                 } catch (e) {
-                    // localStorage unavailable (incognito, disabled) — default to dark
+                    // localStorage unavailable (incognito, disabled) — follow OS only.
                 }
             })();
         </script>
