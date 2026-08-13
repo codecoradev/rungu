@@ -56,6 +56,7 @@ export default defineConfig({
         items: [
           { text: 'MCP Server', link: '/integrations/mcp' },
           { text: 'REST API', link: '/integrations/api' },
+          { text: 'Migrate from Astuto', link: '/integrations/migrate-from-astuto' },
         ],
       },
       {
