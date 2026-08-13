@@ -149,7 +149,7 @@ async fn get_mcp_user(store: &Store) -> Result<String, String> {
 /// List all projects.
 async fn list_projects(store: &Store) -> Result<Value, String> {
     let projects = store.list_projects().await.map_err(|e| format!("Failed to list projects: {e}"))?;
-    Ok(json!({ "projects": projects }))
+    Ok(json!({ "data": projects }))
 }
 
 /// Get a single project by slug.
@@ -160,7 +160,7 @@ async fn get_project(params: &Value, store: &Store) -> Result<Value, String> {
         .await
         .map_err(|e| format!("Failed to get project: {e}"))?
         .ok_or_else(|| format!("Project not found: {slug}"))?;
-    Ok(json!({ "project": project }))
+    Ok(json!({ "data": project }))
 }
 
 /// List posts in a project with optional filters.
@@ -193,7 +193,7 @@ async fn list_posts(params: &Value, store: &Store) -> Result<Value, String> {
         .await
         .map_err(|e| format!("Failed to list posts: {e}"))?;
 
-    Ok(json!({ "posts": posts, "total": total }))
+    Ok(json!({ "data": posts, "total": total }))
 }
 
 /// Get a single post by ID.
@@ -204,7 +204,7 @@ async fn get_post(params: &Value, store: &Store) -> Result<Value, String> {
         .await
         .map_err(|e| format!("Failed to get post: {e}"))?
         .ok_or_else(|| format!("Post not found: {id}"))?;
-    Ok(json!({ "post": post }))
+    Ok(json!({ "data": post }))
 }
 
 /// Create a new post.
@@ -227,7 +227,7 @@ async fn create_post(params: &Value, store: &Store) -> Result<Value, String> {
         .await
         .map_err(|e| format!("Failed to create post: {e}"))?;
 
-    Ok(json!({ "post": post, "created": true }))
+    Ok(json!({ "data": post }))
 }
 
 /// Update a post's status.
@@ -254,7 +254,7 @@ async fn vote_post(params: &Value, store: &Store) -> Result<Value, String> {
         .map_err(|e| format!("Failed to get post after vote: {e}"))?
         .ok_or("Post not found after vote")?;
 
-    Ok(json!({ "voted": voted, "vote_count": post.post.vote_count }))
+    Ok(json!({ "data": { "voted": voted, "vote_count": post.post.vote_count } }))
 }
 
 /// Search posts by query string.
@@ -284,7 +284,7 @@ async fn search_posts(params: &Value, store: &Store) -> Result<Value, String> {
         .await
         .map_err(|e| format!("Failed to search posts: {e}"))?;
 
-    Ok(json!({ "posts": posts, "total": total }))
+    Ok(json!({ "data": posts, "total": total }))
 }
 
 /// Get the changelog for a project — done posts, most recently shipped first.
@@ -315,7 +315,7 @@ async fn get_changelog(params: &Value, store: &Store) -> Result<Value, String> {
         .await
         .map_err(|e| format!("Failed to get changelog: {e}"))?;
 
-    Ok(json!({ "posts": posts, "total": total }))
+    Ok(json!({ "data": posts, "total": total }))
 }
 
 /// List comments for a post.
@@ -323,7 +323,7 @@ async fn list_comments(params: &Value, store: &Store) -> Result<Value, String> {
     let post_id = get_str(params, "post_id")?;
     let comments = store.list_comments(post_id).await.map_err(|e| format!("Failed to list comments: {e}"))?;
 
-    Ok(json!({ "comments": comments }))
+    Ok(json!({ "data": comments }))
 }
 
 /// Add a comment to a post.
@@ -338,7 +338,7 @@ async fn add_comment(params: &Value, store: &Store) -> Result<Value, String> {
         .await
         .map_err(|e| format!("Failed to create comment: {e}"))?;
 
-    Ok(json!({ "comment": comment, "created": true }))
+    Ok(json!({ "data": comment }))
 }
 
 /// Get statistics for a project (counts by status).
@@ -421,7 +421,7 @@ async fn get_trending(params: &Value, store: &Store) -> Result<Value, String> {
         .await
         .map_err(|e| format!("Failed to get trending posts: {e}"))?;
 
-    Ok(json!({ "posts": posts, "total": total }))
+    Ok(json!({ "data": posts, "total": total }))
 }
 
 /// Run the MCP server, reading JSON-RPC from stdin and writing to stdout.
