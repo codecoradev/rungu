@@ -85,14 +85,30 @@ See [CLI Reference](https://rungu.pages.dev/cli-reference) for full options.
 
 ## MCP Tools
 
-> ⚠️ **Experimental** — tool handlers return stub data. Full implementation tracked in [#28](https://github.com/codecoradev/rungu/issues/28).
+15 tools available via stdio (JSON-RPC 2.0) for AI coding agents:
 
-12 tools available via stdio for AI coding agents:
-- `list_projects`, `get_project`
-- `list_posts`, `get_post`, `create_post`, `update_post_status`
-- `vote_post`, `search_posts`
-- `list_comments`, `add_comment`
-- `get_stats`, `get_trending`
+**Projects:** `list_projects`, `get_project`
+**Posts:** `list_posts`, `get_post`, `create_post`, `update_post_status`, `vote_post`, `search_posts`
+**Comments:** `list_comments`, `add_comment`, `delete_comment`
+**Changelog:** `get_changelog`
+**Attachments:** `list_attachments`
+**Insights:** `get_stats`, `get_trending`
+
+Connect from any MCP-compatible client (Claude Desktop, Cursor, etc.):
+
+```json
+{
+  "mcpServers": {
+    "rungu": {
+      "command": "rungu",
+      "args": ["mcp"],
+      "env": {
+        "RUNGU_DB_URL": "sqlite://path/to/rungu.db"
+      }
+    }
+  }
+}
+```
 
 ## License
 
