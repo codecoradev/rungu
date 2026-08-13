@@ -1,10 +1,10 @@
 # ── Stage 1: Build frontend ────────────────────────────────────────────
-FROM node:22-slim AS frontend
+FROM oven/bun:1.3.14-slim AS frontend
 WORKDIR /app/web
-COPY web/package.json web/package-lock.json ./
-RUN npm ci
-COPY web/ .
-RUN npm run build
+COPY web/package.json web/bun.lock ./
+RUN bun install --frozen-lockfile
+COPY web/ ./
+RUN bun run build
 
 # ── Stage 2: Build static binary (musl) ───────────────────────────────
 FROM rust:1.86-alpine AS builder
