@@ -11,23 +11,7 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
-  sync-main:
-    name: Sync main branch
-    runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: develop
-      - name: Push to main
-        run: |
-          git push origin HEAD:main --force
-          echo "✅ main synced to develop at ${{ github.sha }}"
-
   build-release:
-    needs: sync-main
     name: Build ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
     strategy:
@@ -98,7 +82,6 @@ jobs:
           path: release/${{ matrix.artifact }}-${{ steps.version.outputs.VERSION }}.${{ matrix.ext }}
 
   docker-build:
-    needs: sync-main
     name: Docker ${{ matrix.platform }}
     runs-on: ${{ matrix.runner }}
     permissions:
@@ -268,3 +251,33 @@ jobs:
           prerelease: ${{ contains(steps.version.outputs.TAG, '-') }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  sync-main:
+    name: Sync main branch (PR)
+    needs: [release]
+    if: always() && needs.release.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: develop
+          fetch-depth: 0
+      - name: Create PR to sync main
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          BRANCH="chore/sync-main-${GITHUB_REF_NAME}"
+          # Delete stale sync branch if a previous run left one
+          git push origin ":refs/heads/$BRANCH" 2>/dev/null || true
+          git checkout -b "$BRANCH"
+          git push origin "$BRANCH"
+          if ! gh pr create \
+            --base main \
+            --head "$BRANCH" \
+            --title "chore: sync main to ${GITHUB_REF_NAME}" \
+            --body "Auto-generated PR to sync main with develop after ${GITHUB_REF_NAME} release."; then
+            echo "::warning::Failed to create sync PR. Binary artifacts were uploaded successfully."
+          fi
