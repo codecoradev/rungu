@@ -60,6 +60,18 @@ CREATE TABLE IF NOT EXISTS votes (
     PRIMARY KEY (user_id, post_id)
 );
 
+-- Full-text search: generated tsvector + GIN index.
+-- SQLite uses the FTS5 virtual table; on PostgreSQL we derive a `tsvector`
+-- from title+description and index it with GIN so `@@ plainto_tsquery(?)`
+-- is an indexed scan instead of a full-table `LIKE`.
+-- Added via ALTER ... ADD COLUMN IF NOT EXISTS so the migration stays
+-- idempotent (the whole file is re-run on every startup).
+ALTER TABLE posts ADD COLUMN IF NOT EXISTS search_tsv tsvector
+    GENERATED ALWAYS AS (
+        to_tsvector('english', coalesce(title, '') || ' ' || coalesce(description, ''))
+    ) STORED;
+CREATE INDEX IF NOT EXISTS idx_posts_search_tsv ON posts USING GIN (search_tsv);
+
 -- Comments (threaded)
 CREATE TABLE IF NOT EXISTS comments (
     id          TEXT PRIMARY KEY,

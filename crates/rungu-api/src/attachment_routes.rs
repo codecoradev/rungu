@@ -106,12 +106,23 @@ pub async fn upload_attachment(
         // Save to storage
         state.storage.save(&key, data.to_vec()).await.map_err(|_| ApiError::internal_default())?;
 
-        // Save metadata to DB
-        let attachment = state
+        // Save metadata to DB. If this fails, remove the just-written file so
+        // it doesn't leak as an orphan on disk (defense against partial-failure
+        // disk growth).
+        let attachment = match state
             .store
             .create_attachment(&post_id, &filename, &verified_mime, data.len() as i64, &key, &user.id)
             .await
-            .map_err(|_| ApiError::internal_default())?;
+        {
+            Ok(a) => a,
+            Err(e) => {
+                tracing::warn!(error = %e, key = %key, "DB insert failed; cleaning up orphaned attachment file");
+                if let Err(cleanup_err) = state.storage.delete(&key).await {
+                    tracing::warn!(error = %cleanup_err, key = %key, "Failed to clean up orphaned attachment file");
+                }
+                return Err(ApiError::internal_default());
+            }
+        };
 
         let attachment_id = attachment.id.clone();
         let response = AttachmentResponse {
@@ -196,11 +207,18 @@ pub async fn get_attachment_file(
 
     let data = state.storage.load(&storage_path).await.map_err(|_| ApiError::not_found("File not found in storage"))?;
 
+    // Sanitize the filename for the Content-Disposition header. The stored
+    // filename is user-supplied (from the upload), so it must never carry CR/LF
+    // (header injection) or unescaped quotes (header breaking). We also strip
+    // control chars. On anything unsafe we fall back to a neutral name so the
+    // download still works.
+    let safe_filename = sanitize_filename(&attachment.filename);
+
     Ok((
         StatusCode::OK,
         [
             (header::CONTENT_TYPE, attachment.mime),
-            (header::CONTENT_DISPOSITION, format!("inline; filename=\"{}\"", attachment.filename)),
+            (header::CONTENT_DISPOSITION, format!("inline; filename=\"{}\"", safe_filename)),
             (header::CACHE_CONTROL, "public, max-age=86400".to_string()),
             ("x-content-type-options".parse::<axum::http::HeaderName>().unwrap(), "nosniff".to_string()),
         ],
@@ -248,4 +266,46 @@ pub async fn delete_attachment(
     state.store.delete_attachment(&attachment_id).await.map_err(|_| ApiError::internal_default())?;
 
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// Make a stored filename safe to embed in a `Content-Disposition` header value.
+///
+/// The filename originates from a user upload, so it must not carry:
+/// - CR/LF (would split/inject HTTP headers),
+/// - `"` or `\` (would break out of the quoted filename token),
+/// - other control characters.
+///
+/// Anything unsafe is replaced with `_`; a fully-unsafe/empty result falls
+/// back to a neutral `download` so the response still works.
+fn sanitize_filename(name: &str) -> String {
+    let cleaned: String = name
+        .chars()
+        .map(|c| match c {
+            '\r' | '\n' | '"' | '\\' => '_',
+            c if c.is_control() => '_',
+            c => c,
+        })
+        .collect();
+    let cleaned = cleaned.trim();
+    if cleaned.is_empty() { "download".to_string() } else { cleaned.to_string() }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sanitize_filename_strips_header_injection() {
+        // CR/LF would split headers → neutralized.
+        assert_eq!(sanitize_filename("a.txt\r\nX-Evil: 1"), "a.txt__X-Evil: 1");
+        // Quotes/backslash break the quoted token.
+        assert_eq!(sanitize_filename("a\"b\\c.png"), "a_b_c.png");
+        // Control chars removed.
+        assert_eq!(sanitize_filename("a\u{0000}b"), "a_b");
+        // Empty / whitespace-only → neutral fallback.
+        assert_eq!(sanitize_filename("   "), "download");
+        assert_eq!(sanitize_filename(""), "download");
+        // Clean name passes through.
+        assert_eq!(sanitize_filename("screenshot.png"), "screenshot.png");
+    }
 }

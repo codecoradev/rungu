@@ -27,7 +27,7 @@ Thumbs.db
 !/web/build/index.html
 /web/node_modules/
 /web/.svelte-kit/
-/web/bun.lockb
+# Keep lockfiles committed
 
 # Profiling
 flamegraph.svg

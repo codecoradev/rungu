@@ -30,6 +30,7 @@ export default defineConfig({
           { text: 'CLI Reference', link: '/cli-reference' },
           { text: 'Configuration', link: '/configuration' },
           { text: 'Docker', link: '/docker' },
+          { text: 'Production Deployment', link: '/production-deploy' },
         ],
       },
       {
@@ -56,6 +57,7 @@ export default defineConfig({
         items: [
           { text: 'MCP Server', link: '/integrations/mcp' },
           { text: 'REST API', link: '/integrations/api' },
+          { text: 'Webhooks', link: '/integrations/webhooks' },
         ],
       },
       {

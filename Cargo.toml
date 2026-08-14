@@ -10,7 +10,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.2.1"
+version = "0.3.0"
 edition = "2024"
 license = "Apache-2.0"
 repository = "https://github.com/codecoradev/rungu"
@@ -53,6 +53,8 @@ url = "2"
 
 # Crypto
 argon2 = "0.5"
+hmac = "0.12"
+sha2 = "0.10"
 
 # Embed
 mime_guess = "2"
@@ -85,6 +87,9 @@ clap = { version = "4", features = ["derive"] }
 
 # Time
 chrono = { version = "0.4", features = ["serde"] }
+
+# In-memory cache (project-by-slug lookup cache)
+moka = { version = "0.12", features = ["future"] }
 
 # UUID
 uuid = { version = "1", features = ["v4", "serde"] }

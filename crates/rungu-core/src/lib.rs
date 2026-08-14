@@ -52,13 +52,19 @@ pub async fn open_pool(database_url: &str) -> Result<AnyPool> {
 /// Run all database migrations.
 /// Detects database type from the connection string and runs the appropriate SQL.
 pub async fn run_migrations(pool: &AnyPool, database_url: &str) -> Result<()> {
-    let sql = if database_url.starts_with("sqlite:") {
-        include_str!("../migrations/sqlite/001_initial.sql")
+    let is_sqlite = database_url.starts_with("sqlite:");
+    let migrations = if is_sqlite {
+        [include_str!("../migrations/sqlite/001_initial.sql"), include_str!("../migrations/sqlite/002_webhooks.sql")]
     } else {
-        include_str!("../migrations/postgres/001_initial.sql")
+        [
+            include_str!("../migrations/postgres/001_initial.sql"),
+            include_str!("../migrations/postgres/002_webhooks.sql"),
+        ]
     };
 
-    sqlx::query(sql).execute(pool).await.context("Failed to run migrations")?;
+    for sql in &migrations {
+        sqlx::query(sql).execute(pool).await.context("Failed to run migration")?;
+    }
     Ok(())
 }
 

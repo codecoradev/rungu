@@ -8,7 +8,7 @@ use utoipa::OpenApi;
 #[openapi(
     info(
         title = "Rungu API",
-        version = "0.1.0",
+        version = "0.2.1",
         description = "Lightweight self-hosted feedback board API.\n\nCollect feature requests, bug reports, and suggestions with voting and commenting.",
         license(name = "Apache-2.0", url = "https://www.apache.org/licenses/LICENSE-2.0"),
     ),
@@ -39,6 +39,19 @@ use utoipa::OpenApi;
         crate::attachment_routes::upload_attachment,
         crate::attachment_routes::get_attachment_file,
         crate::attachment_routes::delete_attachment,
+        // Webhooks
+        crate::webhook_routes::list_webhooks,
+        crate::webhook_routes::create_webhook,
+        crate::webhook_routes::get_webhook,
+        crate::webhook_routes::update_webhook,
+        crate::webhook_routes::delete_webhook,
+        crate::webhook_routes::list_deliveries,
+        // Auth
+        crate::auth_routes::list_providers,
+        crate::auth_routes::login,
+        crate::auth_routes::callback,
+        crate::auth_routes::logout,
+        crate::auth_routes::me,
     ),
     components(schemas(
         rungu_proto::Post,
@@ -60,6 +73,12 @@ use utoipa::OpenApi;
         rungu_proto::VoteStatusResponse,
         rungu_proto::Attachment,
         rungu_proto::AttachmentResponse,
+        rungu_proto::Webhook,
+        rungu_proto::WebhookEventType,
+        rungu_proto::WebhookDelivery,
+        rungu_proto::CreateWebhookBody,
+        rungu_proto::UpdateWebhookBody,
+        rungu_proto::CurrentUser,
     )),
     tags(
         (name = "projects", description = "Project management endpoints"),
@@ -67,6 +86,8 @@ use utoipa::OpenApi;
         (name = "votes", description = "Voting endpoints"),
         (name = "comments", description = "Comment endpoints"),
         (name = "attachments", description = "Image attachment endpoints"),
+        (name = "webhooks", description = "Webhook subscription and delivery endpoints"),
+        (name = "auth", description = "Authentication endpoints (OAuth2)"),
     ),
 )]
 pub struct ApiDoc;

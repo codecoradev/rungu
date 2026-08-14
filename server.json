@@ -1,0 +1,40 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.codecoradev/rungu",
+  "title": "Rungu",
+  "description": "Self-hosted feedback board with 19 MCP tools for managing posts, comments, roadmaps, changelogs, attachments, and project insights. Local SQLite, no external dependencies.",
+  "repository": {
+    "url": "https://github.com/codecoradev/rungu",
+    "source": "github"
+  },
+  "version": "0.2.1",
+  "homepage": "https://github.com/codecoradev/rungu",
+  "license": "MIT",
+  "authors": [
+    {
+      "name": "Anaz Satria Aji",
+      "url": "https://github.com/ajianaz"
+    }
+  ],
+  "categories": [
+    "project-management",
+    "developer-tools"
+  ],
+  "keywords": [
+    "feedback",
+    "feature-requests",
+    "roadmap",
+    "changelog",
+    "self-hosted"
+  ],
+  "packages": [
+    {
+      "registryType": "oci",
+      "identifier": "ghcr.io/codecoradev/rungu:0.2.1",
+      "version": "0.2.1",
+      "transport": {
+        "type": "stdio"
+      }
+    }
+  ]
+}

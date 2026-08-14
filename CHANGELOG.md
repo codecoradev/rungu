@@ -2,6 +2,53 @@
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-08-14
+
+The integration release. Rungu can now talk to your stack and embed anywhere.
+
+### Added
+
+- **Webhook system** (#106) — Fire-and-forget HTTP notifications when posts are
+  created, voted, or commented. HMAC-SHA256 signed payloads, configurable event
+  filters, automatic retry with exponential backoff, and a full delivery audit
+  log. Admin-only CRUD via `POST/GET/PATCH/DELETE /api/projects/{slug}/webhooks`.
+  Auto-generates a secret if none is provided.
+- **Embeddable feedback widget** (#111) — Drop a single `<script>` tag to embed
+  a Rungu board on any page. Serves `/embed.js` (vanilla JS loader, no
+  dependencies) and `/embed/{slug}` (iframe-friendly HTML board).
+  `postMessage` auto-resize, `X-Frame-Options: ALLOWALL` for cross-origin
+  embedding. Zero npm install required on the host page.
+- **Production deployment guide** (#110) — 689-line guide covering Docker
+  Compose + Traefik reverse proxy + Let's Encrypt TLS, environment variables,
+  OAuth provider configuration, SQLite/PostgreSQL setup, backup strategy,
+  zero-downtime updates, and troubleshooting.
+- **Webhook integration docs** (#109) — Event payload schemas, HMAC
+  verification examples (Node.js, Python, Go), retry semantics, and delivery
+  log querying.
+- **E2E integration tests for webhooks** (#107) — 7 tests covering admin-only
+  access control, full CRUD lifecycle, auto-secret generation, input
+  validation, project isolation, and delivery log. Total test count: 111.
+- **Rate limiting** (in-memory, per-IP fixed window): two independent
+  limiters — strict on `/auth/*` (default 30/min) and broader on `/api/*`
+  (default 300/min). Configurable via `RUNGU_AUTH_RATE_LIMIT_PER_MIN` /
+  `RUNGU_RATE_LIMIT_PER_MIN`; `0` disables. Previously deferred (#52) due
+  to an MSRV-blocked `governor` dependency — reimplemented without external
+  crates. Closes #43.
+
+### Changed
+
+- **`list_posts` now populates `user_voted`** for the requesting user via a
+  single batched lookup. Previously the board list always reported
+  `user_voted: false`, so it could not show which posts the current user had
+  voted on (only `GET /posts/{id}` set it). Replaces the latent N+1 with one
+  indexed query over the `votes` primary key.
+- **PostgreSQL full-text search**: the Postgres backend now uses a generated
+  `tsvector` column + GIN index (`search_tsv @@ plainto_tsquery(?)`) instead
+  of an unindexed `LOWER(...) LIKE` full scan. SQLite still uses FTS5.
+- **`get_project_by_slug` is cached** (5-minute TTL, in-memory `moka`) — it
+  was hit on nearly every board/vote/comment request. Create/update/delete
+  invalidate the cache.
+
 ## [0.2.1] - 2026-06-27
 
 ### Added
