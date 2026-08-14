@@ -2,8 +2,32 @@
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-08-14
+
+The integration release. Rungu can now talk to your stack and embed anywhere.
+
 ### Added
 
+- **Webhook system** (#106) — Fire-and-forget HTTP notifications when posts are
+  created, voted, or commented. HMAC-SHA256 signed payloads, configurable event
+  filters, automatic retry with exponential backoff, and a full delivery audit
+  log. Admin-only CRUD via `POST/GET/PATCH/DELETE /api/projects/{slug}/webhooks`.
+  Auto-generates a secret if none is provided.
+- **Embeddable feedback widget** (#111) — Drop a single `<script>` tag to embed
+  a Rungu board on any page. Serves `/embed.js` (vanilla JS loader, no
+  dependencies) and `/embed/{slug}` (iframe-friendly HTML board).
+  `postMessage` auto-resize, `X-Frame-Options: ALLOWALL` for cross-origin
+  embedding. Zero npm install required on the host page.
+- **Production deployment guide** (#110) — 689-line guide covering Docker
+  Compose + Traefik reverse proxy + Let's Encrypt TLS, environment variables,
+  OAuth provider configuration, SQLite/PostgreSQL setup, backup strategy,
+  zero-downtime updates, and troubleshooting.
+- **Webhook integration docs** (#109) — Event payload schemas, HMAC
+  verification examples (Node.js, Python, Go), retry semantics, and delivery
+  log querying.
+- **E2E integration tests for webhooks** (#107) — 7 tests covering admin-only
+  access control, full CRUD lifecycle, auto-secret generation, input
+  validation, project isolation, and delivery log. Total test count: 111.
 - **Rate limiting** (in-memory, per-IP fixed window): two independent
   limiters — strict on `/auth/*` (default 30/min) and broader on `/api/*`
   (default 300/min). Configurable via `RUNGU_AUTH_RATE_LIMIT_PER_MIN` /
