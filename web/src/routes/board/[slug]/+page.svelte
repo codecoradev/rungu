@@ -367,7 +367,34 @@
 
             {#if posts.length === 0}
                 <div class="rounded-xl border border-dashed border-border py-12 text-center">
-                    <p class="text-muted-foreground">{searchQuery ? 'No posts match your search.' : 'No posts yet.'}</p>
+                    {#if searchQuery || statusFilter || categoryFilter}
+                        <p class="text-lg font-medium">No results</p>
+                        <p class="mt-1 text-sm text-muted-foreground">No posts match your current filters.</p>
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            class="mt-4"
+                            onclick={() => {
+                                searchQuery = '';
+                                statusFilter = '';
+                                categoryFilter = '';
+                            }}
+                        >
+                            Clear all filters
+                        </Button>
+                    {:else if authed}
+                        <p class="text-lg font-medium">No feedback yet</p>
+                        <p class="mt-1 text-sm text-muted-foreground">
+                            Be the first to share an idea, report a bug, or ask a question.
+                        </p>
+                        <Button class="mt-4" onclick={() => (showForm = true)}>+ Post the first feedback</Button>
+                    {:else}
+                        <p class="text-lg font-medium">No feedback yet</p>
+                        <p class="mt-1 text-sm text-muted-foreground">
+                            This board is brand new. Sign in to be the first to post.
+                        </p>
+                        <Button class="mt-4" href="/login">Login to post</Button>
+                    {/if}
                 </div>
             {/if}
         </div>

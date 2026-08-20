@@ -39,7 +39,11 @@
         </div>
     {:else if projects.length === 0}
         <div class="rounded-xl border border-dashed border-border py-12 text-center">
-            <p class="text-muted-foreground">No projects yet.</p>
+            <p class="text-lg font-medium">No boards yet</p>
+            <p class="mt-1 text-sm text-muted-foreground">
+                Feedback boards will show up here once created.
+            </p>
+            <Button variant="outline" size="sm" class="mt-4" href="/admin">Create a board in Admin</Button>
         </div>
     {:else}
         <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
