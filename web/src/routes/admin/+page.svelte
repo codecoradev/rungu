@@ -52,6 +52,16 @@
 
     const isAdmin = $derived(user?.role === 'admin');
 
+    // Success feedback toast (#153) — auto-dismiss, never overlaps the error banner
+    let notice = $state('');
+    let noticeTimer: ReturnType<typeof setTimeout> | undefined;
+    function notify(msg: string) {
+        notice = msg;
+        clearTimeout(noticeTimer);
+        noticeTimer = setTimeout(() => (notice = ''), 2500);
+    }
+    $effect(() => () => clearTimeout(noticeTimer));
+
     async function loadData() {
         loading = true;
         try {
@@ -114,10 +124,11 @@
         try {
             const updated = await api.updateProject(slug, {
                 name: editName.trim() || undefined,
-                description: editDesc || undefined,
+                description: editDesc,
             });
             projects = projects.map((p) => (p.slug === slug ? updated : p));
             editing = null;
+            notify('Project saved ✓');
         } catch {
             error = 'Failed to update project';
         }
@@ -142,6 +153,7 @@
             projects = projects.filter((p) => p.slug !== slug);
             deleting = null;
             deleteStats = null;
+            notify('Project deleted ✓');
         } catch {
             error = 'Failed to delete project';
             deleting = null;
@@ -171,11 +183,18 @@
         try {
             await api.updatePostStatus(post.id, status);
             if (queueStatus) {
-                queue = queue.filter((p) => p.id !== post.id);
+                // Post leaves the filtered list only when its new status no longer matches the filter
+                const matches = queueStatus === status;
+                if (!matches) {
+                    queue = queue.filter((p) => p.id !== post.id);
+                    queueTotal = Math.max(0, queueTotal - 1);
+                } else {
+                    post.status = status as PostDetail['status'];
+                }
             } else {
                 post.status = status as PostDetail['status'];
             }
-            queueTotal = Math.max(0, queueTotal - (queueStatus ? 1 : 0));
+            notify(`Post marked ${status.replace('_', ' ')} ✓`);
         } catch {
             error = 'Failed to update post';
         }
@@ -190,6 +209,7 @@
             webhooks = await api.listWebhooks(selectedProject);
             testResult = {};
             deliveries = {};
+            deletingWebhook = null;
         } catch {
             error = 'Failed to load webhooks';
         } finally {
@@ -213,16 +233,20 @@
         try {
             const updated = await api.updateWebhook(selectedProject, wh.id, { is_active: !wh.is_active });
             webhooks = webhooks.map((w) => (w.id === wh.id ? updated : w));
+            notify(updated.is_active ? 'Webhook activated ✓' : 'Webhook paused ✓');
         } catch {
             error = 'Failed to update webhook';
         }
     }
 
+    let deletingWebhook = $state<string | null>(null);
+
     async function removeWebhook(wh: Webhook) {
-        if (!confirm(`Delete webhook ${wh.url}?`)) return;
         try {
             await api.deleteWebhook(selectedProject, wh.id);
             webhooks = webhooks.filter((w) => w.id !== wh.id);
+            deletingWebhook = null;
+            notify('Webhook deleted ✓');
         } catch {
             error = 'Failed to delete webhook';
         }
@@ -291,6 +315,10 @@
         <p class="mb-4 text-sm text-destructive">{error}</p>
     {/if}
 
+    {#if notice}
+        <p class="mb-4 text-sm text-success" role="status">✓ {notice}</p>
+    {/if}
+
     <!-- Tabs -->
     <div class="mb-6 flex gap-1 border-b" role="tablist">
         {#each tabs as t (t.id)}
@@ -327,10 +355,19 @@
                         <p class="text-sm text-destructive">{createError}</p>
                     {/if}
                     <div class="grid gap-3 sm:grid-cols-2">
-                        <Input bind:value={newName} placeholder="Project name" required oninput={() => { if (!newSlug) newSlug = slugify(newName); }} />
-                        <Input bind:value={newSlug} placeholder="slug (auto from name)" />
+                        <div class="space-y-1.5">
+                            <label for="new-project-name" class="text-sm font-medium">Project name</label>
+                            <Input id="new-project-name" bind:value={newName} placeholder="Project name" required oninput={() => { if (!newSlug) newSlug = slugify(newName); }} />
+                        </div>
+                        <div class="space-y-1.5">
+                            <label for="new-project-slug" class="text-sm font-medium">Slug</label>
+                            <Input id="new-project-slug" bind:value={newSlug} placeholder="auto from name" />
+                        </div>
                     </div>
-                    <Textarea bind:value={newDesc} placeholder="Description (optional)" rows={2} />
+                    <div class="space-y-1.5">
+                        <label for="new-project-desc" class="text-sm font-medium">Description <span class="font-normal text-muted-foreground">(optional)</span></label>
+                        <Textarea id="new-project-desc" bind:value={newDesc} placeholder="What is this board for?" rows={2} />
+                    </div>
                     <Button type="submit" disabled={creating || !newName.trim()}>
                         {creating ? 'Creating...' : 'Create Project'}
                     </Button>
@@ -345,8 +382,14 @@
                 <Card.Root>
                     {#if editing === project.slug}
                         <Card.Content class="space-y-3 pt-6">
-                            <Input bind:value={editName} placeholder="Name" />
-                            <Textarea bind:value={editDesc} placeholder="Description" rows={2} />
+                            <div class="space-y-1.5">
+                                <label for={`edit-name-${project.slug}`} class="text-sm font-medium">Name</label>
+                                <Input id={`edit-name-${project.slug}`} bind:value={editName} placeholder="Name" />
+                            </div>
+                            <div class="space-y-1.5">
+                                <label for={`edit-desc-${project.slug}`} class="text-sm font-medium">Description</label>
+                                <Textarea id={`edit-desc-${project.slug}`} bind:value={editDesc} placeholder="Description" rows={2} />
+                            </div>
                             <div class="flex gap-2">
                                 <Button size="sm" onclick={() => saveEdit(project.slug)}>Save</Button>
                                 <Button variant="outline" size="sm" onclick={() => (editing = null)}>Cancel</Button>
@@ -472,8 +515,11 @@
                 </Card.Header>
                 <Card.Content>
                     <form onsubmit={addWebhook} class="flex flex-col gap-3 sm:flex-row">
-                        <Input bind:value={newWebhookUrl} placeholder="https://example.com/webhook" required type="url" class="flex-1" />
-                        <Button type="submit" disabled={!newWebhookUrl.trim()}>Add</Button>
+                        <div class="flex-1 space-y-1.5">
+                            <label for="new-webhook-url" class="text-sm font-medium">Webhook URL</label>
+                            <Input id="new-webhook-url" bind:value={newWebhookUrl} placeholder="https://example.com/webhook" required type="url" class="flex-1" />
+                        </div>
+                        <Button type="submit" disabled={!newWebhookUrl.trim()} class="sm:mt-6">Add</Button>
                     </form>
                     <p class="mt-2 text-xs text-muted-foreground">
                         Events: post.created, post.status_changed, comment.created. Signed with HMAC-SHA256 (X-Rungu-Signature).
@@ -505,7 +551,12 @@
                                         <Button variant="outline" size="sm" onclick={() => toggleDeliveries(wh)}>
                                             {deliveries[wh.id] ? 'Hide log' : 'Log'}
                                         </Button>
-                                        <Button variant="outline" size="sm" class="text-destructive" onclick={() => removeWebhook(wh)}>Delete</Button>
+                                        {#if deletingWebhook === wh.id}
+                                            <Button variant="destructive" size="sm" onclick={() => removeWebhook(wh)}>Confirm delete</Button>
+                                            <Button variant="outline" size="sm" onclick={() => (deletingWebhook = null)}>Cancel</Button>
+                                        {:else}
+                                            <Button variant="outline" size="sm" class="text-destructive" onclick={() => (deletingWebhook = wh.id)}>Delete</Button>
+                                        {/if}
                                     </div>
                                 </div>
 
@@ -514,7 +565,7 @@
                                     {#if tr.state === 'loading'}
                                         <p class="text-xs text-muted-foreground">Sending test event…</p>
                                     {:else if tr.result.ok}
-                                        <p class="text-xs text-green-600">✓ Test delivered (HTTP {tr.result.status})</p>
+                                        <p class="text-xs text-success">✓ Test delivered (HTTP {tr.result.status})</p>
                                     {:else}
                                         <p class="text-xs text-destructive">✗ {tr.result.error ?? 'Failed'}{tr.result.status ? ` (HTTP ${tr.result.status})` : ''}</p>
                                     {/if}
@@ -529,7 +580,7 @@
                                                 {#each deliveries[wh.id].slice(0, 10) as d (d.id)}
                                                     <li class="flex items-center justify-between gap-2 py-1.5">
                                                         <span class="text-muted-foreground">{d.event_type} · {timeAgo(d.created_at)}</span>
-                                                        <span class={d.success ? 'text-green-600' : 'text-destructive'}>
+                                                        <span class={d.success ? 'text-success' : 'text-destructive'}>
                                                             {d.success ? '✓' : '✗'} {d.status_code ?? 'err'}{d.attempts > 1 ? ` (${d.attempts}x)` : ''}
                                                         </span>
                                                     </li>

@@ -269,7 +269,7 @@
                  buttons, so both stay in sync. -->
             <div class="mt-2 grid grid-cols-2 gap-3 border-t pt-2">
                 <div>
-                    <h4 class="mb-1 text-xs font-semibold uppercase text-muted-foreground">Category</h4>
+                    <h3 class="mb-1 text-xs font-semibold uppercase text-muted-foreground">Category</h3>
                     <div class="flex flex-wrap gap-1">
                         {#each categoryOptions as cat (cat.value)}
                             <button
@@ -287,7 +287,7 @@
                     </div>
                 </div>
                 <div>
-                    <h4 class="mb-1 text-xs font-semibold uppercase text-muted-foreground">Status</h4>
+                    <h3 class="mb-1 text-xs font-semibold uppercase text-muted-foreground">Status</h3>
                     <div class="flex flex-wrap gap-1">
                         {#each statusOptions as st (st.value)}
                             <button
@@ -427,7 +427,7 @@
             {/if}
 
             <Card.Root class="p-3">
-                <h3 class="mb-2 text-xs font-semibold uppercase text-muted-foreground">Categories</h3>
+                <h2 class="mb-2 text-xs font-semibold uppercase text-muted-foreground">Categories</h2>
                 <div class="flex flex-col gap-1">
                     {#each categoryOptions as cat (cat.value)}
                         <button
@@ -446,7 +446,7 @@
             </Card.Root>
 
             <Card.Root class="p-3">
-                <h3 class="mb-2 text-xs font-semibold uppercase text-muted-foreground">Status</h3>
+                <h2 class="mb-2 text-xs font-semibold uppercase text-muted-foreground">Status</h2>
                 <div class="flex flex-col gap-1">
                     {#each statusOptions as st (st.value)}
                         <button
