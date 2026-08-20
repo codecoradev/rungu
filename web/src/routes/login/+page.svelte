@@ -35,7 +35,7 @@
     {:else}
         <Card.Root>
             <Card.Header class="text-center">
-                <Card.Title class="text-2xl">Welcome back</Card.Title>
+                <Card.Title class="text-2xl">Sign in to Rungu</Card.Title>
                 <Card.Description>Sign in to share your feedback</Card.Description>
             </Card.Header>
             <Card.Content>
