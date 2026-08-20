@@ -26,6 +26,8 @@
     let searchQuery = $state('');
     let showForm = $state(false);
     let authed = $state(false);
+    // Mobile toolbar: filter panel visibility (see mobile toolbar markup).
+    let showFilters = $state(false);
     // Set true once the initial onMount load finishes; gates the filter $effect
     // so it doesn't fire before the first board fetch completes. Declared up
     // here (before onMount) to avoid a forward reference / TDZ smell.
@@ -228,6 +230,92 @@
             <p class="mt-1 text-sm text-muted-foreground">{project.description}</p>
         {/if}
     </div>
+
+    <!-- Mobile action toolbar: sticky, replaces the desktop sidebar below lg.
+         Keep in sync with the sidebar actions (new post / roadmap / changelog /
+         filters). Tap targets >= 44px (mobile-ux HIG minimum). -->
+    <div class="sticky top-14 z-20 -mx-4 mb-4 border-b bg-background/95 px-4 py-2 backdrop-blur supports-[backdrop-filter]:bg-background/80 lg:hidden">
+        <div class="flex items-center gap-2 overflow-x-auto">
+            {#if authed}
+                <Button
+                    size="sm"
+                    class="h-11 shrink-0"
+                    onclick={() => (showForm = !showForm)}
+                >
+                    {showForm ? '✕ Cancel' : '+ New Post'}
+                </Button>
+            {:else}
+                <Button size="sm" class="h-11 shrink-0" href="/login">Login to post</Button>
+            {/if}
+            <Button
+                variant="outline"
+                size="sm"
+                class="h-11 shrink-0"
+                aria-expanded={showFilters}
+                onclick={() => (showFilters = !showFilters)}
+            >
+                Filters {statusFilter || categoryFilter ? '•' : ''} {showFilters ? '▴' : '▾'}
+            </Button>
+            <Button variant="outline" size="sm" class="h-11 shrink-0" href="/board/{slug}/roadmap">
+                Roadmap
+            </Button>
+            <Button variant="outline" size="sm" class="h-11 shrink-0" href="/board/{slug}/changelog">
+                Changelog
+            </Button>
+        </div>
+
+        {#if showFilters}
+            <!-- Collapsible filter panel; same state as the desktop sidebar
+                 buttons, so both stay in sync. -->
+            <div class="mt-2 grid grid-cols-2 gap-3 border-t pt-2">
+                <div>
+                    <h4 class="mb-1 text-xs font-semibold uppercase text-muted-foreground">Category</h4>
+                    <div class="flex flex-wrap gap-1">
+                        {#each categoryOptions as cat (cat.value)}
+                            <button
+                                onclick={() => (categoryFilter = categoryFilter === cat.value ? '' : cat.value)}
+                                class={cn(
+                                    'min-h-11 rounded-md px-2 py-1 text-sm transition-colors',
+                                    categoryFilter === cat.value
+                                        ? 'bg-primary/10 font-medium text-primary'
+                                        : 'text-muted-foreground hover:bg-muted',
+                                )}
+                            >
+                                {cat.label}
+                            </button>
+                        {/each}
+                    </div>
+                </div>
+                <div>
+                    <h4 class="mb-1 text-xs font-semibold uppercase text-muted-foreground">Status</h4>
+                    <div class="flex flex-wrap gap-1">
+                        {#each statusOptions as st (st.value)}
+                            <button
+                                onclick={() => (statusFilter = statusFilter === st.value ? '' : st.value)}
+                                class={cn(
+                                    'min-h-11 rounded-md px-2 py-1 text-sm capitalize transition-colors',
+                                    statusFilter === st.value
+                                        ? 'bg-primary/10 font-medium text-primary'
+                                        : 'text-muted-foreground hover:bg-muted',
+                                )}
+                            >
+                                {st.label}
+                            </button>
+                        {/each}
+                    </div>
+                </div>
+            </div>
+        {/if}
+    </div>
+
+    {#if showForm}
+        <!-- Post form rendered full-width above the list on mobile so it is
+             visible without scrolling past the toolbar. Hidden on desktop —
+             the sidebar renders its own instance. -->
+        <div class="mb-4 lg:hidden">
+            <PostForm {slug} onsubmit={handleCreatePost} />
+        </div>
+    {/if}
 
     <div class="grid gap-6 lg:grid-cols-[1fr_280px]">
         <!-- Main -->
