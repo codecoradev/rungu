@@ -222,7 +222,7 @@
                         </select>
                     {/if}
                 </div>
-                <Card.Title class="text-xl">{post.title}</Card.Title>
+                <h1 class="text-xl leading-normal font-medium">{post.title}</h1>
                 <div class="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
                     <span>{post.creator.name || post.creator.email || 'User'}</span>
                     <span>·</span>
