@@ -23,10 +23,12 @@ fn is_public_ip(ip: IpAddr) -> bool {
                 || v4.is_loopback()
                 || v4.is_link_local()
                 || v4.is_broadcast()
+                || v4.is_multicast()
                 || v4.is_documentation()
                 || v4.is_unspecified()
-                // 100.64.0.0/10 CGNAT + 198.18.0.0/15 benchmark range
+                // 100.64.0.0/10 CGNAT (operator/carrier-grade NAT)
                 || (v4.octets()[0] == 100 && (v4.octets()[1] & 0b1100_0000) == 0b0100_0000)
+                // 198.18.0.0/15 benchmark testing (RFC 2544)
                 || (v4.octets()[0] == 198 && (v4.octets()[1] & 0xFE) == 18))
         }
         IpAddr::V6(v6) => {
@@ -44,31 +46,34 @@ fn is_public_ip(ip: IpAddr) -> bool {
     }
 }
 
-/// Delivery-time SSRF guard: resolve the webhook host and refuse to deliver
-/// if ANY resolved address is not globally routable. Catches DNS-based
-/// bypasses and IP changes since create-time validation.
-async fn host_is_safe(host: &str) -> bool {
-    // IP-literal hosts are checked directly.
+/// Delivery-time SSRF guard with IP pinning: resolve the webhook host,
+/// verify EVERY resolved address is globally routable, then return the
+/// validated address so the caller can pin it (reqwest `resolve`) —
+/// closing the TOCTOU/DNS-rebinding gap between check and connect.
+/// Returns `None` if the host is unsafe or unresolvable.
+async fn resolve_safe_addr(host: &str) -> Option<std::net::SocketAddr> {
+    // IP-literal hosts are checked directly (port filled later by caller).
     if let Ok(ip) = host.trim_matches(['[', ']']).parse::<IpAddr>() {
-        return is_public_ip(ip);
+        return if is_public_ip(ip) { Some(std::net::SocketAddr::new(ip, 0)) } else { None };
     }
     // DNS names are resolved; every A/AAAA record must be public.
-    // Port is irrelevant for the lookup; use a dummy port 0.
     match tokio::net::lookup_host((host, 0)).await {
         Ok(addrs) => {
-            let mut any = false;
+            let mut pinned: Option<std::net::SocketAddr> = None;
             for addr in addrs {
-                any = true;
                 if !is_public_ip(addr.ip()) {
                     tracing::warn!("Webhook host {host} resolves to non-public IP {} — blocked", addr.ip());
-                    return false;
+                    return None;
+                }
+                if pinned.is_none() {
+                    pinned = Some(addr); // first validated address, pinned at connect
                 }
             }
-            any // unresolved host -> no addresses -> treat as unsafe
+            pinned // no addresses → None → treated as unsafe
         }
         Err(e) => {
             tracing::warn!("Webhook host {host} failed to resolve: {e} — blocked");
-            false
+            None
         }
     }
 }
@@ -143,15 +148,17 @@ pub fn dispatch_event(
         for (webhook, secret) in webhooks {
             let store = store.clone();
             let http = http.clone();
-            let payload_str = payload_str.clone();
-
-            // Delivery-time SSRF re-check (DNS rebinding / IP drift since creation).
-            let host = url::Url::parse(&webhook.url).ok().and_then(|u| u.host_str().map(String::from));
-            let safe = match host {
-                Some(h) => host_is_safe(&h).await,
-                None => false,
+            // Delivery-time SSRF guard with IP pinning (#141): resolve the host,
+            // require every address to be globally routable, then pin the
+            // validated address so the connection cannot be DNS-rebound to an
+            // internal address between check and connect.
+            let url = url::Url::parse(&webhook.url).ok();
+            let host = url.as_ref().and_then(|u| u.host_str());
+            let pinned = match host {
+                Some(h) => resolve_safe_addr(h).await,
+                None => None,
             };
-            if !safe {
+            let Some(pinned) = pinned else {
                 tracing::warn!("Webhook {} URL host is not safe — skipping delivery", webhook.id);
                 if let Err(e) = store
                     .record_webhook_delivery(
@@ -168,11 +175,11 @@ pub fn dispatch_event(
                     tracing::error!("Failed to record webhook delivery: {e}");
                 }
                 continue;
-            }
+            };
 
             let signature = sign_payload(&payload_str, &secret);
 
-            let result = deliver_with_retry(&http, &webhook, &payload_str, &signature).await;
+            let result = deliver_with_retry(&http, &webhook, &payload_str, &signature, pinned).await;
 
             let (status_code, success, last_error) = match result {
                 Ok(code) => (Some(code), true, String::new()),
@@ -208,9 +215,18 @@ async fn deliver_with_retry(
     webhook: &Webhook,
     payload: &str,
     signature: &str,
+    pinned: std::net::SocketAddr,
 ) -> Result<i32, (u32, String)> {
+    let url = url::Url::parse(&webhook.url).map_err(|e| (1, format!("Invalid webhook URL: {e}")))?;
+    let host = url.host_str().unwrap_or_default().to_string();
+    let port = url.port_or_known_default().unwrap_or(443);
+
+    // Client with the validated IP pinned and redirects disabled: the
+    // connection goes to the exact address we SSRF-checked, and a 3xx
+    // cannot bounce it to an internal host.
     let no_redirect_client = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
+        .resolve(&host, std::net::SocketAddr::new(pinned.ip(), port))
         .timeout(DELIVERY_TIMEOUT)
         .build()
         .map_err(|e| (1, format!("Failed to build HTTP client: {e}")))?;
@@ -224,7 +240,7 @@ async fn deliver_with_retry(
         }
 
         let result = no_redirect_client
-            .post(&webhook.url)
+            .post(url.clone())
             .header("Content-Type", "application/json")
             .header("X-Rungu-Event", webhook.events.clone())
             .header("X-Rungu-Signature", format!("sha256={signature}"))
@@ -284,6 +300,45 @@ mod tests {
     fn test_reject_blocked_hosts() {
         assert!(validate_webhook_url("http://169.254.169.254/latest/meta-data").is_err());
         assert!(validate_webhook_url("https://metadata.google.internal").is_err());
+    }
+
+    #[test]
+    fn test_is_public_ip_blocks_private_ranges() {
+        use std::net::IpAddr;
+        let blocked = [
+            "10.0.0.1",
+            "192.168.1.1",
+            "172.16.0.1",
+            "127.0.0.1",
+            "169.254.1.1",
+            "0.0.0.0",
+            "100.64.0.1",
+            "198.18.0.1",
+            "224.0.0.1",
+            "::1",
+            "::",
+            "fe80::1",
+            "fc00::1",
+            "fd12:3456::1",
+        ];
+        for ip in blocked {
+            assert!(!is_public_ip(ip.parse::<IpAddr>().unwrap()), "{ip} must be blocked");
+        }
+        let public = ["1.1.1.1", "8.8.8.8", "2606:4700::1111"];
+        for ip in public {
+            assert!(is_public_ip(ip.parse::<IpAddr>().unwrap()), "{ip} must be public");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_resolve_safe_addr_blocks_private_dns_or_unresolvable() {
+        // Unresolvable host → None (unsafe).
+        assert!(resolve_safe_addr("nonexistent.invalid.example").await.is_none());
+        // IP literals: loopback → None, public → Some.
+        assert!(resolve_safe_addr("127.0.0.1").await.is_none());
+        let pub_pin = resolve_safe_addr("1.1.1.1").await;
+        assert!(pub_pin.is_some());
+        assert_eq!(pub_pin.unwrap().ip(), "1.1.1.1".parse::<std::net::IpAddr>().unwrap());
     }
 
     #[test]
