@@ -188,10 +188,10 @@
                             {/if}
                             <p class="mt-1 text-xs text-muted-foreground">Created {timeAgo(project.created_at)}</p>
                         </div>
-                        <div class="flex shrink-0 gap-1">
-                            <Button variant="ghost" size="xs" href={`/board/${project.slug}`}>View</Button>
-                            <Button variant="ghost" size="xs" onclick={() => startEdit(project)}>Edit</Button>
-                            <Button variant="ghost" size="xs" class="text-destructive" onclick={() => handleDelete(project.slug)}>Delete</Button>
+                        <div class="flex shrink-0 items-center gap-1">
+                            <Button variant="ghost" size="sm" class="h-11 min-w-11" href={`/board/${project.slug}`} aria-label="View board">View</Button>
+                            <Button variant="ghost" size="sm" class="h-11 min-w-11" onclick={() => startEdit(project)} aria-label="Edit project">Edit</Button>
+                            <Button variant="ghost" size="sm" class="h-11 min-w-11 text-destructive" onclick={() => handleDelete(project.slug)} aria-label="Delete project">Delete</Button>
                         </div>
                     </Card.Header>
                 {/if}
