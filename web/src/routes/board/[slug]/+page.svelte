@@ -327,7 +327,7 @@
                     placeholder="Search..."
                     class="flex-1"
                 />
-                <select bind:value={sort} class="rounded-md border border-input bg-background px-3 py-2 text-sm">
+                <select bind:value={sort} class="rounded-md border border-input bg-background px-3 py-2 text-base sm:text-sm" aria-label="Sort posts">
                     {#each sortOptions as opt (opt.value)}
                         <option value={opt.value}>{opt.label}</option>
                     {/each}

@@ -185,7 +185,7 @@
                         <select
                             value={post.category}
                             onchange={handleCategoryChange}
-                            class="rounded-md border border-input bg-background px-2 py-0.5 text-xs capitalize"
+                            class="rounded-md border border-input bg-background px-2 py-0.5 text-base capitalize sm:text-xs"
                         >
                             {#each categoryOptions as c (c)}
                                 <option value={c} class="capitalize">{c}</option>
@@ -197,7 +197,7 @@
                         <select
                             value={post.status}
                             onchange={handleStatusChange}
-                            class="rounded-md border border-input bg-background px-2 py-0.5 text-xs capitalize"
+                            class="rounded-md border border-input bg-background px-2 py-0.5 text-base capitalize sm:text-xs"
                         >
                             {#each statusOptions as s (s)}
                                 <option value={s} class="capitalize">{s.replace('_', ' ')}</option>
