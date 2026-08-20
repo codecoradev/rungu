@@ -10,8 +10,11 @@
 
     // Preserve where the user came from (#147): backend /auth/:provider/login
     // accepts ?redirect= (signed cookie, open-redirect validated) and sends
-    // the user back there after successful auth.
-    const redirectTo = page.url.searchParams.get('redirect') || '/';
+    // the user back there after successful auth. Client-side path must be
+    // validated the same way — only same-origin absolute paths allowed.
+    const rawRedirect = page.url.searchParams.get('redirect') || '/';
+    const redirectTo =
+        rawRedirect.startsWith('/') && !rawRedirect.startsWith('//') ? rawRedirect : '/';
 
     onMount(async () => {
         try {
