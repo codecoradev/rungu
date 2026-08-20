@@ -4,6 +4,8 @@
     import type { ProviderInfo } from '$lib/api/types';
     import { onMount } from 'svelte';
 
+    let { redirectTo = '/' }: { redirectTo?: string } = $props();
+
     let providers: ProviderInfo[] = $state([]);
     let loadError = $state(false);
 
@@ -15,6 +17,14 @@
             loadError = true;
         }
     });
+
+    function handleLogin(provider: string) {
+        // Thread ?redirect= through the OAuth flow so users land back where
+        // they started (e.g. the post they tried to vote on). #147
+        const url = new URL(`/auth/${provider}/login`, window.location.origin);
+        url.searchParams.set('redirect', redirectTo);
+        window.location.href = url.pathname + url.search;
+    }
 
     const providerMeta: Record<string, { label: string; icon: string }> = {
         google: { label: 'Google', icon: '🔍' },
@@ -29,7 +39,7 @@
         <Button
             variant="outline"
             size="lg"
-            onclick={() => api.login(provider.name)}
+            onclick={() => handleLogin(provider.name)}
             class="justify-start gap-2"
         >
             <span class="text-lg">{meta.icon}</span>

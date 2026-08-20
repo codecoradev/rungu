@@ -11,6 +11,7 @@
     import { Textarea } from '$lib/components/ui/textarea';
     import * as Card from '$lib/components/ui/card';
     import { timeAgo } from '$lib/utils';
+    import { toastError, toastSuccess } from '$lib/toast.svelte';
 
     /**
      * Collect the id of `rootId` plus every comment whose `parent_id` chain leads
@@ -44,21 +45,7 @@
     let loading = $state(true);
     // Blocking load error (renders the whole error page)
     let error = $state('');
-    // Transient per-action error, shown as a toast near the bottom
-    let actionError = $state('');
-    let actionErrorTimer: ReturnType<typeof setTimeout> | null = null;
-
-    function showActionError(msg: string) {
-        actionError = msg;
-        if (actionErrorTimer) clearTimeout(actionErrorTimer);
-        actionErrorTimer = setTimeout(() => (actionError = ''), 4000);
-    }
-
-    $effect(() => {
-        return () => {
-            if (actionErrorTimer) clearTimeout(actionErrorTimer);
-        };
-    });
+    // Transient per-action errors go through the global toaster (#144)
 
     let commentText = $state('');
     let replyTo = $state<string | null>(null);
@@ -123,7 +110,7 @@
             commentText = '';
             replyTo = null;
         } catch {
-            showActionError('Failed to post comment');
+            toastError('Failed to post comment');
         } finally {
             commentLoading = false;
         }
@@ -138,7 +125,7 @@
             const toRemove = collectDescendants(comments, id);
             comments = comments.filter((c) => !toRemove.has(c.id));
         } catch {
-            showActionError('Failed to delete comment');
+            toastError('Failed to delete comment');
         }
     }
 
@@ -148,8 +135,11 @@
         if (!post) return;
         try {
             post = await api.updatePostStatus(post.id, status);
+            toastSuccess(`Status updated: ${status.replace('_', ' ')} ✓`);
         } catch {
-            showActionError('Failed to update status');
+            // Reset the select so it reflects the persisted post, not the failed choice
+            target.value = post.status;
+            toastError('Failed to update status');
         }
     }
 
@@ -159,8 +149,10 @@
         if (!post) return;
         try {
             post = await api.updatePostCategory(post.id, category);
+            toastSuccess(`Category updated: ${category} ✓`);
         } catch {
-            showActionError('Failed to update category');
+            target.value = post.category;
+            toastError('Failed to update category');
         }
     }
 
@@ -202,6 +194,7 @@
                         <select
                             value={post.category}
                             onchange={handleCategoryChange}
+                            aria-label="Change category"
                             class="rounded-md border border-input bg-background px-2 py-0.5 text-base capitalize sm:text-xs"
                         >
                             {#each categoryOptions as c (c)}
@@ -214,6 +207,7 @@
                         <select
                             value={post.status}
                             onchange={handleStatusChange}
+                            aria-label="Change status"
                             class="rounded-md border border-input bg-background px-2 py-0.5 text-base capitalize sm:text-xs"
                         >
                             {#each statusOptions as s (s)}
@@ -257,7 +251,7 @@
                                 <span>·</span>
                                 <span>{timeAgo(parentComment.created_at)}</span>
                             </div>
-                            <p class="mt-1 line-clamp-2 text-xs text-muted-foreground">{parentComment.content}</p>
+                            <p class="mt-1 line-clamp-2 text-xs text-muted-foreground" title={parentComment.content}>{parentComment.content}</p>
                         </div>
                     {/if}
                     <div class="mb-1 text-xs text-muted-foreground">
@@ -292,16 +286,4 @@
             ondelete={handleDeleteComment}
         />
     </section>
-{/if}
-
-{#if actionError}
-    <!-- Transient per-action error toast (comment/status/category/delete).
-         Kept separate from the blocking `error` so load failures still render
-         the full error page. Auto-dismisses after 4s. -->
-    <div
-        role="status"
-        class="fixed bottom-4 left-1/2 z-50 -translate-x-1/2 rounded-lg border border-destructive/40 bg-background px-4 py-2 text-sm text-destructive shadow-lg"
-    >
-        {actionError}
-    </div>
 {/if}
