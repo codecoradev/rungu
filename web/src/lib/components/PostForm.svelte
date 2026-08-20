@@ -20,11 +20,11 @@
     let loading = $state(false);
     let error = $state('');
 
-    const categories: { value: PostCategory; label: string; icon: string }[] = [
-        { value: 'feedback', label: 'Feedback', icon: '💬' },
-        { value: 'bug', label: 'Bug', icon: '🐛' },
-        { value: 'feature', label: 'Feature', icon: '✨' },
-        { value: 'question', label: 'Question', icon: '❓' },
+    const categories: { value: PostCategory; label: string }[] = [
+        { value: 'feedback', label: 'Feedback' },
+        { value: 'bug', label: 'Bug' },
+        { value: 'feature', label: 'Feature' },
+        { value: 'question', label: 'Question' },
     ];
 
     async function handleSubmit(e: Event) {
@@ -96,7 +96,6 @@
                                     : 'border-border text-muted-foreground hover:bg-muted',
                             )}
                         >
-                            <span>{cat.icon}</span>
                             <span>{cat.label}</span>
                         </button>
                     {/each}

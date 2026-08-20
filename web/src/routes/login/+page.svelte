@@ -1,5 +1,6 @@
 <script lang="ts">
     import { onMount } from 'svelte';
+    import { goto } from '$app/navigation';
     import { page } from '$app/state';
     import { api } from '$lib/api/client';
     import AuthProviderButtons from '$lib/components/AuthProviderButtons.svelte';
@@ -19,7 +20,7 @@
     onMount(async () => {
         try {
             await api.getCurrentUser();
-            window.location.href = redirectTo;
+            goto(redirectTo);
         } catch {
             checking = false;
         }

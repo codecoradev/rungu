@@ -111,7 +111,10 @@
             {#each columns as col (col.key)}
                 <div class="flex w-[85%] shrink-0 snap-center flex-col gap-3 rounded-lg border-t-4 {col.accent} bg-muted/30 p-3 md:w-auto">
                     <div class="flex items-center justify-between">
-                        <h2 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                        <h2
+                            class="text-sm font-semibold uppercase tracking-wide text-muted-foreground"
+                            aria-label="{col.title}: {roadmap[col.totalKey]} posts"
+                        >
                             {col.title}
                         </h2>
                         <span class="rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
