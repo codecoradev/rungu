@@ -103,7 +103,7 @@ pub async fn fetch_identity(
 
     match provider {
         AuthProvider::Google => parse_google(&json),
-        AuthProvider::GitHub => parse_github(client, cfg, &json).await,
+        AuthProvider::GitHub => parse_github(client, cfg, access_token, &json).await,
         AuthProvider::Keycloak => parse_keycloak(&json),
     }
 }
@@ -147,7 +147,12 @@ fn parse_google(v: &serde_json::Value) -> Result<OAuthIdentity> {
 ///     `/user/emails` is `verified: true`, or
 ///   - `/user.email` is null/empty but `/user/emails` contains a primary+verified entry
 ///     (in which case that entry's email is used).
-async fn parse_github(client: &reqwest::Client, cfg: &ProviderConfig, v: &serde_json::Value) -> Result<OAuthIdentity> {
+async fn parse_github(
+    client: &reqwest::Client,
+    cfg: &ProviderConfig,
+    access_token: &str,
+    v: &serde_json::Value,
+) -> Result<OAuthIdentity> {
     let provider_id =
         v.get("id").and_then(|i| i.as_i64()).map(|i| i.to_string()).context("GitHub userinfo missing 'id' field")?;
 
@@ -161,6 +166,7 @@ async fn parse_github(client: &reqwest::Client, cfg: &ProviderConfig, v: &serde_
     };
     let emails_resp = client
         .get(&emails_url)
+        .bearer_auth(access_token)
         .header("Accept", "application/vnd.github+json")
         .send()
         .await

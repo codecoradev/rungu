@@ -3,6 +3,7 @@
 
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
+use std::net::IpAddr;
 use std::time::Duration;
 
 use rungu_core::Store;
@@ -13,6 +14,64 @@ type HmacSha256 = Hmac<Sha256>;
 const MAX_ATTEMPTS: u32 = 3;
 const DELIVERY_TIMEOUT: Duration = Duration::from_secs(10);
 const BACKOFF_BASE: Duration = Duration::from_secs(2);
+
+/// Is this IP globally routable? (i.e. NOT private/loopback/link-local/reserved)
+fn is_public_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => {
+            !(v4.is_private()
+                || v4.is_loopback()
+                || v4.is_link_local()
+                || v4.is_broadcast()
+                || v4.is_documentation()
+                || v4.is_unspecified()
+                // 100.64.0.0/10 CGNAT + 198.18.0.0/15 benchmark range
+                || (v4.octets()[0] == 100 && (v4.octets()[1] & 0b1100_0000) == 0b0100_0000)
+                || (v4.octets()[0] == 198 && (v4.octets()[1] & 0xFE) == 18))
+        }
+        IpAddr::V6(v6) => {
+            // IPv4-mapped (::ffff:a.b.c.d) must be checked as IPv4.
+            if let Some(v4) = v6.to_ipv4_mapped() {
+                return is_public_ip(IpAddr::V4(v4));
+            }
+            !(v6.is_loopback()
+                || v6.is_unspecified()
+                // fc00::/7 unique-local
+                || (v6.segments()[0] & 0xFE00) == 0xFC00
+                // fe80::/10 link-local
+                || (v6.segments()[0] & 0xFFC0) == 0xFE80)
+        }
+    }
+}
+
+/// Delivery-time SSRF guard: resolve the webhook host and refuse to deliver
+/// if ANY resolved address is not globally routable. Catches DNS-based
+/// bypasses and IP changes since create-time validation.
+async fn host_is_safe(host: &str) -> bool {
+    // IP-literal hosts are checked directly.
+    if let Ok(ip) = host.trim_matches(['[', ']']).parse::<IpAddr>() {
+        return is_public_ip(ip);
+    }
+    // DNS names are resolved; every A/AAAA record must be public.
+    // Port is irrelevant for the lookup; use a dummy port 0.
+    match tokio::net::lookup_host((host, 0)).await {
+        Ok(addrs) => {
+            let mut any = false;
+            for addr in addrs {
+                any = true;
+                if !is_public_ip(addr.ip()) {
+                    tracing::warn!("Webhook host {host} resolves to non-public IP {} — blocked", addr.ip());
+                    return false;
+                }
+            }
+            any // unresolved host -> no addresses -> treat as unsafe
+        }
+        Err(e) => {
+            tracing::warn!("Webhook host {host} failed to resolve: {e} — blocked");
+            false
+        }
+    }
+}
 
 /// SSRF protection — block requests to private/reserved IP ranges and non-HTTPS schemes.
 pub fn validate_webhook_url(raw: &str) -> Result<(), String> {
@@ -86,6 +145,31 @@ pub fn dispatch_event(
             let http = http.clone();
             let payload_str = payload_str.clone();
 
+            // Delivery-time SSRF re-check (DNS rebinding / IP drift since creation).
+            let host = url::Url::parse(&webhook.url).ok().and_then(|u| u.host_str().map(String::from));
+            let safe = match host {
+                Some(h) => host_is_safe(&h).await,
+                None => false,
+            };
+            if !safe {
+                tracing::warn!("Webhook {} URL host is not safe — skipping delivery", webhook.id);
+                if let Err(e) = store
+                    .record_webhook_delivery(
+                        &webhook.id,
+                        event_str,
+                        &payload_str,
+                        None,
+                        false,
+                        MAX_ATTEMPTS as i32,
+                        "Blocked by SSRF protection (host resolves to non-public address)",
+                    )
+                    .await
+                {
+                    tracing::error!("Failed to record webhook delivery: {e}");
+                }
+                continue;
+            }
+
             let signature = sign_payload(&payload_str, &secret);
 
             let result = deliver_with_retry(&http, &webhook, &payload_str, &signature).await;
@@ -115,12 +199,22 @@ pub fn dispatch_event(
 
 /// Deliver the payload with up to MAX_ATTEMPTS retries (exponential backoff).
 /// Returns the HTTP status code on success (2xx), or an error.
+///
+/// Uses a dedicated client with redirects DISABLED: following a 302 would
+/// let a valid public URL redirect to an internal address at delivery time,
+/// bypassing SSRF validation.
 async fn deliver_with_retry(
-    http: &reqwest::Client,
+    _http: &reqwest::Client,
     webhook: &Webhook,
     payload: &str,
     signature: &str,
 ) -> Result<i32, (u32, String)> {
+    let no_redirect_client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .timeout(DELIVERY_TIMEOUT)
+        .build()
+        .map_err(|e| (1, format!("Failed to build HTTP client: {e}")))?;
+
     let mut last_err = String::new();
 
     for attempt in 1..=MAX_ATTEMPTS {
@@ -129,7 +223,7 @@ async fn deliver_with_retry(
             tokio::time::sleep(delay).await;
         }
 
-        let result = http
+        let result = no_redirect_client
             .post(&webhook.url)
             .header("Content-Type", "application/json")
             .header("X-Rungu-Event", webhook.events.clone())
