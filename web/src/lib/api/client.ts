@@ -16,6 +16,10 @@ import type {
     ProviderInfo,
     Attachment,
     AttachmentListResponse,
+    Webhook,
+    WebhookDelivery,
+    WebhookTestResult,
+    ProjectStats,
 } from './types';
 
 const BASE = '';
@@ -201,6 +205,45 @@ export const api = {
 
     deleteAttachment: (id: string) =>
         request<void>(`/api/attachments/${seg(id)}`, { method: 'DELETE' }),
+
+    // ── Admin ─────────────────────────────────────────────────────────
+    adminListAllPosts: (params?: { status?: string; project?: string; page?: number; per_page?: number }) => {
+        const query = new URLSearchParams();
+        if (params?.status) query.set('status', params.status);
+        if (params?.project) query.set('project', params.project);
+        if (params?.page !== undefined) query.set('page', String(params.page));
+        if (params?.per_page !== undefined) query.set('per_page', String(params.per_page));
+        const qs = query.toString();
+        return request<PaginatedResponse<PostDetail>>(`/api/admin/posts${qs ? `?${qs}` : ''}`);
+    },
+
+    adminProjectStats: (slug: string) =>
+        request<DataResponse<ProjectStats>>(`/api/admin/projects/${seg(slug)}/stats`).then((r) => r.data),
+
+    // ── Webhooks ──────────────────────────────────────────────────────
+    listWebhooks: (slug: string) =>
+        request<{ data: Webhook[] }>(`/api/projects/${seg(slug)}/webhooks`).then((r) => r.data),
+
+    createWebhook: (slug: string, body: { url: string; events?: string }) =>
+        request<DataResponse<Webhook>>(`/api/projects/${seg(slug)}/webhooks`, {
+            method: 'POST',
+            body: JSON.stringify(body),
+        }).then((r) => r.data),
+
+    updateWebhook: (slug: string, id: string, body: { url?: string; events?: string; is_active?: boolean }) =>
+        request<DataResponse<Webhook>>(`/api/projects/${seg(slug)}/webhooks/${seg(id)}`, {
+            method: 'PATCH',
+            body: JSON.stringify(body),
+        }).then((r) => r.data),
+
+    deleteWebhook: (slug: string, id: string) =>
+        request<void>(`/api/projects/${seg(slug)}/webhooks/${seg(id)}`, { method: 'DELETE' }),
+
+    listWebhookDeliveries: (slug: string, id: string) =>
+        request<{ data: WebhookDelivery[] }>(`/api/projects/${seg(slug)}/webhooks/${seg(id)}/deliveries`).then((r) => r.data),
+
+    testWebhook: (slug: string, id: string) =>
+        request<WebhookTestResult>(`/api/projects/${seg(slug)}/webhooks/${seg(id)}/test`, { method: 'POST' }),
 };
 
 export { ApiError };

@@ -210,6 +210,44 @@ pub fn dispatch_event(
 /// Uses a dedicated client with redirects DISABLED: following a 302 would
 /// let a valid public URL redirect to an internal address at delivery time,
 /// bypassing SSRF validation.
+/// Single-attempt delivery for the admin "test webhook" endpoint.
+/// Same SSRF guards as `deliver_with_retry` (resolve → validate → pin).
+pub async fn deliver_once(
+    _http: &reqwest::Client,
+    webhook: &Webhook,
+    payload: &str,
+    signature: &str,
+) -> Result<i32, (u32, String)> {
+    let url = url::Url::parse(&webhook.url).map_err(|e| (1, format!("Invalid webhook URL: {e}")))?;
+    let host = url.host_str().unwrap_or_default().to_string();
+    let port = url.port_or_known_default().unwrap_or(443);
+
+    let pinned = resolve_safe_addr(&host)
+        .await
+        .ok_or_else(|| (1, format!("Host {host} does not resolve to a public address")))?;
+
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .resolve(&host, std::net::SocketAddr::new(pinned.ip(), port))
+        .timeout(DELIVERY_TIMEOUT)
+        .build()
+        .map_err(|e| (1, format!("Failed to build HTTP client: {e}")))?;
+
+    let resp = client
+        .post(url.clone())
+        .header("Content-Type", "application/json")
+        .header("X-Rungu-Event", "webhook.test")
+        .header("X-Rungu-Signature", format!("sha256={signature}"))
+        .header("User-Agent", "Rungu-Webhook/1.0")
+        .body(payload.to_string())
+        .send()
+        .await
+        .map_err(|e| (1, e.to_string()))?;
+
+    let status = resp.status().as_u16() as i32;
+    if resp.status().is_success() { Ok(status) } else { Err((1, format!("HTTP {status}"))) }
+}
+
 async fn deliver_with_retry(
     _http: &reqwest::Client,
     webhook: &Webhook,

@@ -9,7 +9,7 @@ use rungu_api::{AppState, api_routes, auth_routes};
 use rungu_auth::AuthConfig;
 use rungu_auth::session::issue_jwt;
 use rungu_core::{Store, open_pool, run_migrations};
-use rungu_proto::CurrentUser;
+use rungu_proto::{CurrentUser, PostCategory};
 use tower::ServiceExt;
 
 /// Build a test app router with an in-memory database.
@@ -652,4 +652,127 @@ async fn test_changelog_since_filters_out_older_ships() {
     let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(json["pagination"]["total"], 0);
     assert!(json["data"].as_array().unwrap().is_empty());
+}
+
+// ── Admin v2 (#131) ─────────────────────────────────────────────────────
+
+/// Non-admin must NOT access the admin moderation queue.
+#[tokio::test]
+async fn test_admin_queue_requires_admin() {
+    let (app, store) = setup_app().await;
+    let token = authed_user(&store, "test-secret").await;
+    let res = app
+        .oneshot(
+            Request::builder()
+                .uri("/admin/posts")
+                .header("cookie", format!("session={token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert!(res.status() == StatusCode::FORBIDDEN || res.status() == StatusCode::UNAUTHORIZED, "got {}", res.status());
+}
+
+/// Non-admin must NOT access project stats.
+#[tokio::test]
+async fn test_admin_stats_requires_admin() {
+    let (app, store) = setup_app().await;
+    let token = authed_user(&store, "test-secret").await;
+    let res = app
+        .oneshot(
+            Request::builder()
+                .uri("/admin/projects/test-app/stats")
+                .header("cookie", format!("session={token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert!(res.status() == StatusCode::FORBIDDEN || res.status() == StatusCode::UNAUTHORIZED, "got {}", res.status());
+}
+
+/// Admin sees the cross-board queue with pagination metadata.
+#[tokio::test]
+async fn test_admin_queue_lists_posts() {
+    let (app, store) = setup_app().await;
+    let user = store
+        .find_or_create_user("admin@test.com", Some("Admin"), None, &["admin@test.com".to_string()])
+        .await
+        .unwrap();
+    let token =
+        make_token(&CurrentUser { id: user.id.clone(), email: user.email.clone(), role: user.role }, "test-secret");
+    // Seed two posts in the test project (create_post takes the project UUID)
+    let project = store.get_project_by_slug("test-app").await.unwrap().unwrap();
+    store.create_post(&project.id, "First post", "body", PostCategory::Feedback, &user.id).await.unwrap();
+    store.create_post(&project.id, "Second post", "body", PostCategory::Bug, &user.id).await.unwrap();
+
+    let res = app
+        .oneshot(
+            Request::builder()
+                .uri("/admin/posts?status=open&project=test-app")
+                .header("cookie", format!("session={token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["pagination"]["total"], 2, "expected 2 open posts: {json}");
+    assert_eq!(json["data"].as_array().map(Vec::len), Some(2));
+}
+
+/// Project stats include posts, votes, and comments counts.
+#[tokio::test]
+async fn test_admin_project_stats() {
+    let (app, store) = setup_app().await;
+    let user = store
+        .find_or_create_user("admin@test.com", Some("Admin"), None, &["admin@test.com".to_string()])
+        .await
+        .unwrap();
+    let token =
+        make_token(&CurrentUser { id: user.id.clone(), email: user.email.clone(), role: user.role }, "test-secret");
+    let project = store.get_project_by_slug("test-app").await.unwrap().unwrap();
+    let post = store.create_post(&project.id, "Stat post", "body", PostCategory::Feature, &user.id).await.unwrap();
+    store.toggle_vote(&user.id, &post.id).await.unwrap();
+    store.create_comment(&post.id, "nice", None, &user.id).await.unwrap();
+
+    let res = app
+        .oneshot(
+            Request::builder()
+                .uri("/admin/projects/test-app/stats")
+                .header("cookie", format!("session={token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let body = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let stats = &json["data"];
+    assert_eq!(stats["total_posts"], 1);
+    assert_eq!(stats["total_votes"], 1);
+    assert_eq!(stats["total_comments"], 1);
+}
+
+/// Admin-only test webhook delivery rejects non-admin callers.
+#[tokio::test]
+async fn test_webhook_test_requires_admin() {
+    let (app, store) = setup_app().await;
+    let token = authed_user(&store, "test-secret").await;
+    let res = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/projects/test-app/webhooks/00000000-0000-0000-0000-000000000000/test")
+                .header("cookie", format!("session={token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), StatusCode::FORBIDDEN);
 }
