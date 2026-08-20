@@ -42,7 +42,24 @@
     let comments = $state<Comment[]>([]);
     let user = $state<CurrentUser | null>(null);
     let loading = $state(true);
+    // Blocking load error (renders the whole error page)
     let error = $state('');
+    // Transient per-action error, shown as a toast near the bottom
+    let actionError = $state('');
+    let actionErrorTimer: ReturnType<typeof setTimeout> | null = null;
+
+    function showActionError(msg: string) {
+        actionError = msg;
+        if (actionErrorTimer) clearTimeout(actionErrorTimer);
+        actionErrorTimer = setTimeout(() => (actionError = ''), 4000);
+    }
+
+    $effect(() => {
+        return () => {
+            if (actionErrorTimer) clearTimeout(actionErrorTimer);
+        };
+    });
+
     let commentText = $state('');
     let replyTo = $state<string | null>(null);
     let commentLoading = $state(false);
@@ -106,7 +123,7 @@
             commentText = '';
             replyTo = null;
         } catch {
-            error = 'Failed to post comment';
+            showActionError('Failed to post comment');
         } finally {
             commentLoading = false;
         }
@@ -121,7 +138,7 @@
             const toRemove = collectDescendants(comments, id);
             comments = comments.filter((c) => !toRemove.has(c.id));
         } catch {
-            error = 'Failed to delete comment';
+            showActionError('Failed to delete comment');
         }
     }
 
@@ -132,7 +149,7 @@
         try {
             post = await api.updatePostStatus(post.id, status);
         } catch {
-            error = 'Failed to update status';
+            showActionError('Failed to update status');
         }
     }
 
@@ -143,7 +160,7 @@
         try {
             post = await api.updatePostCategory(post.id, category);
         } catch {
-            error = 'Failed to update category';
+            showActionError('Failed to update category');
         }
     }
 
@@ -275,4 +292,16 @@
             ondelete={handleDeleteComment}
         />
     </section>
+{/if}
+
+{#if actionError}
+    <!-- Transient per-action error toast (comment/status/category/delete).
+         Kept separate from the blocking `error` so load failures still render
+         the full error page. Auto-dismisses after 4s. -->
+    <div
+        role="status"
+        class="fixed bottom-4 left-1/2 z-50 -translate-x-1/2 rounded-lg border border-destructive/40 bg-background px-4 py-2 text-sm text-destructive shadow-lg"
+    >
+        {actionError}
+    </div>
 {/if}
