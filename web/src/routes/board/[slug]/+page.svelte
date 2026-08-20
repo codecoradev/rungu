@@ -11,6 +11,7 @@
     import { Skeleton } from '$lib/components/ui/skeleton';
     import { cn } from '$lib/utils';
     import { toastError } from '$lib/toast.svelte';
+    import { LoaderCircle } from '@lucide/svelte';
 
     let { params } = $props();
     let slug = $derived(params.slug);
@@ -56,10 +57,10 @@
     ];
 
     const categoryOptions: { value: PostCategory; label: string }[] = [
-        { value: 'feedback', label: '💬 Feedback' },
-        { value: 'bug', label: '🐛 Bug' },
-        { value: 'feature', label: '✨ Feature' },
-        { value: 'question', label: '❓ Question' },
+        { value: 'feedback', label: 'Feedback' },
+        { value: 'bug', label: 'Bug' },
+        { value: 'feature', label: 'Feature' },
+        { value: 'question', label: 'Question' },
     ];
 
     async function loadBoard() {
@@ -284,7 +285,9 @@
                 aria-expanded={showFilters}
                 onclick={() => (showFilters = !showFilters)}
             >
-                Filters {statusFilter || categoryFilter ? '•' : ''} {showFilters ? '▴' : '▾'}
+                Filters{statusFilter || categoryFilter
+                    ? ` (${(statusFilter ? 1 : 0) + (categoryFilter ? 1 : 0)})`
+                    : ''} {showFilters ? '▴' : '▾'}
             </Button>
             <Button variant="outline" size="sm" class="h-11 shrink-0" href="/board/{slug}/roadmap">
                 Roadmap
@@ -351,12 +354,23 @@
         <!-- Main -->
         <div>
             <div class="mb-4 flex flex-wrap items-center gap-2">
-                <Input
-                    id="board-search"
-                    bind:value={searchQuery}
-                    placeholder="Search..."
-                    class="flex-1"
-                />
+                <div class="relative flex-1">
+                    <Input
+                        id="board-search"
+                        bind:value={searchQuery}
+                        type="search"
+                        placeholder="Search..."
+                    />
+                    {#if refetching && searchQuery}
+                        <span
+                            class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+                            role="status"
+                            aria-label="Searching"
+                        >
+                            <LoaderCircle class="size-4 animate-spin" aria-hidden="true" />
+                        </span>
+                    {/if}
+                </div>
                 <select bind:value={sort} class="rounded-md border border-input bg-background px-3 py-2 text-base sm:text-sm" aria-label="Sort posts">
                     {#each sortOptions as opt (opt.value)}
                         <option value={opt.value}>{opt.label}</option>

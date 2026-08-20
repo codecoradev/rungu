@@ -9,6 +9,7 @@
     import { Skeleton } from '$lib/components/ui/skeleton';
     import { timeAgo } from '$lib/utils';
     import { toastSuccess } from '$lib/toast.svelte';
+    import StatusBadge from '$lib/components/StatusBadge.svelte';
 
     let projects = $state<Project[]>([]);
     let user = $state<CurrentUser | null>(null);
@@ -466,9 +467,9 @@
                         <Card.Content class="flex flex-col gap-3 pt-6 sm:flex-row sm:items-start sm:justify-between">
                             <div class="min-w-0 flex-1">
                                 <div class="flex flex-wrap items-center gap-2">
-                                    <span class="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">{post.status}</span>
+                                    <StatusBadge status={post.status} />
                                     <span class="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">{post.category}</span>
-                                    <span class="text-xs text-muted-foreground">▲ {post.vote_count} · 💬 {post.comment_count} · {timeAgo(post.created_at)}</span>
+                                    <span class="text-xs text-muted-foreground">▲ {post.vote_count} · {post.comment_count} comments · {timeAgo(post.created_at)}</span>
                                 </div>
                                 <p class="mt-2 font-medium">{post.title}</p>
                                 <p class="mt-1 text-xs text-muted-foreground">by {post.creator?.name ?? post.created_by}</p>
