@@ -8,6 +8,7 @@
     import * as Card from '$lib/components/ui/card';
     import { Skeleton } from '$lib/components/ui/skeleton';
     import { timeAgo } from '$lib/utils';
+    import { toastSuccess } from '$lib/toast.svelte';
 
     let projects = $state<Project[]>([]);
     let user = $state<CurrentUser | null>(null);
@@ -53,14 +54,9 @@
     const isAdmin = $derived(user?.role === 'admin');
 
     // Success feedback toast (#153) — auto-dismiss, never overlaps the error banner
-    let notice = $state('');
-    let noticeTimer: ReturnType<typeof setTimeout> | undefined;
     function notify(msg: string) {
-        notice = msg;
-        clearTimeout(noticeTimer);
-        noticeTimer = setTimeout(() => (notice = ''), 2500);
+        toastSuccess(msg);
     }
-    $effect(() => () => clearTimeout(noticeTimer));
 
     async function loadData() {
         loading = true;
@@ -315,9 +311,6 @@
         <p class="mb-4 text-sm text-destructive">{error}</p>
     {/if}
 
-    {#if notice}
-        <p class="mb-4 text-sm text-success" role="status">✓ {notice}</p>
-    {/if}
 
     <!-- Tabs -->
     <div class="mb-6 flex gap-1 border-b" role="tablist">

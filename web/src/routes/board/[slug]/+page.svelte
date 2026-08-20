@@ -10,6 +10,7 @@
     import * as Card from '$lib/components/ui/card';
     import { Skeleton } from '$lib/components/ui/skeleton';
     import { cn } from '$lib/utils';
+    import { toastError } from '$lib/toast.svelte';
 
     let { params } = $props();
     let slug = $derived(params.slug);
@@ -18,6 +19,9 @@
     let posts = $state<PostDetail[]>([]);
     let total = $state(0);
     let loading = $state(true);
+    // True while re-fetching with posts already on screen (filter/search refill).
+    // Gates the dimming overlay so the first load still shows skeletons. #148
+    let refetching = $state(false);
     let error = $state('');
 
     let sort = $state('newest');
@@ -59,7 +63,10 @@
     ];
 
     async function loadBoard() {
-        loading = true;
+        // Filter/search refill: posts are already rendered — dim them instead
+        // of flashing skeletons, and reset pagination. #148
+        refetching = posts.length > 0;
+        loading = posts.length === 0;
         error = '';
         try {
             project = await api.getProject(slug);
@@ -72,10 +79,33 @@
             });
             posts = result.data;
             total = result.pagination.total;
+            focusedPostIndex = -1;
         } catch (e) {
             error = e instanceof ApiError && e.status === 404 ? 'Project not found' : 'Failed to load board';
         } finally {
             loading = false;
+            refetching = false;
+        }
+    }
+
+    async function loadMore() {
+        const before = posts.length;
+        if (before >= total) return;
+        try {
+            const result = await api.listPosts(slug, {
+                sort,
+                status: statusFilter || undefined,
+                category: categoryFilter || undefined,
+                q: searchQuery || undefined,
+                per_page: 50,
+                page: Math.floor(before / 50) + 1,
+            });
+            // Merge, dedup by id (defensive against shifting sort orders)
+            const seen = new Set(posts.map((p) => p.id));
+            posts = [...posts, ...result.data.filter((p) => !seen.has(p.id))];
+            total = result.pagination.total;
+        } catch {
+            toastError('Failed to load more posts');
         }
     }
 
@@ -349,7 +379,7 @@
                 </div>
             {/if}
 
-            <div class="space-y-3">
+            <div class="space-y-3 transition-opacity duration-200 {refetching ? 'pointer-events-none opacity-40' : ''}">
                 {#each posts as post, i (post.id)}
                     <div
                         data-post-index={i}
@@ -364,6 +394,17 @@
                     </div>
                 {/each}
             </div>
+
+            {#if posts.length > 0 && total > posts.length}
+                <div class="mt-4 text-center">
+                    <p class="mb-2 text-xs text-muted-foreground" aria-live="polite">
+                        Showing {posts.length} of {total} posts
+                    </p>
+                    <Button variant="outline" size="sm" onclick={loadMore}>Show more</Button>
+                </div>
+            {:else if posts.length > 0 && total === posts.length && total > 50}
+                <p class="mt-4 text-center text-xs text-muted-foreground">Showing all {total} posts</p>
+            {/if}
 
             {#if posts.length === 0}
                 <div class="rounded-xl border border-dashed border-border py-12 text-center">

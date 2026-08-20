@@ -53,13 +53,20 @@
         <Card.Title class="text-base">New Post</Card.Title>
     </Card.Header>
     <Card.Content>
-        <form onsubmit={handleSubmit} class="space-y-3">
+        <form onsubmit={handleSubmit} class="space-y-3" novalidate>
             {#if error}
-                <p class="text-sm text-destructive">{error}</p>
+                <p id="post-form-error" class="text-sm text-destructive" role="alert">{error}</p>
             {/if}
 
             <div>
-                <Input bind:value={title} placeholder="What's your feedback?" maxlength={200} aria-label="Title" />
+                <Input
+                    bind:value={title}
+                    placeholder="What's your feedback?"
+                    maxlength={200}
+                    aria-label="Title"
+                    aria-invalid={error ? 'true' : undefined}
+                    aria-describedby={error ? 'post-form-error' : undefined}
+                />
                 <p class="mt-1 text-right text-xs text-muted-foreground" aria-live="polite">
                     {title.length}/200
                 </p>

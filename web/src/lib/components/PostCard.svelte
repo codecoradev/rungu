@@ -21,9 +21,9 @@
                     <CategoryBadge category={post.category} />
                     <StatusBadge status={post.status} />
                 </div>
-                <Card.Title class="truncate text-base">{post.title}</Card.Title>
+                <Card.Title class="truncate text-base" title={post.title}>{post.title}</Card.Title>
                 {#if post.description}
-                    <p class="mt-1 line-clamp-2 text-sm text-muted-foreground">{post.description}</p>
+                    <p class="mt-1 line-clamp-2 text-sm text-muted-foreground" title={post.description}>{post.description}</p>
                 {/if}
                 <div class="mt-2 flex items-center gap-3 text-xs text-muted-foreground">
                     <span>{post.creator.name || post.creator.email || 'User'}</span>

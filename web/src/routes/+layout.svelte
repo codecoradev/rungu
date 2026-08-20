@@ -7,6 +7,7 @@
     import { Button } from '$lib/components/ui/button';
     import ThemeToggle from '$lib/components/ThemeToggle.svelte';
     import ShortcutHelp from '$lib/components/ShortcutHelp.svelte';
+    import Toaster from '$lib/components/Toaster.svelte';
     import { resolveShortcut, type ShortcutDef } from '$lib/shortcuts';
 
     let { children } = $props();
@@ -139,3 +140,4 @@
 </div>
 
 <ShortcutHelp bind:open={helpOpen} />
+<Toaster />
