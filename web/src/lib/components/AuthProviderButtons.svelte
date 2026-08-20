@@ -38,8 +38,15 @@
     {/each}
 
     {#if providers.length === 0}
-        <p class="text-center text-sm text-muted-foreground">
-            {loadError ? 'Failed to load auth providers. Check your connection.' : 'No auth providers configured.'}
-        </p>
+        <div class="rounded-lg border border-dashed border-border p-4 text-center">
+            {#if loadError}
+                <p class="text-sm text-muted-foreground">Failed to load auth providers. Check your connection and refresh.</p>
+            {:else}
+                <p class="text-sm font-medium">No login methods configured</p>
+                <p class="mt-1 text-sm text-muted-foreground">
+                    This Rungu instance has no OAuth provider enabled. Admins can enable Google, GitHub or Keycloak in the server configuration.
+                </p>
+            {/if}
+        </div>
     {/if}
 </div>

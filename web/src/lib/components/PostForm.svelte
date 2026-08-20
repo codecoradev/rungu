@@ -58,9 +58,21 @@
                 <p class="text-sm text-destructive">{error}</p>
             {/if}
 
-            <Input bind:value={title} placeholder="What's your feedback?" maxlength={200} />
+            <div>
+                <Input bind:value={title} placeholder="What's your feedback?" maxlength={200} aria-label="Title" />
+                <p class="mt-1 text-right text-xs text-muted-foreground" aria-live="polite">
+                    {title.length}/200
+                </p>
+            </div>
 
-            <Textarea bind:value={description} placeholder="Add more details (optional)" rows={3} />
+            <div>
+                <Textarea bind:value={description} placeholder="Add more details (optional)" rows={3} maxlength={4000} aria-label="Description" />
+                {#if description.length > 3600}
+                    <p class="mt-1 text-right text-xs text-muted-foreground" aria-live="polite">
+                        {description.length}/4000
+                    </p>
+                {/if}
+            </div>
 
             <!-- Category: vertical list, no overflow -->
             <div class="space-y-1.5">

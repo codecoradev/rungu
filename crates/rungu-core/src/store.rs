@@ -443,15 +443,18 @@ impl Store {
                 let q = $query.bind(params.project_id);
                 let q = if let Some(ref s) = params.status { q.bind(status_to_str(*s)) } else { q };
                 let q = if let Some(ref c) = params.category { q.bind(category_to_str(*c)) } else { q };
-                let q = match &search {
-                    Search::Fts5(t) | Search::PgTsv(t) => q.bind(t.clone()),
-                    Search::None => q,
-                };
-                if let Some(ts) = params.since {
+                // Bind in SQL placeholder order: `since` condition is part of
+                // `where_sql` and comes BEFORE the appended `search_where`
+                // fragment, so `since` must be bound before the search token.
+                let q = if let Some(ts) = params.since {
                     // Bind the `updated_at >= ?` lower bound as an RFC3339 string.
                     q.bind(ts.to_rfc3339())
                 } else {
                     q
+                };
+                match &search {
+                    Search::Fts5(t) | Search::PgTsv(t) => q.bind(t.clone()),
+                    Search::None => q,
                 }
             }};
         }
