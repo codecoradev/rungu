@@ -506,6 +506,109 @@ impl Store {
         Ok((posts, total))
     }
 
+    /// List posts across ALL projects — admin moderation queue.
+    ///
+    /// Optional filters: exact status, exact project slug. Ordered newest first.
+    /// Same join shape as `list_posts` so `PostDetail` maps identically.
+    pub async fn list_all_posts(&self, params: ListAllPostsParams<'_>) -> Result<(Vec<PostDetail>, i64)> {
+        let mut where_parts: Vec<&str> = vec!["1=1"];
+        if params.status.is_some() {
+            where_parts.push("p.status = ?");
+        }
+        if params.project_slug.is_some() {
+            where_parts.push("pr.slug = ?");
+        }
+
+        let where_sql = where_parts.join(" AND ");
+
+        // Count first (same WHERE, no join needed unless filtering by slug).
+        let count_sql = format!(
+            "SELECT COUNT(*) FROM posts p \
+             LEFT JOIN projects pr ON p.project_id = pr.id \
+             WHERE {where_sql}"
+        );
+        let mut count_q = sqlx::query_scalar::<_, i64>(&count_sql);
+        if let Some(s) = params.status {
+            count_q = count_q.bind(status_to_str(s));
+        }
+        if let Some(slug) = params.project_slug {
+            count_q = count_q.bind(slug);
+        }
+        let total = count_q.fetch_one(&self.pool).await.context("Failed to count posts")?;
+
+        let sql = format!(
+            "SELECT p.*, u.id as user_id, u.email as user_email, u.name as user_name, u.avatar_url as user_avatar, \
+             pr.slug as project_slug, pr.name as project_name \
+             FROM posts p \
+             LEFT JOIN users u ON p.created_by = u.id \
+             LEFT JOIN projects pr ON p.project_id = pr.id \
+             WHERE {where_sql} \
+             ORDER BY p.created_at DESC \
+             LIMIT ? OFFSET ?"
+        );
+        let mut q = sqlx::query(&sql);
+        if let Some(s) = params.status {
+            q = q.bind(status_to_str(s));
+        }
+        if let Some(slug) = params.project_slug {
+            q = q.bind(slug);
+        }
+        q = q.bind(params.limit).bind(params.offset);
+
+        let rows = q.fetch_all(&self.pool).await.context("Failed to list posts")?;
+        let posts: Vec<PostDetail> = rows.iter().map(map_post_detail).collect();
+
+        Ok((posts, total))
+    }
+
+    /// Aggregate counts for a project — posts by status/category, unique
+    /// participants, and vote/comment totals (used by the safe-delete dialog).
+    pub async fn project_stats(&self, project_id: &str) -> Result<ProjectStats> {
+        let by_status: std::collections::HashMap<String, i64> =
+            sqlx::query("SELECT status, COUNT(*) as n FROM posts WHERE project_id = ? GROUP BY status")
+                .bind(project_id)
+                .fetch_all(&self.pool)
+                .await?
+                .iter()
+                .map(|row| (row.get::<String, _>("status"), row.get::<i64, _>("n")))
+                .collect();
+
+        let by_category: std::collections::HashMap<String, i64> =
+            sqlx::query("SELECT category, COUNT(*) as n FROM posts WHERE project_id = ? GROUP BY category")
+                .bind(project_id)
+                .fetch_all(&self.pool)
+                .await?
+                .iter()
+                .map(|row| (row.get::<String, _>("category"), row.get::<i64, _>("n")))
+                .collect();
+
+        let total_posts: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM posts WHERE project_id = ?")
+            .bind(project_id)
+            .fetch_one(&self.pool)
+            .await?;
+
+        let total_users: i64 = sqlx::query_scalar("SELECT COUNT(DISTINCT created_by) FROM posts WHERE project_id = ?")
+            .bind(project_id)
+            .fetch_one(&self.pool)
+            .await?;
+
+        let total_votes: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM votes WHERE post_id IN (SELECT id FROM posts WHERE project_id = ?)",
+        )
+        .bind(project_id)
+        .fetch_one(&self.pool)
+        .await?;
+
+        let total_comments: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM comments WHERE post_id IN (SELECT id FROM posts WHERE project_id = ?)",
+        )
+        .bind(project_id)
+        .fetch_one(&self.pool)
+        .await?;
+
+        Ok(ProjectStats { total_posts, by_status, by_category, total_users, total_votes, total_comments })
+    }
+
     /// Get a single post with detail.
     pub async fn get_post(&self, post_id: &str, user_id: Option<&str>) -> Result<Option<PostDetail>> {
         let row = sqlx::query(

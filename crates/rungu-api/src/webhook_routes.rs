@@ -21,6 +21,88 @@ pub fn router() -> Router<AppState> {
             axum::routing::get(get_webhook).patch(update_webhook).delete(delete_webhook),
         )
         .route("/projects/{slug}/webhooks/{id}/deliveries", axum::routing::get(list_deliveries))
+        .route("/projects/{slug}/webhooks/{id}/test", axum::routing::post(test_webhook))
+}
+
+// ── Handlers (test) ────────────────────────────────────────────────────
+
+/// Send a test event to a webhook (admin only). Synchronous single delivery
+/// so the admin UI can show the actual result inline.
+#[utoipa::path(
+    post,
+    path = "/api/projects/{slug}/webhooks/{id}/test",
+    params(
+        ("slug" = String, Path, description = "Project slug"),
+        ("id" = String, Path, description = "Webhook ID"),
+    ),
+    responses(
+        (status = 200, description = "Test delivery result", body = serde_json::Value),
+        (status = 401, description = "Not authenticated", body = serde_json::Value),
+        (status = 403, description = "Admin access required", body = serde_json::Value),
+        (status = 404, description = "Webhook not found", body = serde_json::Value),
+    ),
+    security(("session" = [])),
+    tag = "webhooks",
+)]
+pub async fn test_webhook(
+    State(state): State<AppState>,
+    Path((slug, id)): Path<(String, String)>,
+    CurrentUser(user): CurrentUser,
+) -> Result<impl IntoResponse, ApiError> {
+    ApiError::require_admin(&user)?;
+    let project =
+        state.store.get_project_by_slug(&slug).await?.ok_or_else(|| ApiError::not_found("Project not found"))?;
+
+    let webhook = state.store.get_webhook(&id).await?.ok_or_else(|| ApiError::not_found("Webhook not found"))?;
+    if webhook.project_id != project.id {
+        return Err(ApiError::not_found("Webhook not found"));
+    }
+    if !webhook.is_active {
+        return Err(ApiError::bad_request("Webhook is not active"));
+    }
+
+    let secret =
+        state.store.get_webhook_secret(&id).await?.ok_or_else(|| ApiError::not_found("Webhook secret not found"))?;
+
+    let payload = serde_json::json!({
+        "event": "webhook.test",
+        "project": { "id": project.id, "slug": project.slug, "name": project.name },
+        "webhook_id": webhook.id,
+        "sent_at": chrono::Utc::now().to_rfc3339(),
+    });
+    let payload_str = serde_json::to_string(&payload).unwrap_or_default();
+    let signature = crate::webhook::sign_payload(&payload_str, &secret);
+
+    let result = crate::webhook::deliver_once(&state.http_client, &webhook, &payload_str, &signature).await;
+
+    // Truncate on a char boundary (payload may contain multi-byte UTF-8).
+    let payload_excerpt: String = payload_str.chars().take(2000).collect();
+    match result {
+        Err((attempts, msg)) => {
+            let _ = state
+                .store
+                .record_webhook_delivery(
+                    &webhook.id,
+                    "webhook.test",
+                    &payload_excerpt,
+                    None,
+                    false,
+                    attempts as i32,
+                    &msg,
+                )
+                .await;
+            Ok(Json(serde_json::json!({ "ok": false, "attempts": attempts, "error": msg })))
+        }
+        Ok(status_code) => {
+            let ok = (200..300).contains(&status_code);
+            let msg = if ok { "" } else { &format!("HTTP {status_code}") };
+            let _ = state
+                .store
+                .record_webhook_delivery(&webhook.id, "webhook.test", &payload_excerpt, Some(status_code), ok, 1, msg)
+                .await;
+            Ok(Json(serde_json::json!({ "ok": ok, "status": status_code })))
+        }
+    }
 }
 
 // ── Query params ───────────────────────────────────────────────────────

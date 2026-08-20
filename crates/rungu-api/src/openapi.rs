@@ -46,6 +46,9 @@ use utoipa::OpenApi;
         crate::webhook_routes::update_webhook,
         crate::webhook_routes::delete_webhook,
         crate::webhook_routes::list_deliveries,
+        crate::webhook_routes::test_webhook,
+        crate::admin_routes::list_all_posts,
+        crate::admin_routes::project_stats,
         // Auth
         crate::auth_routes::list_providers,
         crate::auth_routes::login,
