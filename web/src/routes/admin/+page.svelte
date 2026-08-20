@@ -60,6 +60,7 @@
         clearTimeout(noticeTimer);
         noticeTimer = setTimeout(() => (notice = ''), 2500);
     }
+    $effect(() => () => clearTimeout(noticeTimer));
 
     async function loadData() {
         loading = true;
@@ -123,7 +124,7 @@
         try {
             const updated = await api.updateProject(slug, {
                 name: editName.trim() || undefined,
-                description: editDesc || undefined,
+                description: editDesc,
             });
             projects = projects.map((p) => (p.slug === slug ? updated : p));
             editing = null;
@@ -182,11 +183,17 @@
         try {
             await api.updatePostStatus(post.id, status);
             if (queueStatus) {
-                queue = queue.filter((p) => p.id !== post.id);
+                // Post leaves the filtered list only when its new status no longer matches the filter
+                const matches = queueStatus === status;
+                if (!matches) {
+                    queue = queue.filter((p) => p.id !== post.id);
+                    queueTotal = Math.max(0, queueTotal - 1);
+                } else {
+                    post.status = status as PostDetail['status'];
+                }
             } else {
                 post.status = status as PostDetail['status'];
             }
-            queueTotal = Math.max(0, queueTotal - (queueStatus ? 1 : 0));
             notify(`Post marked ${status.replace('_', ' ')} ✓`);
         } catch {
             error = 'Failed to update post';
@@ -202,6 +209,7 @@
             webhooks = await api.listWebhooks(selectedProject);
             testResult = {};
             deliveries = {};
+            deletingWebhook = null;
         } catch {
             error = 'Failed to load webhooks';
         } finally {
