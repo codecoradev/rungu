@@ -129,3 +129,41 @@ export interface Attachment {
 export interface AttachmentListResponse {
     data: Attachment[];
 }
+
+// ── Webhooks & admin ──────────────────────────────────────────────────
+
+export interface Webhook {
+    id: string;
+    project_id: string;
+    url: string;
+    events: string;
+    is_active: boolean;
+    created_at: string;
+}
+
+export interface WebhookDelivery {
+    id: string;
+    webhook_id: string;
+    event_type: string;
+    status_code: number | null;
+    success: boolean;
+    attempts: number;
+    last_error: string;
+    created_at: string;
+}
+
+export interface WebhookTestResult {
+    ok: boolean;
+    status?: number;
+    attempts?: number;
+    error?: string;
+}
+
+export interface ProjectStats {
+    total_posts: number;
+    by_status: Record<string, number>;
+    by_category: Record<string, number>;
+    total_users: number;
+    total_votes: number;
+    total_comments: number;
+}

@@ -42,10 +42,12 @@
         await loadAttachments();
     }
 
+    let deletingAttachment = $state<string | null>(null);
+
     async function handleDelete(id: string) {
-        if (!confirm('Delete this attachment?')) return;
         try {
             await api.deleteAttachment(id);
+            deletingAttachment = null;
             await loadAttachments();
         } catch (e) {
             error = (e as Error).message;
@@ -91,17 +93,36 @@
                     />
                 </button>
                 {#if canEdit}
-                    <button
-                        type="button"
-                        onclick={() => handleDelete(att.id)}
-                        class="absolute top-1 right-1 rounded-md bg-background/80 p-1 opacity-0 transition group-hover:opacity-100 hover:bg-destructive hover:text-destructive-foreground"
-                        title="Delete attachment"
-                        aria-label="Delete attachment"
-                    >
-                        <svg class="size-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
-                            <path fill-rule="evenodd" d="M8.75 1A2.75 2.75 0 006 3.75v.5H3.75a.75.75 0 000 1.5h.45l.917 10.625A2.75 2.75 0 007.81 19h4.38a2.75 2.75 0 002.693-2.625L15.8 5.75h.45a.75.75 0 000-1.5H14v-.5A2.75 2.75 0 0011.25 1h-2.5z" clip-rule="evenodd" />
-                        </svg>
-                    </button>
+                    {#if deletingAttachment === att.id}
+                        <div class="absolute top-1 right-1 flex items-center gap-1">
+                            <button
+                                type="button"
+                                onclick={() => handleDelete(att.id)}
+                                class="rounded-md bg-destructive px-2 py-1 text-xs text-destructive-foreground"
+                            >
+                                Delete
+                            </button>
+                            <button
+                                type="button"
+                                onclick={() => (deletingAttachment = null)}
+                                class="rounded-md bg-background/80 px-2 py-1 text-xs"
+                            >
+                                Cancel
+                            </button>
+                        </div>
+                    {:else}
+                        <button
+                            type="button"
+                            onclick={() => (deletingAttachment = att.id)}
+                            class="absolute top-1 right-1 rounded-md bg-background/80 p-1 opacity-0 transition group-hover:opacity-100 hover:bg-destructive hover:text-destructive-foreground"
+                            title="Delete attachment"
+                            aria-label="Delete attachment"
+                        >
+                            <svg class="size-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                                <path fill-rule="evenodd" d="M8.75 1A2.75 2.75 0 006 3.75v.5H3.75a.75.75 0 000 1.5h.45l.917 10.625A2.75 2.75 0 007.81 19h4.38a2.75 2.75 0 002.693-2.625L15.8 5.75h.45a.75.75 0 000-1.5H14v-.5A2.75 2.75 0 0011.25 1h-2.5z" clip-rule="evenodd" />
+                            </svg>
+                        </button>
+                    {/if}
                 {/if}
             </div>
         {/each}

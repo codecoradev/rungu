@@ -20,11 +20,11 @@
     let loading = $state(false);
     let error = $state('');
 
-    const categories: { value: PostCategory; label: string; icon: string }[] = [
-        { value: 'feedback', label: 'Feedback', icon: '💬' },
-        { value: 'bug', label: 'Bug', icon: '🐛' },
-        { value: 'feature', label: 'Feature', icon: '✨' },
-        { value: 'question', label: 'Question', icon: '❓' },
+    const categories: { value: PostCategory; label: string }[] = [
+        { value: 'feedback', label: 'Feedback' },
+        { value: 'bug', label: 'Bug' },
+        { value: 'feature', label: 'Feature' },
+        { value: 'question', label: 'Question' },
     ];
 
     async function handleSubmit(e: Event) {
@@ -53,14 +53,33 @@
         <Card.Title class="text-base">New Post</Card.Title>
     </Card.Header>
     <Card.Content>
-        <form onsubmit={handleSubmit} class="space-y-3">
+        <form onsubmit={handleSubmit} class="space-y-3" novalidate>
             {#if error}
-                <p class="text-sm text-destructive">{error}</p>
+                <p id="post-form-error" class="text-sm text-destructive" role="alert">{error}</p>
             {/if}
 
-            <Input bind:value={title} placeholder="What's your feedback?" maxlength={200} />
+            <div>
+                <Input
+                    bind:value={title}
+                    placeholder="What's your feedback?"
+                    maxlength={200}
+                    aria-label="Title"
+                    aria-invalid={error ? 'true' : undefined}
+                    aria-describedby={error ? 'post-form-error' : undefined}
+                />
+                <p class="mt-1 text-right text-xs text-muted-foreground" aria-live="polite">
+                    {title.length}/200
+                </p>
+            </div>
 
-            <Textarea bind:value={description} placeholder="Add more details (optional)" rows={3} />
+            <div>
+                <Textarea bind:value={description} placeholder="Add more details (optional)" rows={3} maxlength={4000} aria-label="Description" />
+                {#if description.length > 3600}
+                    <p class="mt-1 text-right text-xs text-muted-foreground" aria-live="polite">
+                        {description.length}/4000
+                    </p>
+                {/if}
+            </div>
 
             <!-- Category: vertical list, no overflow -->
             <div class="space-y-1.5">
@@ -77,7 +96,6 @@
                                     : 'border-border text-muted-foreground hover:bg-muted',
                             )}
                         >
-                            <span>{cat.icon}</span>
                             <span>{cat.label}</span>
                         </button>
                     {/each}

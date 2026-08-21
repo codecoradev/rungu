@@ -18,6 +18,9 @@
     // Build parent → children map
     const threads = $derived(buildThreads(comments));
 
+    // Two-step inline confirm for destructive delete (matches admin project pattern)
+    let confirmingDelete = $state<string | null>(null);
+
     function buildThreads(items: Comment[]): Map<string, Comment[]> {
         const map = new Map<string, Comment[]>();
         for (const item of items) {
@@ -68,9 +71,30 @@
                     </Button>
                 {/if}
                 {#if ondelete && comment.created_by === currentUserId}
-                    <Button variant="ghost" size="xs" class="text-destructive" onclick={() => ondelete(comment.id)}>
-                        Delete
-                    </Button>
+                    {#if confirmingDelete === comment.id}
+                        <Button
+                            variant="destructive"
+                            size="xs"
+                            onclick={() => {
+                                confirmingDelete = null;
+                                ondelete!(comment.id);
+                            }}
+                        >
+                            Confirm delete
+                        </Button>
+                        <Button variant="ghost" size="xs" onclick={() => (confirmingDelete = null)}>
+                            Cancel
+                        </Button>
+                    {:else}
+                        <Button
+                            variant="ghost"
+                            size="xs"
+                            class="text-destructive"
+                            onclick={() => (confirmingDelete = comment.id)}
+                        >
+                            Delete
+                        </Button>
+                    {/if}
                 {/if}
             </div>
 

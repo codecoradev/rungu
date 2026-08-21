@@ -2,6 +2,7 @@
 //!
 //! REST API routes — Axum handlers for projects, posts, votes, comments, auth.
 
+pub mod admin_routes;
 pub mod attachment_routes;
 pub mod auth_routes;
 pub mod comment_routes;
@@ -54,4 +55,5 @@ pub fn api_routes() -> Router<AppState> {
         .merge(comment_routes::router())
         .merge(attachment_routes::router())
         .merge(webhook_routes::router())
+        .merge(admin_routes::router())
 }

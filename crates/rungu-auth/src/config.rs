@@ -39,7 +39,14 @@ impl AuthConfig {
                 eprintln!("FATAL: APP_SECRET environment variable is not set. Generate one with: openssl rand -hex 32");
                 std::process::exit(1);
             }),
-            secure_cookie: parse_bool_env("RUNGU_SECURE_COOKIE", true),
+            // When unset, derive from APP_URL: Secure cookies are silently
+            // dropped by browsers on plain http, which breaks localhost and
+            // LAN deployments behind the default APP_URL. Explicit
+            // RUNGU_SECURE_COOKIE still wins.
+            secure_cookie: match env::var("RUNGU_SECURE_COOKIE").ok().filter(|v| !v.trim().is_empty()) {
+                Some(v) => parse_bool_or_exit("RUNGU_SECURE_COOKIE", &v, true),
+                None => app_url.starts_with("https://"),
+            },
             admin_emails: env::var("ADMIN_EMAILS")
                 .unwrap_or_default()
                 .split(',')
@@ -138,25 +145,32 @@ impl AuthConfig {
 /// Any other value → logs a fatal error and exits, rather than silently picking
 /// a side. This prevents the old `v != "false"` footgun where typos like
 /// `False`, `0`, or `no` silently enabled secure cookies and broke local HTTP login.
+/// Kept for tests and as the reference boolean env parser; production
+/// call sites use `parse_bool_or_exit` directly.
+#[cfg_attr(not(test), allow(dead_code))]
 fn parse_bool_env(name: &str, default_value: bool) -> bool {
     match std::env::var(name) {
-        Ok(v) => {
-            let lower = v.trim().to_lowercase();
-            match lower.as_str() {
-                "" => default_value,
-                "true" | "1" | "yes" | "y" | "on" => true,
-                "false" | "0" | "no" | "n" | "off" => false,
-                other => {
-                    eprintln!(
-                        "FATAL: Invalid boolean value for {name}: {other:?}. \
-                         Accepted (case-insensitive): true|false|1|0|yes|no|on|off. \
-                         Example: {name}=false"
-                    );
-                    std::process::exit(1);
-                }
-            }
-        }
+        Ok(v) => parse_bool_or_exit(name, &v, default_value),
         Err(_) => default_value,
+    }
+}
+
+/// Parse a boolean value string; empty falls back to `default_value`,
+/// invalid values abort with a FATAL message naming `name`.
+fn parse_bool_or_exit(name: &str, raw: &str, default_value: bool) -> bool {
+    let lower = raw.trim().to_lowercase();
+    match lower.as_str() {
+        "" => default_value,
+        "true" | "1" | "yes" | "y" | "on" => true,
+        "false" | "0" | "no" | "n" | "off" => false,
+        other => {
+            eprintln!(
+                "FATAL: Invalid boolean value for {name}: {other:?}. \
+                     Accepted (case-insensitive): true|false|1|0|yes|no|on|off. \
+                     Example: {name}=false"
+            );
+            std::process::exit(1);
+        }
     }
 }
 
@@ -215,5 +229,29 @@ mod tests {
             set_env(name, Some(v));
             assert!(!parse_bool_env(name, true), "expected falsy for {v:?}");
         }
+    }
+
+    #[test]
+    fn secure_cookie_derives_from_app_url_when_unset() {
+        use super::AuthConfig;
+
+        let _g = ENV_LOCK.lock().unwrap();
+        set_env("RUNGU_SECURE_COOKIE", None);
+        set_env("APP_SECRET", Some("test-secret-0123456789abcdef"));
+
+        // http URL -> Secure cookies off (browsers drop them on plain http)
+        set_env("APP_URL", Some("http://localhost:3000"));
+        assert!(!AuthConfig::from_env().secure_cookie);
+
+        // https URL -> Secure cookies on
+        set_env("APP_URL", Some("https://feedback.example.com"));
+        assert!(AuthConfig::from_env().secure_cookie);
+
+        // Explicit env wins over APP_URL derivation
+        set_env("APP_URL", Some("http://localhost:3000"));
+        set_env("RUNGU_SECURE_COOKIE", Some("true"));
+        assert!(AuthConfig::from_env().secure_cookie);
+
+        set_env("RUNGU_SECURE_COOKIE", None);
     }
 }

@@ -1,6 +1,7 @@
 <script lang="ts">
     import { Button } from '$lib/components/ui/button';
     import { api, ApiError } from '$lib/api/client';
+    import { toastError } from '$lib/toast.svelte';
     import { cn } from '$lib/utils';
 
     let {
@@ -18,7 +19,6 @@
     } = $props();
 
     let loading = $state(false);
-    let error = $state('');
 
     async function toggle() {
         if (disabled || loading) return;
@@ -31,7 +31,6 @@
         onvote?.(voted, count);
 
         loading = true;
-        error = '';
         try {
             const result = await api.toggleVote(postId);
             // Reconcile with server response
@@ -43,7 +42,10 @@
             voted = prevVoted;
             count = prevCount;
             onvote?.(prevVoted, prevCount);
-            error = e instanceof ApiError && e.status === 401 ? 'Login to vote' : 'Failed to vote';
+            const isAuth = e instanceof ApiError && e.status === 401;
+            toastError(isAuth ? 'Login to vote' : 'Failed to vote', {
+                action: isAuth ? { label: 'Login →', href: `/login?redirect=${encodeURIComponent(location.pathname)}` } : undefined,
+            });
         } finally {
             loading = false;
         }
@@ -56,11 +58,7 @@
     {disabled}
     onclick={toggle}
     class={cn('gap-1.5 transition-opacity', loading && 'opacity-50')}
-    title={error || undefined}
 >
-    {#if error}
-        <span class="text-destructive text-xs">{error}</span>
-    {/if}
     <svg
         class="size-4"
         xmlns="http://www.w3.org/2000/svg"

@@ -1,5 +1,7 @@
 <script lang="ts">
     import { onMount } from 'svelte';
+    import { goto } from '$app/navigation';
+    import { page } from '$app/state';
     import { api } from '$lib/api/client';
     import AuthProviderButtons from '$lib/components/AuthProviderButtons.svelte';
     import * as Card from '$lib/components/ui/card';
@@ -7,10 +9,18 @@
 
     let checking = $state(true);
 
+    // Preserve where the user came from (#147): backend /auth/:provider/login
+    // accepts ?redirect= (signed cookie, open-redirect validated) and sends
+    // the user back there after successful auth. Client-side path must be
+    // validated the same way — only same-origin absolute paths allowed.
+    const rawRedirect = page.url.searchParams.get('redirect') || '/';
+    const redirectTo =
+        rawRedirect.startsWith('/') && !rawRedirect.startsWith('//') ? rawRedirect : '/';
+
     onMount(async () => {
         try {
             await api.getCurrentUser();
-            window.location.href = '/';
+            goto(redirectTo);
         } catch {
             checking = false;
         }
@@ -35,11 +45,11 @@
     {:else}
         <Card.Root>
             <Card.Header class="text-center">
-                <Card.Title class="text-2xl">Welcome back</Card.Title>
+                <Card.Title class="text-2xl">Sign in to Rungu</Card.Title>
                 <Card.Description>Sign in to share your feedback</Card.Description>
             </Card.Header>
             <Card.Content>
-                <AuthProviderButtons />
+                <AuthProviderButtons {redirectTo} />
             </Card.Content>
         </Card.Root>
     {/if}

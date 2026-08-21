@@ -12,7 +12,10 @@ services:
       RUST_LOG: ${RUST_LOG:-rungu=info}
       APP_SECRET: ${APP_SECRET:?APP_SECRET is required}
       APP_URL: ${APP_URL:-http://localhost:3000}
-      RUNGU_SECURE_COOKIE: ${RUNGU_SECURE_COOKIE:-true}
+      # Cookies are only marked Secure when the public URL is https —
+      # default APP_URL is http://localhost:3000, where Secure cookies
+      # are silently dropped by browsers.
+      RUNGU_SECURE_COOKIE: ${RUNGU_SECURE_COOKIE:-}
       ADMIN_EMAILS: ${ADMIN_EMAILS:-}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}

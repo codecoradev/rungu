@@ -102,12 +102,19 @@
             </Card.Content>
         </Card.Root>
     {:else if roadmap}
-        <!-- Three-column board. Stacks to a single column on mobile (md:grid-cols-3). -->
-        <div class="grid gap-4 md:grid-cols-3">
+        <!-- Three-column board. Stacks to a single column on mobile (md:grid-cols-3).
+             Mobile: horizontal scroll-snap per column keeps the board scannable
+             with a swipe instead of a very long single column. -->
+        <div
+            class="flex snap-x snap-mandatory gap-4 overflow-x-auto pb-2 md:grid md:grid-cols-3 md:overflow-visible md:pb-0"
+        >
             {#each columns as col (col.key)}
-                <div class="flex flex-col gap-3 rounded-lg border-t-4 {col.accent} bg-muted/30 p-3">
+                <div class="flex w-[85%] shrink-0 snap-center flex-col gap-3 rounded-lg border-t-4 {col.accent} bg-muted/30 p-3 md:w-auto">
                     <div class="flex items-center justify-between">
-                        <h2 class="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                        <h2
+                            class="text-sm font-semibold uppercase tracking-wide text-muted-foreground"
+                            aria-label="{col.title}: {roadmap[col.totalKey]} posts"
+                        >
                             {col.title}
                         </h2>
                         <span class="rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
