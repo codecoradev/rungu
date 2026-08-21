@@ -31,6 +31,7 @@ async fn setup_app() -> (axum::Router, Store) {
     };
 
     let state = AppState {
+        email: rungu_api::email::EmailConfig::Disabled,
         store: store.clone(),
         config,
         http_client: reqwest::Client::new(),

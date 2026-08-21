@@ -77,6 +77,9 @@ pub struct User {
     pub role: UserRole,
     pub created_at: DateTime<Utc>,
     pub last_login: DateTime<Utc>,
+    /// User opted out of email notifications (issue #73).
+    #[serde(default)]
+    pub notifications_opt_out: bool,
 }
 
 /// OAuth identity linked to a user.

@@ -46,6 +46,12 @@ tower-http = { version = "0.6", features = ["cors", "trace"] }
 # HTTP client
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 
+# TLS (for the built-in minimal SMTP client; shares the rustls stack with reqwest)
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
+rustls-pki-types = "1"
+webpki-roots = "0.26"
+base64 = "0.22"
+
 # Auth / JWT
 jsonwebtoken = "9"
 openidconnect = "3"

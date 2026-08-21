@@ -6,7 +6,9 @@ pub mod admin_routes;
 pub mod attachment_routes;
 pub mod auth_routes;
 pub mod comment_routes;
+pub mod email;
 pub mod error;
+pub mod notification_routes;
 pub mod oauth;
 pub mod openapi;
 pub mod post_routes;
@@ -32,6 +34,9 @@ pub struct AppState {
     pub http_client: reqwest::Client,
     /// Storage backend for file attachments.
     pub storage: std::sync::Arc<dyn rungu_core::Storage>,
+    /// Email-notification configuration (issue #73). `Disabled` when no
+    /// SMTP env is present — handlers check this before doing work.
+    pub email: email::EmailConfig,
 }
 
 impl FromRef<AppState> for rungu_auth::AuthConfig {
@@ -56,4 +61,5 @@ pub fn api_routes() -> Router<AppState> {
         .merge(attachment_routes::router())
         .merge(webhook_routes::router())
         .merge(admin_routes::router())
+        .merge(notification_routes::router())
 }

@@ -50,6 +50,11 @@ fn map_user(row: &AnyRow) -> User {
         role: parse_role(row.get::<&str, _>("role")),
         created_at: parse_ts(row.get::<&str, _>("created_at")),
         last_login: parse_ts(row.get::<&str, _>("last_login")),
+        notifications_opt_out: row
+            .try_get("notifications_opt_out")
+            .map(|v: i64| v != 0)
+            .or_else(|_| row.try_get::<bool, _>("notifications_opt_out"))
+            .unwrap_or(false),
     }
 }
 
@@ -965,6 +970,7 @@ impl Store {
                 role: if is_admin { UserRole::Admin } else { UserRole::Member },
                 created_at: parse_now(&now),
                 last_login: parse_now(&now),
+                notifications_opt_out: false,
             })
         }
     }
@@ -972,7 +978,7 @@ impl Store {
     /// Get user by ID.
     pub async fn get_user(&self, user_id: &str) -> Result<Option<User>> {
         let row =
-            sqlx::query("SELECT id, email, name, avatar_url, role, created_at, last_login FROM users WHERE id = ?")
+            sqlx::query("SELECT id, email, name, avatar_url, role, created_at, last_login, notifications_opt_out FROM users WHERE id = ?")
                 .bind(user_id)
                 .fetch_optional(&self.pool)
                 .await?;
@@ -1281,6 +1287,60 @@ impl Store {
 
         Ok(rows.iter().map(map_webhook_delivery).collect())
     }
+
+    // ── Email notifications (issue #73) ─────────────────────────────
+
+    /// Distinct notification recipients for a post: the author plus
+    /// everyone who commented, excluding `actor_id` and anyone who opted
+    /// out. One email per user, individual sends (no BCC lists).
+    pub async fn notification_recipients(&self, post_id: &str, actor_id: &str) -> Result<Vec<NotifyUser>> {
+        let rows = sqlx::query(
+            "SELECT u.id, u.email, u.name FROM users u \
+             WHERE (u.id = (SELECT created_by FROM posts WHERE id = ?) \
+                 OR u.id IN (SELECT created_by FROM comments WHERE post_id = ?)) \
+             AND u.id != ? \
+             AND u.notifications_opt_out = 0",
+        )
+        .bind(post_id)
+        .bind(post_id)
+        .bind(actor_id)
+        .fetch_all(&self.pool)
+        .await
+        .context("Failed to fetch notification recipients")?;
+
+        Ok(rows.iter().map(|r| NotifyUser { id: r.get("id"), email: r.get("email"), name: r.get("name") }).collect())
+    }
+
+    /// Get a user's email-notification opt-out flag.
+    pub async fn get_notifications_opt_out(&self, user_id: &str) -> Result<Option<bool>> {
+        let row = sqlx::query("SELECT notifications_opt_out FROM users WHERE id = ?")
+            .bind(user_id)
+            .fetch_optional(&self.pool)
+            .await
+            .context("Failed to get notification opt-out")?;
+        Ok(row.as_ref().map(|r| match r.try_get::<i64, _>("notifications_opt_out") {
+            Ok(v) => v != 0,
+            Err(_) => r.get::<bool, _>("notifications_opt_out"),
+        }))
+    }
+
+    /// Set a user's email-notification opt-out flag.
+    pub async fn set_notifications_opt_out(&self, user_id: &str, opt_out: bool) -> Result<()> {
+        sqlx::query("UPDATE users SET notifications_opt_out = ? WHERE id = ?")
+            .bind(opt_out)
+            .bind(user_id)
+            .execute(&self.pool)
+            .await
+            .context("Failed to set notification opt-out")?;
+        Ok(())
+    }
+}
+
+/// Minimal user projection for email delivery.
+pub struct NotifyUser {
+    pub id: String,
+    pub email: String,
+    pub name: String,
 }
 
 // ── Webhook row mappers ───────────────────────────────────────────────

@@ -247,6 +247,26 @@ pub async fn update_post(
                 }
             }),
         );
+
+        // Email notification (issue #73): status change reaches the post
+        // author + commenters. No-op when SMTP is not configured.
+        // The actor is the (owner-checked) updater; notify everyone else.
+        crate::email::notify_recipients(
+            std::sync::Arc::new(state.store.clone()),
+            state.email.clone(),
+            state.config.app_secret.clone(),
+            &id,
+            &user.id,
+            crate::email::EmailKind::StatusChanged {
+                post_title: existing.post.title.clone(),
+                post_id: id.clone(),
+                old_status: serde_json::to_value(existing.post.status)
+                    .ok()
+                    .and_then(|v| v.as_str().map(str::to_string))
+                    .unwrap_or_default(),
+                new_status: status_str.clone(),
+            },
+        );
     }
 
     if let Some(category_str) = &body.category {

@@ -108,6 +108,30 @@ pub async fn create_comment(
         }),
     );
 
+    // Email notification (issue #73): notify post author + other commenters.
+    // No-op when SMTP is not configured (EmailConfig::Disabled).
+    crate::email::notify_recipients(
+        std::sync::Arc::new(state.store.clone()),
+        state.email.clone(),
+        state.config.app_secret.clone(),
+        &post_id,
+        &user.id,
+        crate::email::EmailKind::NewComment {
+            post_title: _post.post.title.clone(),
+            post_id: post_id.clone(),
+            commenter_name: {
+                // CurrentUser only carries id/email/role; display name may be
+                // empty in proto User — fall back to email prefix.
+                let u = state.store.get_user(&user.id).await.ok().flatten();
+                match u.filter(|u| !u.name.is_empty()) {
+                    Some(u) => u.name,
+                    None => user.email.split('@').next().unwrap_or("Someone").to_string(),
+                }
+            },
+            comment_excerpt: crate::email::truncate(&comment.comment.content, 280),
+        },
+    );
+
     Ok((StatusCode::CREATED, Json(serde_json::json!({ "data": comment }))))
 }
 
