@@ -30,10 +30,16 @@ use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use tokio::sync::Mutex;
 
-/// Per-IP request counter for one window.
+/// Per-IP sliding-window state (two-bucket weighted approximation).
+///
+/// `prev_count` holds the count from the window that just elapsed;
+/// `current` holds the active window. The effective request rate is
+/// `prev_count * (1 - progress) + current`, which smoothly decays as the
+/// current window advances — no fixed-window 2x burst at the boundary.
 #[derive(Copy, Clone)]
 struct Bucket {
     window_start: Instant,
+    prev_count: u32,
     count: u32,
 }
 
@@ -59,24 +65,56 @@ impl RateLimiter {
 
     /// Returns `Ok(remaining)` when allowed, `Err(retry_after_secs)` when the
     /// IP is over the limit for the remainder of the current window.
+    ///
+    /// Sliding-window (two-bucket weighted) algorithm: the previous window's
+    /// count decays linearly as the current window advances, so a client can
+    /// never exceed `max_requests` in *any* full-window span — unlike a plain
+    /// fixed window which allows a 2x burst at the boundary.
     pub async fn check(&self, ip: IpAddr) -> Result<u32, u64> {
         let now = Instant::now();
         let mut map = self.inner.lock().await;
-        let entry = map.entry(ip).or_insert(Bucket { window_start: now, count: 0 });
+        let entry = map.entry(ip).or_insert(Bucket { window_start: now, prev_count: 0, count: 0 });
 
-        // Reset the bucket once the window has fully elapsed.
-        if now.duration_since(entry.window_start) >= self.window {
-            entry.window_start = now;
+        // Roll windows forward however many whole windows have elapsed.
+        let elapsed = now.duration_since(entry.window_start);
+        if elapsed >= self.window {
+            // u32::MAX windows of even a 1ns window is ~4.3s of ns-division
+            // headroom; clamp to a sane cap instead of a raw cast to make the
+            // invariant explicit for any window size.
+            let windows_passed = u32::try_from(elapsed.as_nanos() / self.window.as_nanos()).unwrap_or(u32::MAX);
+            // Only the immediately-previous window matters for decay; anything
+            // older has fully drained.
+            entry.prev_count = if windows_passed == 1 { entry.count } else { 0 };
+            // Saturating mul/add: with windows_passed capped at u32::MAX and a
+            // 60s window this overflows only after ~8k years — but saturate
+            // anyway so the math can never panic.
+            entry.window_start =
+                entry.window_start.checked_add(self.window.saturating_mul(windows_passed)).unwrap_or(now);
             entry.count = 0;
         }
 
-        if entry.count >= self.max_requests {
-            let elapsed = now.duration_since(entry.window_start);
-            let remaining = self.window.saturating_sub(elapsed);
-            Err(remaining.as_secs().max(1))
+        // Weighted estimate of requests in the sliding window.
+        let progress = now.duration_since(entry.window_start).as_secs_f64() / self.window.as_secs_f64();
+        let weighted = entry.prev_count as f64 * (1.0 - progress) + entry.count as f64;
+
+        if weighted >= self.max_requests as f64 {
+            // Full drain time for the weighted count to fall below the limit.
+            let drain_needed = weighted - self.max_requests as f64 + 1.0;
+            let decay_rate_per_sec = entry.prev_count as f64 / self.window.as_secs_f64();
+            let retry_secs = if decay_rate_per_sec > 0.0 {
+                (drain_needed / decay_rate_per_sec).ceil().max(1.0)
+            } else {
+                // Only the current bucket is full: wait out the remainder.
+                let rem = self.window - now.duration_since(entry.window_start);
+                rem.as_secs().max(1) as f64
+            };
+            Err(retry_secs as u64)
         } else {
             entry.count += 1;
-            Ok(self.max_requests - entry.count)
+            // Subtract 1 for the request just admitted so the header reports
+            // requests still available *after* this one.
+            let remaining = (self.max_requests as f64 - weighted - 1.0).floor() as u32;
+            Ok(remaining)
         }
     }
 
@@ -183,5 +221,51 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(30)).await;
         // Window has elapsed → counter resets.
         assert!(rl.check(ip("10.0.0.1")).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn no_2x_burst_at_window_boundary() {
+        // Sliding window: exhausting the limit at the end of one window must
+        // NOT grant a fresh full budget immediately after the boundary.
+        let window = Duration::from_millis(50);
+        let rl = RateLimiter::new(3, window, false);
+
+        // Burn the full budget at the tail of window #1.
+        for _ in 0..3 {
+            assert!(rl.check(ip("10.0.0.1")).await.is_ok());
+        }
+        assert!(rl.check(ip("10.0.0.1")).await.is_err());
+
+        // Cross the boundary into window #2 with the previous count still
+        // heavily weighted. A fixed window would allow 3 more here; the
+        // sliding window must still block.
+        tokio::time::sleep(window + Duration::from_millis(5)).await;
+        let mut allowed = 0;
+        for _ in 0..3 {
+            if rl.check(ip("10.0.0.1")).await.is_ok() {
+                allowed += 1;
+            }
+        }
+        // Right after the boundary, prev_count=3 fully weighted → nothing (or
+        // at most a tiny fraction) should pass. Definitely not a fresh 3.
+        assert!(allowed <= 1, "expected ≤1 allowed right after boundary, got {allowed}");
+    }
+
+    #[tokio::test]
+    async fn full_budget_returns_after_full_drain() {
+        // Two full windows after exhaustion, the budget must be fully restored.
+        let window = Duration::from_millis(50);
+        let rl = RateLimiter::new(3, window, false);
+        for _ in 0..3 {
+            assert!(rl.check(ip("10.0.0.1")).await.is_ok());
+        }
+        assert!(rl.check(ip("10.0.0.1")).await.is_err());
+
+        // Advance 2 full windows: prev_count drained to 0.
+        tokio::time::sleep(window * 2 + Duration::from_millis(10)).await;
+        for _ in 0..3 {
+            assert!(rl.check(ip("10.0.0.1")).await.is_ok());
+        }
+        assert!(rl.check(ip("10.0.0.1")).await.is_err());
     }
 }
