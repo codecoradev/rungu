@@ -21,6 +21,25 @@ Lightweight, self-hosted feedback board. Collect feature requests, bug reports, 
 - **Dual database** — SQLite (default) or PostgreSQL via `DATABASE_URL`
 - **Single binary** — embedded SPA, Docker ready
 
+## Screenshots
+
+| Board | Roadmap |
+|:---:|:---:|
+| ![Board](docs/screenshots/board-desktop.png) | ![Roadmap](docs/screenshots/roadmap-desktop.png) |
+
+| Post detail | Dark mode |
+|:---:|:---:|
+| ![Post detail](docs/screenshots/post-detail-desktop.png) | ![Dark mode](docs/screenshots/board-desktop-dark.png) |
+
+<details>
+<summary>More views</summary>
+
+| Changelog | Mobile |
+|:---:|:---:|
+| ![Changelog](docs/screenshots/changelog-desktop.png) | ![Mobile](docs/screenshots/board-mobile.png) |
+
+</details>
+
 ## Quick Start
 
 ```bash
