@@ -32,6 +32,13 @@ README that finally shows what Rungu looks like.
   API: 300/min) now use a sliding window instead of fixed windows. A client
   that exhausts its quota can no longer burst 2× at a window boundary;
   `Retry-After` reports the actual time until capacity frees up.
+- **`RUNGU_SECURE_COOKIE` now derives from `APP_URL`** — When unset, cookies
+  are only marked Secure on `https://` URLs. Previously the default was
+  `true`, which broke login on localhost and plain-HTTP deployments (browsers
+  silently drop Secure cookies over http). An explicit `RUNGU_SECURE_COOKIE`
+  still wins.
+- **`server.json` metadata** — License corrected from MIT to Apache-2.0 and
+  version synced with the workspace.
 
 ## [0.3.0] - 2026-08-14
 
