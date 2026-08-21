@@ -215,13 +215,16 @@ pub async fn update_post(
     CurrentUser(user): CurrentUser,
     Json(body): Json<UpdatePostBody>,
 ) -> Result<impl IntoResponse, ApiError> {
-    if !body.has_updates() {
-        return Err(ApiError::bad_request("No fields to update"));
-    }
-
+    // Ownership check MUST run before body validation: otherwise the response
+    // differs for existing vs missing posts and leaks post existence to
+    // non-owners (see #162).
     let existing = state.store.get_post(&id, None).await?.ok_or_else(|| ApiError::not_found("Post not found"))?;
 
     ApiError::check_owner_or_admin(&user, &existing.post.created_by, "You can only update your own posts")?;
+
+    if !body.has_updates() {
+        return Err(ApiError::bad_request("No fields to update"));
+    }
 
     if let Some(status_str) = &body.status {
         let status = parse_status(status_str).ok_or_else(|| ApiError::bad_request("Invalid status"))?;
