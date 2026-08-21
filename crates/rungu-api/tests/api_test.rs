@@ -31,6 +31,7 @@ async fn setup_app() -> (axum::Router, Store) {
     };
 
     let state = AppState {
+        email: rungu_api::email::EmailConfig::Disabled,
         store: store.clone(),
         config,
         http_client: reqwest::Client::new(),
@@ -775,4 +776,87 @@ async fn test_webhook_test_requires_admin() {
         .await
         .unwrap();
     assert_eq!(res.status(), StatusCode::FORBIDDEN);
+}
+
+// ── Email notifications (issue #73) ────────────────────────────────────
+
+#[tokio::test]
+async fn test_notification_preferences_roundtrip() {
+    let (app, store) = setup_app().await;
+    let secret = "test-secret";
+    let token = authed_user(&store, secret).await;
+    let user = store.find_or_create_user("user@test.com", Some("Test User"), None, &[]).await.unwrap();
+
+    // default: opted in
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/me/notifications/preferences")
+                .header("cookie", format!("session={token}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+    let body: serde_json::Value =
+        serde_json::from_slice(&axum::body::to_bytes(res.into_body(), 65536).await.unwrap()).unwrap();
+    assert_eq!(body["notificationsOptOut"], false);
+
+    // opt out
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/me/notifications/preferences")
+                .header("cookie", format!("session={token}"))
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"notificationsOptOut":true}"#))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+    let body: serde_json::Value =
+        serde_json::from_slice(&axum::body::to_bytes(res.into_body(), 65536).await.unwrap()).unwrap();
+    assert_eq!(body["notificationsOptOut"], true);
+
+    // store reflects it
+    let u = store.get_user(&user.id).await.unwrap().unwrap();
+    assert!(u.notifications_opt_out);
+}
+
+#[tokio::test]
+async fn test_unsubscribe_link_roundtrip() {
+    use rungu_api::email;
+
+    let (app, store) = setup_app().await;
+    let user = store.find_or_create_user("unsub@test.com", Some("Unsub"), None, &[]).await.unwrap();
+    assert!(!user.notifications_opt_out);
+
+    // token signed with app secret (same secret setup_app uses for auth)
+    let secret = "test-secret";
+    let token = email::unsubscribe_token(&user.id, secret);
+
+    let res = app
+        .clone()
+        .oneshot(
+            Request::builder().uri(format!("/notifications/unsubscribe?token={token}")).body(Body::empty()).unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 200);
+
+    let u = store.get_user(&user.id).await.unwrap().unwrap();
+    assert!(u.notifications_opt_out);
+
+    // bogus token rejected
+    let res = app
+        .clone()
+        .oneshot(Request::builder().uri("/notifications/unsubscribe?token=deadbeef").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(res.status(), 400);
 }

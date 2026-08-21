@@ -36,6 +36,21 @@ pub async fn serve(config: Config, pool: sqlx::AnyPool, is_sqlite: bool, listen:
         config: config.auth.clone(),
         http_client,
         storage: std::sync::Arc::from(rungu_core::create_storage()?),
+        email: {
+            let ec = rungu_api::email::EmailConfig::from_env(&config.auth.app_url);
+            match &ec {
+                rungu_api::email::EmailConfig::Disabled => {
+                    info!("Email notifications: disabled (no SMTP configuration)");
+                }
+                rungu_api::email::EmailConfig::Log => {
+                    info!("Email notifications: log driver (dev/CI mode, nothing is sent)");
+                }
+                rungu_api::email::EmailConfig::Smtp(s) => {
+                    info!("Email notifications: SMTP {}:{} from {}", s.host, s.port, s.from);
+                }
+            }
+            ec
+        },
     };
 
     // CORS — secure by default.
