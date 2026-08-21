@@ -160,7 +160,7 @@
                                             </div>
                                             <h3 class="mt-1 font-semibold leading-tight">{post.title}</h3>
                                             {#if post.description}
-                                                <p class="mt-1 line-clamp-2 text-sm text-muted-foreground">{post.description}</p>
+                                                <p class="mt-1 line-clamp-2 text-sm text-muted-foreground" title={post.description}>{post.description}</p>
                                             {/if}
                                             <div class="mt-2 flex items-center gap-3 text-xs text-muted-foreground">
                                                 <span>{post.vote_count} votes</span>

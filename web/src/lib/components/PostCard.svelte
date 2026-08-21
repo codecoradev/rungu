@@ -9,7 +9,7 @@
     let { post, slug }: { post: PostDetail; slug: string } = $props();
 </script>
 
-<a href={`/board/${slug}/post/${post.id}`} class="block">
+<a href={`/board/${slug}/post/${post.id}`} class="block rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background">
     <Card.Root class="transition-shadow hover:shadow-md">
         <Card.Header class="flex-row items-start gap-3">
             <!-- svelte-ignore a11y_click_events_have_key_events,a11y_no_static_element_interactions -->
@@ -21,9 +21,9 @@
                     <CategoryBadge category={post.category} />
                     <StatusBadge status={post.status} />
                 </div>
-                <Card.Title class="truncate text-base">{post.title}</Card.Title>
+                <Card.Title class="truncate text-base" title={post.title}>{post.title}</Card.Title>
                 {#if post.description}
-                    <p class="mt-1 line-clamp-2 text-sm text-muted-foreground">{post.description}</p>
+                    <p class="mt-1 line-clamp-2 text-sm text-muted-foreground" title={post.description}>{post.description}</p>
                 {/if}
                 <div class="mt-2 flex items-center gap-3 text-xs text-muted-foreground">
                     <span>{post.creator.name || post.creator.email || 'User'}</span>

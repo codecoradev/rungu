@@ -7,6 +7,7 @@
     import { Button } from '$lib/components/ui/button';
     import ThemeToggle from '$lib/components/ThemeToggle.svelte';
     import ShortcutHelp from '$lib/components/ShortcutHelp.svelte';
+    import Toaster from '$lib/components/Toaster.svelte';
     import { resolveShortcut, type ShortcutDef } from '$lib/shortcuts';
 
     let { children } = $props();
@@ -105,7 +106,19 @@
                 {#if loading}
                     <div class="size-8 animate-pulse rounded-full bg-muted"></div>
                 {:else if user}
-                    <span class="text-sm text-muted-foreground">{user.email}</span>
+                    <span
+                        class="hidden max-w-[140px] truncate text-sm text-muted-foreground sm:inline"
+                        title={user.email}
+                    >
+                        {user.email}
+                    </span>
+                    <span
+                        aria-hidden="true"
+                        title={user.email}
+                        class="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-sm font-semibold text-primary sm:hidden"
+                    >
+                        {user.email.charAt(0).toUpperCase()}
+                    </span>
                     {#if user.role === 'admin'}
                         <Button variant="ghost" size="sm" href="/admin">Admin</Button>
                     {/if}
@@ -127,3 +140,4 @@
 </div>
 
 <ShortcutHelp bind:open={helpOpen} />
+<Toaster />

@@ -268,6 +268,16 @@ pub struct ListPostsParams<'a> {
 
 // ── Stats ───────────────────────────────────────────────────────────────
 
+/// Resolved parameters for store-level list_all_posts (admin cross-board queue).
+#[derive(Debug, Clone)]
+pub struct ListAllPostsParams<'a> {
+    pub status: Option<PostStatus>,
+    /// Optional exact project slug filter.
+    pub project_slug: Option<&'a str>,
+    pub offset: i64,
+    pub limit: i64,
+}
+
 /// Project statistics.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct ProjectStats {
@@ -275,6 +285,8 @@ pub struct ProjectStats {
     pub by_status: std::collections::HashMap<String, i64>,
     pub by_category: std::collections::HashMap<String, i64>,
     pub total_users: i64,
+    pub total_votes: i64,
+    pub total_comments: i64,
 }
 
 /// OAuth identity returned from provider.

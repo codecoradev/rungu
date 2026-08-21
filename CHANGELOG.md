@@ -2,6 +2,44 @@
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-08-21
+
+The polish release. Sharper moderation controls, smarter rate limiting, and a
+README that finally shows what Rungu looks like.
+
+### Added
+
+- **README screenshots** (#112) — Real UI shots of the board, post detail,
+  roadmap, changelog, and dark mode (desktop + mobile), captured from a seeded
+  demo instance and hosted in `docs/screenshots/`.
+
+### Fixed
+
+- **Dark mode** (#151 follow-up) — Theme tokens now resolve from CSS variables
+  instead of literal values, so every surface — public and admin — follows the
+  system/dark toggle. Zero white patches remain.
+- **Moderation queue status buttons** (#160) — The active status button is now
+  highlighted, redundant status buttons are hidden (you can no longer "start" a
+  post that is already in progress), and Decline asks for confirmation before
+  acting. Accidental status changes are a thing of the past.
+- **`PATCH /api/posts/{id}` information leak** (#162) — Ownership is checked
+  before request body validation, so non-owners get a consistent 403 instead of
+  a 400-vs-403 difference that revealed whether a post exists.
+
+### Changed
+
+- **Sliding window rate limiting** (#165) — Both rate limiters (auth: 30/min,
+  API: 300/min) now use a sliding window instead of fixed windows. A client
+  that exhausts its quota can no longer burst 2× at a window boundary;
+  `Retry-After` reports the actual time until capacity frees up.
+- **`RUNGU_SECURE_COOKIE` now derives from `APP_URL`** — When unset, cookies
+  are only marked Secure on `https://` URLs. Previously the default was
+  `true`, which broke login on localhost and plain-HTTP deployments (browsers
+  silently drop Secure cookies over http). An explicit `RUNGU_SECURE_COOKIE`
+  still wins.
+- **`server.json` metadata** — License corrected from MIT to Apache-2.0 and
+  version synced with the workspace.
+
 ## [0.3.0] - 2026-08-14
 
 The integration release. Rungu can now talk to your stack and embed anywhere.

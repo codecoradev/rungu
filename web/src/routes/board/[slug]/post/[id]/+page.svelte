@@ -11,6 +11,7 @@
     import { Textarea } from '$lib/components/ui/textarea';
     import * as Card from '$lib/components/ui/card';
     import { timeAgo } from '$lib/utils';
+    import { toastError, toastSuccess } from '$lib/toast.svelte';
 
     /**
      * Collect the id of `rootId` plus every comment whose `parent_id` chain leads
@@ -42,7 +43,10 @@
     let comments = $state<Comment[]>([]);
     let user = $state<CurrentUser | null>(null);
     let loading = $state(true);
+    // Blocking load error (renders the whole error page)
     let error = $state('');
+    // Transient per-action errors go through the global toaster (#144)
+
     let commentText = $state('');
     let replyTo = $state<string | null>(null);
     let commentLoading = $state(false);
@@ -106,7 +110,7 @@
             commentText = '';
             replyTo = null;
         } catch {
-            error = 'Failed to post comment';
+            toastError('Failed to post comment');
         } finally {
             commentLoading = false;
         }
@@ -121,7 +125,7 @@
             const toRemove = collectDescendants(comments, id);
             comments = comments.filter((c) => !toRemove.has(c.id));
         } catch {
-            error = 'Failed to delete comment';
+            toastError('Failed to delete comment');
         }
     }
 
@@ -131,8 +135,11 @@
         if (!post) return;
         try {
             post = await api.updatePostStatus(post.id, status);
+            toastSuccess(`Status updated: ${status.replace('_', ' ')} ✓`);
         } catch {
-            error = 'Failed to update status';
+            // Reset the select so it reflects the persisted post, not the failed choice
+            target.value = post.status;
+            toastError('Failed to update status');
         }
     }
 
@@ -142,8 +149,10 @@
         if (!post) return;
         try {
             post = await api.updatePostCategory(post.id, category);
+            toastSuccess(`Category updated: ${category} ✓`);
         } catch {
-            error = 'Failed to update category';
+            target.value = post.category;
+            toastError('Failed to update category');
         }
     }
 
@@ -185,7 +194,8 @@
                         <select
                             value={post.category}
                             onchange={handleCategoryChange}
-                            class="rounded-md border border-input bg-background px-2 py-0.5 text-xs capitalize"
+                            aria-label="Change category"
+                            class="rounded-md border border-input bg-background px-2 py-0.5 text-base capitalize sm:text-xs"
                         >
                             {#each categoryOptions as c (c)}
                                 <option value={c} class="capitalize">{c}</option>
@@ -197,7 +207,8 @@
                         <select
                             value={post.status}
                             onchange={handleStatusChange}
-                            class="rounded-md border border-input bg-background px-2 py-0.5 text-xs capitalize"
+                            aria-label="Change status"
+                            class="rounded-md border border-input bg-background px-2 py-0.5 text-base capitalize sm:text-xs"
                         >
                             {#each statusOptions as s (s)}
                                 <option value={s} class="capitalize">{s.replace('_', ' ')}</option>
@@ -205,7 +216,7 @@
                         </select>
                     {/if}
                 </div>
-                <Card.Title class="text-xl">{post.title}</Card.Title>
+                <h1 class="text-xl leading-normal font-medium">{post.title}</h1>
                 <div class="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
                     <span>{post.creator.name || post.creator.email || 'User'}</span>
                     <span>·</span>
@@ -240,7 +251,7 @@
                                 <span>·</span>
                                 <span>{timeAgo(parentComment.created_at)}</span>
                             </div>
-                            <p class="mt-1 line-clamp-2 text-xs text-muted-foreground">{parentComment.content}</p>
+                            <p class="mt-1 line-clamp-2 text-xs text-muted-foreground" title={parentComment.content}>{parentComment.content}</p>
                         </div>
                     {/if}
                     <div class="mb-1 text-xs text-muted-foreground">
