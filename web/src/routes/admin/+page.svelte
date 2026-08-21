@@ -159,6 +159,18 @@
 
     // ── Moderation ────────────────────────────────────────────────────
 
+    // Decline confirmation state — destructive action needs explicit confirm.
+    let declineTarget = $state<PostDetail | null>(null);
+
+    // Status actions offered per current status. The active status is rendered
+    // as a solid highlighted chip; other statuses as outline buttons; the
+    // current status itself is never repeated as an action.
+    const MODERATION_ACTIONS: { status: PostStatus; label: string }[] = [
+        { status: 'planned', label: 'Plan' },
+        { status: 'in_progress', label: 'Start' },
+        { status: 'done', label: 'Done' },
+    ];
+
     async function loadQueue() {
         queueLoading = true;
         try {
@@ -474,11 +486,23 @@
                                 <p class="mt-2 font-medium">{post.title}</p>
                                 <p class="mt-1 text-xs text-muted-foreground">by {post.creator?.name ?? post.created_by}</p>
                             </div>
-                            <div class="flex shrink-0 flex-wrap gap-1">
-                                <Button variant="outline" size="sm" onclick={() => moderate(post, 'planned')}>Plan</Button>
-                                <Button variant="outline" size="sm" onclick={() => moderate(post, 'in_progress')}>Start</Button>
-                                <Button variant="outline" size="sm" onclick={() => moderate(post, 'done')}>Done</Button>
-                                <Button variant="outline" size="sm" class="text-destructive" onclick={() => moderate(post, 'declined')}>Decline</Button>
+                            <div class="flex shrink-0 flex-wrap items-center gap-1">
+                                {#if post.status !== 'open' && post.status !== 'declined'}
+                                    <Button variant="secondary" size="sm" onclick={() => moderate(post, 'open')}>Reopen</Button>
+                                {/if}
+                                {#each MODERATION_ACTIONS as action (action.status)}
+                                    {#if post.status === action.status}
+                                        <!-- Active status: solid highlight, not clickable again -->
+                                        <Button variant="default" size="sm" aria-current="true" disabled>{action.label} ✓</Button>
+                                    {:else}
+                                        <Button variant="outline" size="sm" onclick={() => moderate(post, action.status)}>{action.label}</Button>
+                                    {/if}
+                                {/each}
+                                {#if post.status === 'declined'}
+                                    <Button variant="default" size="sm" class="bg-destructive text-destructive-foreground" disabled>Declined ✕</Button>
+                                {:else}
+                                    <Button variant="outline" size="sm" class="text-destructive" onclick={() => (declineTarget = post)}>Decline</Button>
+                                {/if}
                             </div>
                         </Card.Content>
                     </Card.Root>
@@ -593,4 +617,36 @@
             {/if}
         {/if}
     {/if}
+{/if}
+
+<!-- ═══ DECLINE CONFIRM MODAL ═══ -->
+{#if declineTarget}
+    <div
+        role="alertdialog"
+        aria-modal="true"
+        aria-label="Confirm decline"
+        class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+        onclick={(e) => e.target === e.currentTarget && (declineTarget = null)}
+    >
+        <div class="w-full max-w-sm rounded-lg border border-border bg-card p-5 shadow-lg">
+            <h2 class="text-base font-semibold">Decline this post?</h2>
+            <p class="mt-2 text-sm text-muted-foreground">
+                “{declineTarget.title}” will be marked as <strong>declined</strong>.
+                The author and voters will see this status on the board.
+            </p>
+            <div class="mt-4 flex justify-end gap-2">
+                <Button variant="outline" size="sm" onclick={() => (declineTarget = null)}>Cancel</Button>
+                <Button
+                    variant="default"
+                    size="sm"
+                    class="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                    onclick={async () => {
+                        const post = declineTarget;
+                        declineTarget = null;
+                        if (post) await moderate(post, 'declined');
+                    }}
+                >Decline</Button>
+            </div>
+        </div>
+    </div>
 {/if}
