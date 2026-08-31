@@ -1,5 +1,6 @@
 <script lang="ts">
     import { onMount } from 'svelte';
+    import CircleAlert from '@lucide/svelte/icons/circle-alert';
     import { api, ApiError } from '$lib/api/client';
     import type { PostDetail, Comment, CurrentUser, PostStatus, PostCategory } from '$lib/api/types';
     import StatusBadge from '$lib/components/StatusBadge.svelte';
@@ -173,10 +174,20 @@
         <Card.Header class="h-48 animate-pulse bg-muted" />
     </Card.Root>
 {:else if error}
-    <div class="py-16 text-center">
-        <p class="text-lg text-muted-foreground">{error}</p>
-        <Button variant="link" href={`/board/${slug}`}>← Back to board</Button>
-    </div>
+    <Card.Root class="py-12 text-center">
+        <Card.Content class="flex flex-col items-center gap-3 pt-6">
+            <div class="flex size-10 items-center justify-center rounded-full bg-destructive/10">
+                <CircleAlert class="size-5 text-destructive" aria-hidden="true" />
+            </div>
+            <h1 class="text-lg font-semibold">{error}</h1>
+            <p class="text-sm text-muted-foreground">
+                It may have been deleted, or the link is incorrect.
+            </p>
+            <Button variant="outline" size="sm" href={`/board/${slug}`} class="mt-2">
+                ← Back to board
+            </Button>
+        </Card.Content>
+    </Card.Root>
 {:else if post}
     <Button variant="link" size="sm" href={`/board/${slug}`} class="px-0 text-muted-foreground">
         ← Back to board
@@ -216,7 +227,7 @@
                         </select>
                     {/if}
                 </div>
-                <h1 class="text-xl leading-normal font-medium">{post.title}</h1>
+                <h1 class="text-2xl leading-tight font-semibold tracking-tight">{post.title}</h1>
                 <div class="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
                     <span>{post.creator.name || post.creator.email || 'User'}</span>
                     <span>·</span>

@@ -5,6 +5,7 @@
     import { api } from '$lib/api/client';
     import type { CurrentUser } from '$lib/api/types';
     import { Button } from '$lib/components/ui/button';
+    import Keyboard from '@lucide/svelte/icons/keyboard';
     import ThemeToggle from '$lib/components/ThemeToggle.svelte';
     import ShortcutHelp from '$lib/components/ShortcutHelp.svelte';
     import Toaster from '$lib/components/Toaster.svelte';
@@ -100,7 +101,7 @@
                     aria-label="Keyboard shortcuts"
                     title="Keyboard shortcuts (?)"
                 >
-                    ?
+                    <Keyboard class="size-4" aria-hidden="true" />
                 </Button>
                 <ThemeToggle />
                 {#if loading}

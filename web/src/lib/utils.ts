@@ -14,21 +14,6 @@ export type WithElementRef<T, U extends HTMLElement = HTMLElement> = WithoutChil
     children?: Snippet;
 };
 
-// ── Badge color mapping ───────────────────────────────────────────────
-
-import type { BadgeVariant } from '$lib/components/ui/badge/badge.svelte';
-
-export function statusColor(status: string): BadgeVariant {
-    const map: Record<string, BadgeVariant> = {
-        open: 'secondary',
-        planned: 'default',
-        in_progress: 'default',
-        done: 'outline',
-        declined: 'destructive',
-    };
-    return map[status] ?? 'outline';
-}
-
 // ── Time formatting ───────────────────────────────────────────────────
 
 export function timeAgo(dateStr: string): string {

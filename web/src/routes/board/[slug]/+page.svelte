@@ -12,6 +12,7 @@
     import { cn } from '$lib/utils';
     import { toastError } from '$lib/toast.svelte';
     import { LoaderCircle } from '@lucide/svelte';
+    import CircleAlert from '@lucide/svelte/icons/circle-alert';
 
     let { params } = $props();
     let slug = $derived(params.slug);
@@ -249,10 +250,15 @@
         {/each}
     </div>
 {:else if error}
-    <div class="py-16 text-center">
-        <p class="text-lg text-muted-foreground">{error}</p>
-        <Button variant="link" href="/">← Back to boards</Button>
-    </div>
+    <Card.Root class="py-12 text-center">
+        <Card.Content class="flex flex-col items-center gap-3 pt-6">
+            <div class="flex size-10 items-center justify-center rounded-full bg-destructive/10">
+                <CircleAlert class="size-5 text-destructive" aria-hidden="true" />
+            </div>
+            <h1 class="text-lg font-semibold">{error}</h1>
+            <Button variant="outline" size="sm" href="/" class="mt-2">← Back to boards</Button>
+        </Card.Content>
+    </Card.Root>
 {:else if project}
     <div class="mb-6">
         <Button variant="link" size="sm" href="/" class="px-0 text-muted-foreground">← All boards</Button>

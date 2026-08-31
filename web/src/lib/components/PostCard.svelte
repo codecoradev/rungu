@@ -3,6 +3,7 @@
     import StatusBadge from './StatusBadge.svelte';
     import CategoryBadge from './CategoryBadge.svelte';
     import VoteButton from './VoteButton.svelte';
+    import MessageSquare from '@lucide/svelte/icons/message-square';
     import { timeAgo } from '$lib/utils';
     import * as Card from '$lib/components/ui/card';
 
@@ -32,9 +33,7 @@
                     {#if post.comment_count > 0}
                         <span>·</span>
                         <span class="flex items-center gap-1">
-                            <svg class="size-3.5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
-                                <path d="M2 4a2 2 0 012-2h12a2 2 0 012 2v8a2 2 0 01-2 2H7l-5 4V4z" />
-                            </svg>
+                            <MessageSquare class="size-3.5" aria-hidden="true" />
                             {post.comment_count}
                         </span>
                     {/if}

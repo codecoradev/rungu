@@ -38,6 +38,11 @@
         --color-destructive-foreground: oklch(0.985 0 0);
         --color-success: oklch(0.55 0.15 155);
         --color-success-foreground: oklch(0.985 0 0);
+        --color-status-open: oklch(0.62 0.21 260);
+        --color-status-planned: oklch(0.61 0.25 293);
+        --color-status-in-progress: oklch(0.77 0.19 70);
+        --color-status-done: oklch(0.7 0.17 163);
+        --color-status-declined: oklch(0.64 0.24 25);
         --color-border: oklch(0.87 0.005 265);
         --color-input: oklch(0.87 0.005 265);
         --color-ring: oklch(0.45 0.15 250);
@@ -47,24 +52,31 @@
     .dark {
         color-scheme: dark;
 
+        /* 0.92 — below pure white to avoid eye strain on dark backgrounds */
         --color-background: oklch(0.145 0.015 265);
-        --color-foreground: oklch(0.985 0 0);
+        --color-foreground: oklch(0.92 0.005 265);
         --color-card: oklch(0.18 0.015 265);
-        --color-card-foreground: oklch(0.985 0 0);
+        --color-card-foreground: oklch(0.92 0.005 265);
         --color-popover: oklch(0.18 0.015 265);
-        --color-popover-foreground: oklch(0.985 0 0);
+        --color-popover-foreground: oklch(0.92 0.005 265);
         --color-primary: oklch(0.55 0.2 250);
         --color-primary-foreground: oklch(0.985 0 0);
         --color-secondary: oklch(0.27 0.015 265);
-        --color-secondary-foreground: oklch(0.985 0 0);
+        --color-secondary-foreground: oklch(0.92 0.005 265);
         --color-muted: oklch(0.27 0.015 265);
         --color-muted-foreground: oklch(0.7 0.015 265);
         --color-accent: oklch(0.27 0.015 265);
-        --color-accent-foreground: oklch(0.985 0 0);
+        --color-accent-foreground: oklch(0.92 0.005 265);
         --color-destructive: oklch(0.55 0.22 25);
         --color-destructive-foreground: oklch(0.985 0 0);
         --color-success: oklch(0.75 0.16 155);
         --color-success-foreground: oklch(0.145 0.015 265);
+        /* Slightly lighter on dark so status hues keep their contrast */
+        --color-status-open: oklch(0.71 0.17 255);
+        --color-status-planned: oklch(0.7 0.18 293);
+        --color-status-in-progress: oklch(0.83 0.19 84);
+        --color-status-done: oklch(0.77 0.18 163);
+        --color-status-declined: oklch(0.7 0.19 22);
         --color-border: oklch(0.35 0.015 265);
         --color-input: oklch(0.35 0.015 265);
         --color-ring: oklch(0.6 0.15 250);
@@ -95,6 +107,11 @@
     --color-destructive-foreground: var(--color-destructive-foreground);
     --color-success: var(--color-success);
     --color-success-foreground: var(--color-success-foreground);
+    --color-status-open: var(--color-status-open);
+    --color-status-planned: var(--color-status-planned);
+    --color-status-in-progress: var(--color-status-in-progress);
+    --color-status-done: var(--color-status-done);
+    --color-status-declined: var(--color-status-declined);
     --color-border: var(--color-border);
     --color-input: var(--color-input);
     --color-ring: var(--color-ring);

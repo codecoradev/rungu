@@ -1,5 +1,6 @@
 <script lang="ts">
     import { Button } from '$lib/components/ui/button';
+    import Star from '@lucide/svelte/icons/star';
     import { api, ApiError } from '$lib/api/client';
     import { toastError } from '$lib/toast.svelte';
     import { cn } from '$lib/utils';
@@ -57,17 +58,13 @@
     size="sm"
     {disabled}
     onclick={toggle}
-    class={cn('gap-1.5 transition-opacity', loading && 'opacity-50')}
+    class={cn('min-h-11 gap-1.5 transition-opacity', loading && 'opacity-50')}
 >
-    <svg
+    <Star
         class="size-4"
-        xmlns="http://www.w3.org/2000/svg"
-        viewBox="0 0 20 20"
+        strokeWidth={1.5}
         fill={voted ? 'currentColor' : 'none'}
-        stroke="currentColor"
-        stroke-width="1.5"
-    >
-        <path d="M10 3l2.5 5 5.5.8-4 3.9.9 5.5L10 16l-4.9 2.6.9-5.5-4-3.9 5.5-.8L10 3z" stroke-linejoin="round" />
-    </svg>
+        aria-hidden="true"
+    />
     <span>{count}</span>
 </Button>
