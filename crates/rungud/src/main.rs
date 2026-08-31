@@ -22,7 +22,7 @@ struct Cli {
     db: PathBuf,
 
     /// Log level
-    #[arg(short, long, global = true, default_value = "info")]
+    #[arg(short = 'g', long, global = true, default_value = "info")]
     log_level: String,
 
     #[command(subcommand)]
@@ -47,7 +47,7 @@ enum Commands {
         #[arg(short, long)]
         slug: Option<String>,
         /// Project description
-        #[arg(short, long, default_value = "")]
+        #[arg(short = 'D', long, default_value = "")]
         description: String,
     },
     /// Health check (exit 0 if healthy)
