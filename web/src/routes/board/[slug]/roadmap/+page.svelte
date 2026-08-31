@@ -56,9 +56,9 @@
     // Column definition — order matches the status lifecycle (left → right).
     type BucketKey = 'planned' | 'in_progress' | 'done';
     const columns: { key: BucketKey; title: string; totalKey: keyof RoadmapResponse; accent: string }[] = [
-        { key: 'planned', title: 'Planned', totalKey: 'planned_total', accent: 'border-t-blue-500' },
-        { key: 'in_progress', title: 'In Progress', totalKey: 'in_progress_total', accent: 'border-t-amber-500' },
-        { key: 'done', title: 'Done', totalKey: 'done_total', accent: 'border-t-emerald-500' },
+        { key: 'planned', title: 'Planned', totalKey: 'planned_total', accent: 'border-t-status-planned' },
+        { key: 'in_progress', title: 'In Progress', totalKey: 'in_progress_total', accent: 'border-t-status-in-progress' },
+        { key: 'done', title: 'Done', totalKey: 'done_total', accent: 'border-t-status-done' },
     ];
 </script>
 
