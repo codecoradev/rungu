@@ -115,6 +115,8 @@ pub async fn serve(config: Config, pool: sqlx::AnyPool, is_sqlite: bool, listen:
         .merge(SwaggerUi::new("/swagger-ui").url("/api-docs/openapi.json", ApiDoc::openapi()))
         .route("/health", get(health_check))
         .merge(crate::embed::router())
+        // MCP over HTTP (#189) — root-mounted, Bearer-authed (same key as REST).
+        .merge(rungu_api::mcp_http::mcp_routes())
         .fallback(spa_handler)
         // Sentry layer: capture HTTP request context and errors.
         // No-op when SENTRY_DSN is not set.

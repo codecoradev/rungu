@@ -106,7 +106,7 @@ See [CLI Reference](https://rungu.pages.dev/cli-reference) for full options.
 
 ## MCP Tools
 
-21 tools available via stdio (JSON-RPC 2.0) for AI coding agents:
+26 tools for AI coding agents (stdio locally, HTTP remotely with `RUNGU_API_KEY`):
 
 **Projects:** `list_projects`, `get_project`
 **Posts:** `list_posts`, `get_post`, `create_post`, `update_post_status`, `update_post_category`, `delete_post`, `vote_post`, `search_posts`, `get_roadmap`
@@ -114,9 +114,11 @@ See [CLI Reference](https://rungu.pages.dev/cli-reference) for full options.
 **Changelog:** `get_changelog`
 **Attachments:** `list_attachments`, `delete_attachment`
 **Insights:** `get_stats`, `get_trending`, `get_analytics`, `get_top_posts`
+**Admin:** `create_project`, `delete_project`, `list_webhooks`, `create_webhook`, `delete_webhook`
 
 Connect from any MCP-compatible client (Claude Desktop, Cursor, etc.):
 
+Local (stdio):
 ```json
 {
   "mcpServers": {
@@ -126,6 +128,18 @@ Connect from any MCP-compatible client (Claude Desktop, Cursor, etc.):
       "env": {
         "RUNGU_DB_URL": "sqlite://path/to/rungu.db"
       }
+    }
+  }
+}
+```
+
+Remote (HTTP, requires `RUNGU_API_KEY` on the server):
+```json
+{
+  "mcpServers": {
+    "rungu": {
+      "url": "https://your-rungu-host/mcp",
+      "headers": { "Authorization": "Bearer <RUNGU_API_KEY>" }
     }
   }
 }

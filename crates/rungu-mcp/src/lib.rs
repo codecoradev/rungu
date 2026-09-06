@@ -89,6 +89,11 @@ async fn handle_request(method: &str, params: &Value, store: &Store) -> Result<V
         "get_trending" => get_trending(params, store).await,
         "get_analytics" => get_analytics(params, store).await,
         "get_top_posts" => get_top_posts(params, store).await,
+        "create_project" => create_project(params, store).await,
+        "delete_project" => delete_project(params, store).await,
+        "list_webhooks" => list_webhooks(params, store).await,
+        "create_webhook" => create_webhook(params, store).await,
+        "delete_webhook" => delete_webhook(params, store).await,
         "list_attachments" => list_attachments(params, store).await,
         "delete_post" => delete_post(params, store).await,
         "update_post_category" => update_post_category(params, store).await,
@@ -498,6 +503,72 @@ async fn get_top_posts(params: &Value, store: &Store) -> Result<Value, String> {
     }
 
     Ok(json!({ "data": rows }))
+}
+
+/// Create a project (admin parity — mirrors REST POST /api/projects).
+async fn create_project(params: &Value, store: &Store) -> Result<Value, String> {
+    let name = get_str(params, "name")?;
+    let slug = get_optional_str(params, "slug").unwrap_or("");
+    let description = get_optional_str(params, "description").unwrap_or("");
+    let slug = if slug.is_empty() { name.to_lowercase().replace(' ', "-") } else { slug.to_string() };
+
+    let project =
+        store.create_project(name, &slug, description).await.map_err(|e| format!("Failed to create project: {e}"))?;
+    Ok(json!({ "data": project }))
+}
+
+/// Delete a project and everything in it (admin parity — irreversible).
+async fn delete_project(params: &Value, store: &Store) -> Result<Value, String> {
+    let slug = get_str(params, "slug")?;
+    let project = store
+        .get_project_by_slug(slug)
+        .await
+        .map_err(|e| format!("Failed to get project: {e}"))?
+        .ok_or_else(|| format!("Project not found: {slug}"))?;
+    store.delete_project(&project.id).await.map_err(|e| format!("Failed to delete project: {e}"))?;
+    Ok(json!({ "deleted": true, "id": project.id, "slug": slug }))
+}
+
+/// List webhooks for a project (admin parity; secrets are NOT included).
+async fn list_webhooks(params: &Value, store: &Store) -> Result<Value, String> {
+    let slug = get_str(params, "slug")?;
+    let project = store
+        .get_project_by_slug(slug)
+        .await
+        .map_err(|e| format!("Failed to get project: {e}"))?
+        .ok_or_else(|| format!("Project not found: {slug}"))?;
+    let webhooks = store.list_webhooks(&project.id).await.map_err(|e| format!("Failed to list webhooks: {e}"))?;
+    Ok(json!({ "data": webhooks, "total": webhooks.len() }))
+}
+
+/// Create a webhook subscription (admin parity). Auto-generates a signing
+/// secret when `secret` is omitted; the secret is returned exactly once here.
+async fn create_webhook(params: &Value, store: &Store) -> Result<Value, String> {
+    let slug = get_str(params, "slug")?;
+    let url = get_str(params, "url")?;
+    let events = get_optional_str(params, "events").unwrap_or("*");
+    let secret = match get_optional_str(params, "secret") {
+        Some(s) if !s.is_empty() => s.to_string(),
+        _ => uuid::Uuid::new_v4().to_string(),
+    };
+
+    let project = store
+        .get_project_by_slug(slug)
+        .await
+        .map_err(|e| format!("Failed to get project: {e}"))?
+        .ok_or_else(|| format!("Project not found: {slug}"))?;
+    let webhook = store
+        .create_webhook(&project.id, url, events, &secret)
+        .await
+        .map_err(|e| format!("Failed to create webhook: {e}"))?;
+    Ok(json!({ "data": webhook, "signing_secret": secret }))
+}
+
+/// Delete a webhook (admin parity).
+async fn delete_webhook(params: &Value, store: &Store) -> Result<Value, String> {
+    let id = get_str(params, "id")?;
+    store.delete_webhook(id).await.map_err(|e| format!("Failed to delete webhook: {e}"))?;
+    Ok(json!({ "deleted": true, "id": id }))
 }
 
 /// Run the MCP server, reading JSON-RPC from stdin and writing to stdout.

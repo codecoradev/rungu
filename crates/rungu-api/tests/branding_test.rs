@@ -24,6 +24,7 @@ async fn setup_branded_app(branding: InstanceBranding, license: LicenseStatus) -
         app_url: "http://localhost:3000".to_string(),
         secure_cookie: false,
         admin_emails: vec![],
+        api_key: None,
         google: None,
         github: None,
         keycloak: None,

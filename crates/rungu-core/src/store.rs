@@ -1284,6 +1284,18 @@ impl Store {
 
     // ── Analytics events (#186) ─────────────────────────────────────────
 
+    /// Store-level accessors for the HTTP MCP transport (#189): the Axum
+    /// layer needs the pool/kind to rebuild a Store per JSON-RPC call, which
+    /// is exactly what `run_server` does for stdio.
+    pub fn is_sqlite(&self) -> bool {
+        self.is_sqlite
+    }
+
+    /// Pool handle for transports that rebuild per-request Stores (HTTP MCP).
+    pub fn pool_for_mcp(&self) -> sqlx::AnyPool {
+        self.pool.clone()
+    }
+
     /// Record an analytics event. Privacy-first: no IP, cookie, or
     /// fingerprint is ever stored — only aggregate counters.
     pub async fn record_event(&self, project_id: &str, post_id: Option<&str>, event_type: &str) -> Result<()> {

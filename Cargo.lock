@@ -1862,6 +1862,7 @@ dependencies = [
  "reqwest",
  "rungu_auth",
  "rungu_core",
+ "rungu_mcp",
  "rungu_proto",
  "serde",
  "serde_json",
@@ -1890,6 +1891,7 @@ dependencies = [
  "rungu_proto",
  "serde",
  "serde_json",
+ "sha2",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -1928,6 +1930,7 @@ dependencies = [
  "sqlx",
  "tokio",
  "tracing",
+ "uuid",
 ]
 
 [[package]]
