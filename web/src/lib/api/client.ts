@@ -22,6 +22,7 @@ import type {
     ProjectStats,
 } from './types';
 import type { InstanceMeta } from '../branding.svelte';
+import type { AnalyticsSummary, AnalyticsTopRow } from './types';
 
 const BASE = '';
 
@@ -227,6 +228,17 @@ export const api = {
 
     adminProjectStats: (slug: string) =>
         request<DataResponse<ProjectStats>>(`/api/admin/projects/${seg(slug)}/stats`).then((r) => r.data),
+
+    // ── Admin: analytics (#186/#187) ────────────────────────────────────
+    adminAnalytics: (slug: string, days = 30) => {
+        const qs = new URLSearchParams({ days: String(days) });
+        return request<{ data: AnalyticsSummary }>(`/api/admin/analytics/${seg(slug)}?${qs}`).then((r) => r.data);
+    },
+
+    adminAnalyticsTop: (slug: string, days = 30, limit = 10) => {
+        const qs = new URLSearchParams({ days: String(days), limit: String(limit) });
+        return request<{ data: AnalyticsTopRow[] }>(`/api/admin/analytics/${seg(slug)}/top?${qs}`).then((r) => r.data);
+    },
 
     // ── Webhooks ──────────────────────────────────────────────────────
     listWebhooks: (slug: string) =>
