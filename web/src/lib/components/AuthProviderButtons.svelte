@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { branding } from '$lib/branding.svelte';
     import { Button } from '$lib/components/ui/button';
     import { api } from '$lib/api/client';
     import type { ProviderInfo } from '$lib/api/types';
@@ -69,7 +70,7 @@
             {:else}
                 <p class="text-sm font-medium">No login methods configured</p>
                 <p class="mt-1 text-sm text-muted-foreground">
-                    This Rungu instance has no OAuth provider enabled. Admins can enable Google, GitHub or Keycloak in the server configuration.
+                    This {branding.value.brandName} instance has no OAuth provider enabled. Admins can enable Google, GitHub or Keycloak in the server configuration.
                 </p>
             {/if}
         </div>

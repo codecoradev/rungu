@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { branding } from '$lib/branding.svelte';
     import { onMount } from 'svelte';
     import { api, ApiError } from '$lib/api/client';
     import type { Project, RoadmapResponse } from '$lib/api/types';
@@ -56,14 +57,14 @@
     // Column definition — order matches the status lifecycle (left → right).
     type BucketKey = 'planned' | 'in_progress' | 'done';
     const columns: { key: BucketKey; title: string; totalKey: keyof RoadmapResponse; accent: string }[] = [
-        { key: 'planned', title: 'Planned', totalKey: 'planned_total', accent: 'border-t-blue-500' },
-        { key: 'in_progress', title: 'In Progress', totalKey: 'in_progress_total', accent: 'border-t-amber-500' },
-        { key: 'done', title: 'Done', totalKey: 'done_total', accent: 'border-t-emerald-500' },
+        { key: 'planned', title: 'Planned', totalKey: 'planned_total', accent: 'border-t-status-planned' },
+        { key: 'in_progress', title: 'In Progress', totalKey: 'in_progress_total', accent: 'border-t-status-in-progress' },
+        { key: 'done', title: 'Done', totalKey: 'done_total', accent: 'border-t-status-done' },
     ];
 </script>
 
 <svelte:head>
-    <title>{project ? `${project.name} · Roadmap` : 'Roadmap'} · Rungu</title>
+    <title>{(project ? `${project.name} · Roadmap` : 'Roadmap') + ' · ' + branding.value.brandName}</title>
 </svelte:head>
 
 <div class="mx-auto max-w-7xl px-4 py-8">

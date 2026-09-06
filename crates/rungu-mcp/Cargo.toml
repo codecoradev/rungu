@@ -9,6 +9,7 @@ description = "MCP server — stdio transport, AI agent tools"
 [dependencies]
 rungu_proto = { workspace = true }
 rungu_core = { workspace = true }
+uuid = { workspace = true }
 sqlx = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

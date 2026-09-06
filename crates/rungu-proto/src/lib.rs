@@ -136,11 +136,15 @@ pub struct PostDetail {
     pub user_voted: bool,
 }
 
-/// Lightweight user info for post creator display.
+/// Lightweight PUBLIC user info for post/comment display.
+///
+/// Deliberately excludes email (#192): these structs ship in unauthenticated
+/// REST responses (posts, comments, roadmap, changelog) and webhook
+/// payloads. Publishing emails enables account enumeration and harvesting —
+/// emails stay internal to auth/identity only.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct UserSummary {
     pub id: String,
-    pub email: String,
     pub name: String,
     pub avatar_url: String,
 }

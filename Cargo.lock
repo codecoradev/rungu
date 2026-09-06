@@ -1852,7 +1852,7 @@ dependencies = [
 
 [[package]]
 name = "rungu_api"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -1862,6 +1862,7 @@ dependencies = [
  "reqwest",
  "rungu_auth",
  "rungu_core",
+ "rungu_mcp",
  "rungu_proto",
  "serde",
  "serde_json",
@@ -1878,7 +1879,7 @@ dependencies = [
 
 [[package]]
 name = "rungu_auth"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -1890,6 +1891,7 @@ dependencies = [
  "rungu_proto",
  "serde",
  "serde_json",
+ "sha2",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
@@ -1899,7 +1901,7 @@ dependencies = [
 
 [[package]]
 name = "rungu_core"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1918,7 +1920,7 @@ dependencies = [
 
 [[package]]
 name = "rungu_mcp"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "rungu_core",
@@ -1928,11 +1930,12 @@ dependencies = [
  "sqlx",
  "tokio",
  "tracing",
+ "uuid",
 ]
 
 [[package]]
 name = "rungu_proto"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "chrono",
  "serde",
@@ -1942,7 +1945,7 @@ dependencies = [
 
 [[package]]
 name = "rungud"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "axum",

@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { branding } from '$lib/branding.svelte';
     import { onMount } from 'svelte';
     import { goto } from '$app/navigation';
     import { page } from '$app/state';
@@ -14,8 +15,15 @@
     // the user back there after successful auth. Client-side path must be
     // validated the same way — only same-origin absolute paths allowed.
     const rawRedirect = page.url.searchParams.get('redirect') || '/';
+    // Reject: not starting with '/', protocol-relative '//', a leading '\\'
+    // (browsers normalize '/\\evil.com' to scheme-relative), and control chars.
     const redirectTo =
-        rawRedirect.startsWith('/') && !rawRedirect.startsWith('//') ? rawRedirect : '/';
+        rawRedirect.startsWith('/') &&
+        !rawRedirect.startsWith('//') &&
+        !rawRedirect.startsWith('/\\') &&
+        !/[\u0000-\u001f]/.test(rawRedirect)
+            ? rawRedirect
+            : '/';
 
     onMount(async () => {
         try {
@@ -28,7 +36,7 @@
 </script>
 
 <svelte:head>
-    <title>Login — Rungu</title>
+    <title>{'Login — ' + branding.value.brandName}</title>
 </svelte:head>
 
 <div class="mx-auto max-w-sm py-16">
@@ -45,7 +53,7 @@
     {:else}
         <Card.Root>
             <Card.Header class="text-center">
-                <Card.Title class="text-2xl">Sign in to Rungu</Card.Title>
+                <Card.Title class="text-2xl">Sign in to {branding.value.brandName}</Card.Title>
                 <Card.Description>Sign in to share your feedback</Card.Description>
             </Card.Header>
             <Card.Content>

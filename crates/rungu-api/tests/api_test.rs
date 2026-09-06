@@ -25,6 +25,7 @@ async fn setup_app() -> (axum::Router, Store) {
         app_url: "http://localhost:3000".to_string(),
         secure_cookie: false,
         admin_emails: vec![],
+        api_key: None,
         google: None,
         github: None,
         keycloak: None,
@@ -37,6 +38,9 @@ async fn setup_app() -> (axum::Router, Store) {
         storage: std::sync::Arc::from(
             rungu_core::FsStorage::new(std::env::temp_dir().join("rungu-test-uploads")).unwrap(),
         ),
+        branding: rungu_api::meta::InstanceBranding::default(),
+        license: std::sync::Arc::new(rungu_api::meta::LicenseStatus::new()),
+        agent_user_id: std::sync::Arc::new(None),
     };
     // Tests use bare paths (e.g. "/projects") — match the production router structure:
     // API routes under /api, auth routes at root.

@@ -21,6 +21,8 @@ import type {
     WebhookTestResult,
     ProjectStats,
 } from './types';
+import type { InstanceMeta } from '../branding.svelte';
+import type { AnalyticsSummary, AnalyticsTopRow } from './types';
 
 const BASE = '';
 
@@ -38,13 +40,17 @@ class ApiError extends Error {
 }
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
+    // Merge deliberately: spreading `...options` last would clobber the
+    // merged headers with the caller's raw object (losing the default
+    // Content-Type) and could override `credentials`.
+    const { headers: extraHeaders, ...rest } = options ?? {};
     const res = await fetch(`${BASE}${path}`, {
         credentials: 'include',
+        ...rest,
         headers: {
             'Content-Type': 'application/json',
-            ...options?.headers,
+            ...extraHeaders,
         },
-        ...options,
     });
 
     if (!res.ok) {
@@ -70,6 +76,9 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 export const api = {
     // Auth
     getProviders: () => request<{ providers: ProviderInfo[] }>('/auth/providers'),
+
+    // Instance branding (white-label, #185)
+    getMeta: () => request<InstanceMeta>('/api/meta'),
 
     getCurrentUser: () => request<DataResponse<CurrentUser>>('/auth/me').then((r) => r.data),
 
@@ -219,6 +228,17 @@ export const api = {
 
     adminProjectStats: (slug: string) =>
         request<DataResponse<ProjectStats>>(`/api/admin/projects/${seg(slug)}/stats`).then((r) => r.data),
+
+    // ── Admin: analytics (#186/#187) ────────────────────────────────────
+    adminAnalytics: (slug: string, days = 30) => {
+        const qs = new URLSearchParams({ days: String(days) });
+        return request<{ data: AnalyticsSummary }>(`/api/admin/analytics/${seg(slug)}?${qs}`).then((r) => r.data);
+    },
+
+    adminAnalyticsTop: (slug: string, days = 30, limit = 10) => {
+        const qs = new URLSearchParams({ days: String(days), limit: String(limit) });
+        return request<{ data: AnalyticsTopRow[] }>(`/api/admin/analytics/${seg(slug)}/top?${qs}`).then((r) => r.data);
+    },
 
     // ── Webhooks ──────────────────────────────────────────────────────
     listWebhooks: (slug: string) =>

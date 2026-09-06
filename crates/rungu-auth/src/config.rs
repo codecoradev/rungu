@@ -21,6 +21,10 @@ pub struct AuthConfig {
     pub app_url: String,
     pub secure_cookie: bool,
     pub admin_emails: Vec<String>,
+    /// Static API key for machine access (`Authorization: Bearer <key>`).
+    /// `None` = machine access disabled. Treated as full-admin identity
+    /// (the synthetic `ai-agent` user). Constant-time compared.
+    pub api_key: Option<String>,
     pub google: Option<ProviderConfig>,
     pub github: Option<ProviderConfig>,
     pub keycloak: Option<ProviderConfig>,
@@ -53,6 +57,7 @@ impl AuthConfig {
                 .map(|s| s.trim().to_lowercase())
                 .filter(|s| !s.is_empty())
                 .collect(),
+            api_key: env::var("RUNGU_API_KEY").ok().map(|v| v.trim().to_string()).filter(|v| !v.is_empty()),
             app_url,
             google,
             github,

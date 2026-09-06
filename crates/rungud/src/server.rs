@@ -22,6 +22,25 @@ use crate::spa::spa_handler;
 
 /// Build the Axum router and start serving.
 pub async fn serve(config: Config, pool: sqlx::AnyPool, is_sqlite: bool, listen: &str) -> anyhow::Result<()> {
+    // Machine access bootstrap (#189): resolve the synthetic ai-agent admin
+    // when RUNGU_API_KEY is set. Its DB id feeds the auth extractors so
+    // agent-created rows carry a valid created_by FK.
+    let agent_user_id: std::sync::Arc<Option<String>> = if config.auth.api_key.is_some() {
+        let bootstrap = rungu_core::Store::new_with_kind(pool.clone(), is_sqlite);
+        let agent = bootstrap
+            .find_or_create_user(
+                rungu_auth::middleware::AGENT_USER_EMAIL,
+                Some(rungu_auth::middleware::AGENT_USER_NAME),
+                None,
+                &[rungu_auth::middleware::AGENT_USER_EMAIL.to_string()],
+            )
+            .await?;
+        info!("Machine access enabled: API key active as {} ({})", agent.email, agent.id);
+        std::sync::Arc::new(Some(agent.id))
+    } else {
+        std::sync::Arc::new(None)
+    };
+
     let store = rungu_core::Store::new_with_kind(pool, is_sqlite);
 
     // Single shared HTTP client for outbound calls (OAuth token exchange, userinfo).
@@ -31,11 +50,35 @@ pub async fn serve(config: Config, pool: sqlx::AnyPool, is_sqlite: bool, listen:
         .build()
         .map_err(|e| anyhow::anyhow!("Failed to build HTTP client: {e}"))?;
 
+    // License validation for the white-label badge (#185). A network failure
+    // or missing org id simply keeps the badge visible; never fatal. A valid
+    // key hides the "Powered by Rungu" badge on all surfaces.
+    let license = std::sync::Arc::new(rungu_api::meta::LicenseStatus::new());
+    if let Some(key) = config.license_key.as_deref() {
+        match config.license_org_id.as_deref() {
+            None => tracing::warn!("RUNGU_LICENSE_KEY set but RUNGU_LICENSE_ORG_ID missing — badge stays visible"),
+            Some(org) => match rungu_api::meta::validate_license(&http_client, key, org).await {
+                Ok(info) => {
+                    if info.licensed {
+                        info!("License validated — Powered-by badge hidden");
+                    } else {
+                        tracing::warn!("License key not valid — Powered-by badge stays visible");
+                    }
+                    *license.0.write().await = Some(info);
+                }
+                Err(e) => tracing::warn!("License validation failed ({e}) — badge stays visible"),
+            },
+        }
+    }
+
     let state = AppState {
         store,
         config: config.auth.clone(),
         http_client,
         storage: std::sync::Arc::from(rungu_core::create_storage()?),
+        branding: config.branding.clone(),
+        license,
+        agent_user_id,
     };
 
     // CORS — secure by default.
@@ -92,6 +135,8 @@ pub async fn serve(config: Config, pool: sqlx::AnyPool, is_sqlite: bool, listen:
         .merge(SwaggerUi::new("/swagger-ui").url("/api-docs/openapi.json", ApiDoc::openapi()))
         .route("/health", get(health_check))
         .merge(crate::embed::router())
+        // MCP over HTTP (#189) — root-mounted, Bearer-authed (same key as REST).
+        .merge(rungu_api::mcp_http::mcp_routes())
         .fallback(spa_handler)
         // Sentry layer: capture HTTP request context and errors.
         // No-op when SENTRY_DSN is not set.

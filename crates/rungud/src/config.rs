@@ -23,6 +23,14 @@ pub struct Config {
     /// can't be spoofed. Enable only behind a trusted reverse proxy that
     /// **overwrites** the header.
     pub trust_proxy: bool,
+    /// Instance branding for white-labeling (see `rungu_api::meta`).
+    pub branding: rungu_api::meta::InstanceBranding,
+    /// Polar license key for the white-label tier. `None` = unlicensed
+    /// (badge stays visible). Validated at startup against the Polar API.
+    pub license_key: Option<String>,
+    /// Polar organization id the license keys belong to (required together
+    /// with `license_key` — the validate API is org-scoped).
+    pub license_org_id: Option<String>,
 }
 
 impl Config {
@@ -38,6 +46,24 @@ impl Config {
             .filter(|s| !s.is_empty())
             .collect();
 
+        // White-label branding (#185). Empty/unset values fall back to the
+        // Rungu defaults. Strings are sanitised (control chars stripped,
+        // length-capped) because they end up in HTML, headers, and JSON.
+        let brand_name = {
+            let raw = std::env::var("RUNGU_INSTANCE_NAME").unwrap_or_default();
+            let trimmed = rungu_api::meta::InstanceBranding::sanitize_config_str(raw.trim(), 60);
+            if trimmed.is_empty() { "Rungu".to_string() } else { trimmed }
+        };
+        let logo_url = std::env::var("RUNGU_LOGO_URL")
+            .ok()
+            .map(|v| rungu_api::meta::InstanceBranding::sanitize_config_str(v.trim(), 500))
+            .filter(|v| !v.is_empty());
+        let footer_text = std::env::var("RUNGU_FOOTER_TEXT")
+            .ok()
+            .map(|v| rungu_api::meta::InstanceBranding::sanitize_config_str(v.trim(), 200))
+            .filter(|v| !v.is_empty())
+            .unwrap_or_default();
+
         Self {
             db_path,
             listen_addr: std::env::var("RUNGU_LISTEN").unwrap_or_else(|_| "0.0.0.0:3000".to_string()),
@@ -47,6 +73,15 @@ impl Config {
             rate_limit_per_min: parse_per_min("RUNGU_RATE_LIMIT_PER_MIN", 300),
             auth_rate_limit_per_min: parse_per_min("RUNGU_AUTH_RATE_LIMIT_PER_MIN", 30),
             trust_proxy: parse_bool("RUNGU_TRUST_PROXY", false),
+            branding: rungu_api::meta::InstanceBranding::new(brand_name, logo_url, footer_text, true),
+            license_key: std::env::var("RUNGU_LICENSE_KEY")
+                .ok()
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty()),
+            license_org_id: std::env::var("RUNGU_LICENSE_ORG_ID")
+                .ok()
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty()),
         }
     }
 

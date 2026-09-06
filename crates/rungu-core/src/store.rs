@@ -56,12 +56,8 @@ fn map_user(row: &AnyRow) -> User {
 /// Map a SQLite row to a PostDetail (with user join + vote status).
 fn map_post_detail(row: &AnyRow) -> PostDetail {
     let post = map_post(row);
-    let creator = UserSummary {
-        id: row.get("user_id"),
-        email: row.get("user_email"),
-        name: row.get("user_name"),
-        avatar_url: row.get("user_avatar"),
-    };
+    let creator =
+        UserSummary { id: row.get("user_id"), name: row.get("user_name"), avatar_url: row.get("user_avatar") };
     PostDetail { post, creator, user_voted: false }
 }
 
@@ -97,12 +93,8 @@ fn map_comment(row: &AnyRow) -> Comment {
 /// Map a SQLite row to a CommentDetail (with user join).
 fn map_comment_detail(row: &AnyRow) -> CommentDetail {
     let comment = map_comment(row);
-    let creator = UserSummary {
-        id: row.get("user_id"),
-        email: row.get("user_email"),
-        name: row.get("user_name"),
-        avatar_url: row.get("user_avatar"),
-    };
+    let creator =
+        UserSummary { id: row.get("user_id"), name: row.get("user_name"), avatar_url: row.get("user_avatar") };
     CommentDetail { comment, creator }
 }
 
@@ -468,7 +460,7 @@ impl Store {
 
         // Main query with LIMIT/OFFSET appended
         let sql = format!(
-            "SELECT p.*, u.id as user_id, u.email as user_email, u.name as user_name, u.avatar_url as user_avatar \
+            "SELECT p.*, u.id as user_id, u.name as user_name, u.avatar_url as user_avatar \
              FROM posts p \
              {search_join}
              LEFT JOIN users u ON p.created_by = u.id \
@@ -537,7 +529,7 @@ impl Store {
         let total = count_q.fetch_one(&self.pool).await.context("Failed to count posts")?;
 
         let sql = format!(
-            "SELECT p.*, u.id as user_id, u.email as user_email, u.name as user_name, u.avatar_url as user_avatar, \
+            "SELECT p.*, u.id as user_id, u.name as user_name, u.avatar_url as user_avatar, \
              pr.slug as project_slug, pr.name as project_name \
              FROM posts p \
              LEFT JOIN users u ON p.created_by = u.id \
@@ -612,7 +604,7 @@ impl Store {
     /// Get a single post with detail.
     pub async fn get_post(&self, post_id: &str, user_id: Option<&str>) -> Result<Option<PostDetail>> {
         let row = sqlx::query(
-            "SELECT p.*, u.id as user_id, u.email as user_email, u.name as user_name, u.avatar_url as user_avatar \
+            "SELECT p.*, u.id as user_id, u.name as user_name, u.avatar_url as user_avatar \
              FROM posts p \
              LEFT JOIN users u ON p.created_by = u.id \
              WHERE p.id = ?",
@@ -778,7 +770,7 @@ impl Store {
     /// List comments for a post, ordered oldest-first for threading.
     pub async fn list_comments(&self, post_id: &str) -> Result<Vec<CommentDetail>> {
         let rows = sqlx::query(
-            "SELECT c.*, u.id as user_id, u.email as user_email, u.name as user_name, u.avatar_url as user_avatar \
+            "SELECT c.*, u.id as user_id, u.name as user_name, u.avatar_url as user_avatar \
              FROM comments c \
              LEFT JOIN users u ON c.created_by = u.id \
              WHERE c.post_id = ? \
@@ -839,14 +831,13 @@ impl Store {
         tx.commit().await.context("Failed to commit comment creation")?;
 
         // Fetch creator info for the response
-        let creator_row = sqlx::query("SELECT u.id, u.email, u.name, u.avatar_url FROM users u WHERE u.id = ?")
+        let creator_row = sqlx::query("SELECT u.id, u.name, u.avatar_url FROM users u WHERE u.id = ?")
             .bind(created_by)
             .fetch_one(&self.pool)
             .await?;
 
         let creator = UserSummary {
             id: creator_row.get("id"),
-            email: creator_row.get("email"),
             name: creator_row.get("name"),
             avatar_url: creator_row.get("avatar_url"),
         };
@@ -1280,6 +1271,129 @@ impl Store {
                 .await?;
 
         Ok(rows.iter().map(map_webhook_delivery).collect())
+    }
+
+    // ── Analytics events (#186) ─────────────────────────────────────────
+
+    /// Store-level accessors for the HTTP MCP transport (#189): the Axum
+    /// layer needs the pool/kind to rebuild a Store per JSON-RPC call, which
+    /// is exactly what `run_server` does for stdio.
+    pub fn is_sqlite(&self) -> bool {
+        self.is_sqlite
+    }
+
+    /// Pool handle for transports that rebuild per-request Stores (HTTP MCP).
+    pub fn pool_for_mcp(&self) -> sqlx::AnyPool {
+        self.pool.clone()
+    }
+
+    /// Record an analytics event. Privacy-first: no IP, cookie, or
+    /// fingerprint is ever stored — only aggregate counters.
+    pub async fn record_event(&self, project_id: &str, post_id: Option<&str>, event_type: &str) -> Result<()> {
+        sqlx::query("INSERT INTO analytics_events (id, project_id, post_id, event_type) VALUES (?, ?, ?, ?)")
+            .bind(super::new_id())
+            .bind(project_id)
+            .bind(post_id)
+            .bind(event_type)
+            .execute(&self.pool)
+            .await
+            .map(|_| ())
+            .map_err(Into::into)
+    }
+
+    /// Aggregate event counts per type for a project within the last `days`
+    /// days (0 = all time).
+    pub async fn analytics_totals(
+        &self,
+        project_id: &str,
+        days: u32,
+    ) -> Result<std::collections::HashMap<String, i64>> {
+        // Dialect note: `datetime('now', …)` is SQLite-only; PostgreSQL needs
+        // a cast interval (same branch pattern as FTS5 vs tsvector search).
+        let rows = if days == 0 {
+            sqlx::query(
+                "SELECT event_type, COUNT(*) as n FROM analytics_events WHERE project_id = ? GROUP BY event_type",
+            )
+            .bind(project_id)
+            .fetch_all(&self.pool)
+            .await?
+        } else if self.is_sqlite {
+            sqlx::query(
+                "SELECT event_type, COUNT(*) as n FROM analytics_events WHERE project_id = ? AND created_at >= datetime('now', ?) GROUP BY event_type",
+            )
+            .bind(project_id)
+            .bind(format!("-{} days", days))
+            .fetch_all(&self.pool)
+            .await?
+        } else {
+            sqlx::query(
+                "SELECT event_type, COUNT(*) as n FROM analytics_events WHERE project_id = ? AND created_at >= NOW() - (? || ' days')::interval GROUP BY event_type",
+            )
+            .bind(project_id)
+            .bind(days.to_string())
+            .fetch_all(&self.pool)
+            .await?
+        };
+        Ok(rows.iter().map(|row| (row.get::<String, _>("event_type"), row.get::<i64, _>("n"))).collect())
+    }
+
+    /// Daily event counts for the last `days` days, bucketed by UTC date.
+    /// Returns rows of (day, event_type, count).
+    pub async fn analytics_daily(&self, project_id: &str, days: u32) -> Result<Vec<(String, String, i64)>> {
+        let rows = if self.is_sqlite {
+            sqlx::query(
+                "SELECT date(created_at) as day, event_type, COUNT(*) as n FROM analytics_events WHERE project_id = ? AND created_at >= datetime('now', ?) GROUP BY day, event_type ORDER BY day",
+            )
+            .bind(project_id)
+            .bind(format!("-{} days", days))
+            .fetch_all(&self.pool)
+            .await?
+        } else {
+            sqlx::query(
+                "SELECT to_char(created_at, 'YYYY-MM-DD') as day, event_type, COUNT(*) as n FROM analytics_events WHERE project_id = ? AND created_at >= NOW() - (? || ' days')::interval GROUP BY day, event_type ORDER BY day",
+            )
+            .bind(project_id)
+            .bind(days.to_string())
+            .fetch_all(&self.pool)
+            .await?
+        };
+        Ok(rows
+            .iter()
+            .map(|row| (row.get::<String, _>("day"), row.get::<String, _>("event_type"), row.get::<i64, _>("n")))
+            .collect())
+    }
+
+    /// Top posts by view count within the last `days` days (0 = all time).
+    /// Returns (post_id, view_count) pairs, most-viewed first.
+    pub async fn analytics_top_posts(&self, project_id: &str, days: u32, limit: i64) -> Result<Vec<(String, i64)>> {
+        let rows = if days == 0 {
+            sqlx::query(
+                "SELECT post_id, COUNT(*) as n FROM analytics_events WHERE project_id = ? AND event_type = 'post_view' AND post_id IS NOT NULL GROUP BY post_id ORDER BY n DESC LIMIT ?",
+            )
+            .bind(project_id)
+            .bind(limit)
+            .fetch_all(&self.pool)
+            .await?
+        } else if self.is_sqlite {
+            sqlx::query(
+                "SELECT post_id, COUNT(*) as n FROM analytics_events WHERE project_id = ? AND event_type = 'post_view' AND post_id IS NOT NULL AND created_at >= datetime('now', ?) GROUP BY post_id ORDER BY n DESC LIMIT ?",
+            )
+            .bind(project_id)
+            .bind(format!("-{} days", days))
+            .bind(limit)
+            .fetch_all(&self.pool)
+            .await?
+        } else {
+            sqlx::query(
+                "SELECT post_id, COUNT(*) as n FROM analytics_events WHERE project_id = ? AND event_type = 'post_view' AND post_id IS NOT NULL AND created_at >= NOW() - (? || ' days')::interval GROUP BY post_id ORDER BY n DESC LIMIT ?",
+            )
+            .bind(project_id)
+            .bind(days.to_string())
+            .bind(limit)
+            .fetch_all(&self.pool)
+            .await?
+        };
+        Ok(rows.iter().map(|row| (row.get::<String, _>("post_id"), row.get::<i64, _>("n"))).collect())
     }
 }
 

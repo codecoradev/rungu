@@ -14,7 +14,51 @@ All configuration is done via environment variables.
 | `RUNGU_AUTH_RATE_LIMIT_PER_MIN` | `30` | Max `/auth/*` requests per minute per client IP. Stricter than the API limiter to blunt OAuth/login abuse. `0` disables it. |
 | `RUNGU_TRUST_PROXY` | `false` | Honor `X-Forwarded-For` when resolving rate-limit client IPs. Enable only behind a trusted reverse proxy that overwrites the header; otherwise clients can spoof it. When `false`, the socket address is used. |
 | `RUNGU_SECURE_COOKIE` | `true` | Set `false` for HTTP (no Secure flag on cookies). Accepts (case-insensitive): `true\|1\|yes\|on`, `false\|0\|no\|off`. Any other value exits with a fatal error — see [Security](#security). |
+| `RUNGU_API_KEY` | _(unset)_ | Machine access key for AI agents. When set, `Authorization: Bearer <key>` authenticates as the synthetic **ai-agent** admin user on all `/api` routes and `POST /mcp` (MCP over HTTP). Constant-time compared; unset = machine access disabled. |
 | `RUST_LOG` | `rungu=info` | Log level (trace, debug, info, warn, error). Supports `tracing_subscriber`'s [`EnvFilter`](https://docs.rs/tracing-subscriber/latest/tracing_subscriber/filter/struct.EnvFilter.html) syntax. |
+
+## White-label Branding
+
+Present Rungu under your own brand. See [issue #185](https://github.com/codecoradev/rungu/issues/185).
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `RUNGU_INSTANCE_NAME` | `Rungu` | Brand name shown in the header, page titles, login page, and embed board. |
+| `RUNGU_LOGO_URL` | _(unset)_ | Logo shown next to the brand name in the SPA header. |
+| `RUNGU_FOOTER_TEXT` | _(unset)_ | Footer line shown **only** when the Powered-by badge is removed by a license. |
+| `RUNGU_LICENSE_KEY` | _(unset)_ | Polar license key. A valid key removes the "Powered by Rungu" badge. |
+| `RUNGU_LICENSE_ORG_ID` | _(unset)_ | Polar organization id the license belongs to (required with `RUNGU_LICENSE_KEY`). |
+
+Branding is instance-level and ENV-driven — no restart-free admin UI by design. The
+"Powered by Rungu" badge (SPA footer + embed board) is the OSS growth loop and is **not**
+removable via env; only a valid license hides it. Licensing: **$49 per major version**
+(minor + patch free forever) or **$70 lifetime**. The gate is intentionally soft: an
+invalid or expired license only makes the badge reappear — the board itself is never
+throttled or locked.
+
+## AI Remote Access (API Key + MCP over HTTP)
+
+Let AI agents (Claude Code, Cursor, custom agents) control Rungu remotely with full admin power — no interactive OAuth needed.
+
+```bash
+# Server: set a strong key (generate with: openssl rand -hex 32)
+RUNGU_API_KEY=<your-key>
+```
+
+**REST** — any endpoint, including admin:
+```bash
+curl -H "Authorization: Bearer <key>" https://host/api/admin/analytics/myslug?days=30
+```
+
+**MCP over HTTP** — same 26 tools as local stdio:
+```json
+{ "mcpServers": { "rungu": {
+    "url": "https://host/mcp",
+    "headers": { "Authorization": "Bearer <key>" }
+} } }
+```
+
+Behavior: the key identifies the synthetic `ai-agent` user (auto-created as admin at startup — agent-created posts/comments have a valid author). A presented-but-wrong key is always 401 on privileged endpoints and never grants admin power; public reads treat it as anonymous. Rotation = change the env and restart. Unset = machine access fully disabled (previous behavior).
 
 ## Auth (Session)
 

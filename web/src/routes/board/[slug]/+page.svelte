@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { branding } from '$lib/branding.svelte';
     import { onMount } from 'svelte';
     import { goto } from '$app/navigation';
     import { api, ApiError } from '$lib/api/client';
@@ -12,6 +13,7 @@
     import { cn } from '$lib/utils';
     import { toastError } from '$lib/toast.svelte';
     import { LoaderCircle } from '@lucide/svelte';
+    import CircleAlert from '@lucide/svelte/icons/circle-alert';
 
     let { params } = $props();
     let slug = $derived(params.slug);
@@ -23,6 +25,9 @@
     // True while re-fetching with posts already on screen (filter/search refill).
     // Gates the dimming overlay so the first load still shows skeletons. #148
     let refetching = $state(false);
+    // Monotonic guard against stale loads (#173): every loadBoard() bumps the
+    // generation; only the latest generation may commit its response.
+    let loadGeneration = $state(0);
     let error = $state('');
 
     let sort = $state('newest');
@@ -69,8 +74,14 @@
         refetching = posts.length > 0;
         loading = posts.length === 0;
         error = '';
+
+        // Stale-response guard (#173): mutations and filter changes can fire
+        // loadBoard() concurrently. Capture the generation; a newer load
+        // invalidates this one, so an older response never overwrites it.
+        const generation = ++loadGeneration;
+
         try {
-            project = await api.getProject(slug);
+            const projectData = await api.getProject(slug);
             const result = await api.listPosts(slug, {
                 sort,
                 status: statusFilter || undefined,
@@ -78,14 +89,19 @@
                 q: searchQuery || undefined,
                 per_page: 50,
             });
+            if (generation !== loadGeneration) return; // a newer load superseded this one
+            project = projectData;
             posts = result.data;
             total = result.pagination.total;
             focusedPostIndex = -1;
         } catch (e) {
+            if (generation !== loadGeneration) return;
             error = e instanceof ApiError && e.status === 404 ? 'Project not found' : 'Failed to load board';
         } finally {
-            loading = false;
-            refetching = false;
+            if (generation === loadGeneration) {
+                loading = false;
+                refetching = false;
+            }
         }
     }
 
@@ -239,7 +255,7 @@
 </script>
 
 <svelte:head>
-    <title>{project?.name ?? 'Board'} — Rungu</title>
+    <title>{(project?.name ?? 'Board') + ' — ' + branding.value.brandName}</title>
 </svelte:head>
 
 {#if loading && !project}
@@ -249,10 +265,15 @@
         {/each}
     </div>
 {:else if error}
-    <div class="py-16 text-center">
-        <p class="text-lg text-muted-foreground">{error}</p>
-        <Button variant="link" href="/">← Back to boards</Button>
-    </div>
+    <Card.Root class="py-12 text-center">
+        <Card.Content class="flex flex-col items-center gap-3 pt-6">
+            <div class="flex size-10 items-center justify-center rounded-full bg-destructive/10">
+                <CircleAlert class="size-5 text-destructive" aria-hidden="true" />
+            </div>
+            <h1 class="text-lg font-semibold">{error}</h1>
+            <Button variant="outline" size="sm" href="/" class="mt-2">← Back to boards</Button>
+        </Card.Content>
+    </Card.Root>
 {:else if project}
     <div class="mb-6">
         <Button variant="link" size="sm" href="/" class="px-0 text-muted-foreground">← All boards</Button>
