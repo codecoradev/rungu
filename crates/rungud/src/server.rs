@@ -31,11 +31,34 @@ pub async fn serve(config: Config, pool: sqlx::AnyPool, is_sqlite: bool, listen:
         .build()
         .map_err(|e| anyhow::anyhow!("Failed to build HTTP client: {e}"))?;
 
+    // License validation for the white-label badge (#185). A network failure
+    // or missing org id simply keeps the badge visible; never fatal. A valid
+    // key hides the "Powered by Rungu" badge on all surfaces.
+    let license = std::sync::Arc::new(rungu_api::meta::LicenseStatus::new());
+    if let Some(key) = config.license_key.as_deref() {
+        match config.license_org_id.as_deref() {
+            None => tracing::warn!("RUNGU_LICENSE_KEY set but RUNGU_LICENSE_ORG_ID missing — badge stays visible"),
+            Some(org) => match rungu_api::meta::validate_license(&http_client, key, org).await {
+                Ok(info) => {
+                    if info.licensed {
+                        info!("License validated — Powered-by badge hidden");
+                    } else {
+                        tracing::warn!("License key not valid — Powered-by badge stays visible");
+                    }
+                    *license.0.write().await = Some(info);
+                }
+                Err(e) => tracing::warn!("License validation failed ({e}) — badge stays visible"),
+            },
+        }
+    }
+
     let state = AppState {
         store,
         config: config.auth.clone(),
         http_client,
         storage: std::sync::Arc::from(rungu_core::create_storage()?),
+        branding: config.branding.clone(),
+        license,
     };
 
     // CORS — secure by default.

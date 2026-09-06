@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { branding } from '$lib/branding.svelte';
     import { onMount } from 'svelte';
     import { goto } from '$app/navigation';
     import { page } from '$app/state';
@@ -28,7 +29,7 @@
 </script>
 
 <svelte:head>
-    <title>Login — Rungu</title>
+    <title>{'Login — ' + branding.value.brandName}</title>
 </svelte:head>
 
 <div class="mx-auto max-w-sm py-16">
@@ -45,7 +46,7 @@
     {:else}
         <Card.Root>
             <Card.Header class="text-center">
-                <Card.Title class="text-2xl">Sign in to Rungu</Card.Title>
+                <Card.Title class="text-2xl">Sign in to {branding.value.brandName}</Card.Title>
                 <Card.Description>Sign in to share your feedback</Card.Description>
             </Card.Header>
             <Card.Content>

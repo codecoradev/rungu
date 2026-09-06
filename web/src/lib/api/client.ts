@@ -21,6 +21,7 @@ import type {
     WebhookTestResult,
     ProjectStats,
 } from './types';
+import type { InstanceMeta } from '../branding.svelte';
 
 const BASE = '';
 
@@ -70,6 +71,9 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 export const api = {
     // Auth
     getProviders: () => request<{ providers: ProviderInfo[] }>('/auth/providers'),
+
+    // Instance branding (white-label, #185)
+    getMeta: () => request<InstanceMeta>('/api/meta'),
 
     getCurrentUser: () => request<DataResponse<CurrentUser>>('/auth/me').then((r) => r.data),
 

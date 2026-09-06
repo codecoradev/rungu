@@ -4,6 +4,7 @@
     import { page } from '$app/state';
     import { api } from '$lib/api/client';
     import type { CurrentUser } from '$lib/api/types';
+    import { branding } from '$lib/branding.svelte';
     import { Button } from '$lib/components/ui/button';
     import Keyboard from '@lucide/svelte/icons/keyboard';
     import ThemeToggle from '$lib/components/ThemeToggle.svelte';
@@ -17,6 +18,14 @@
     let helpOpen = $state(false);
 
     onMount(async () => {
+        // Instance branding (#185) — boot snapshot (from x-rungu-* headers via
+        // app.html) is already applied; /api/meta is the source of truth and
+        // carries the license-dependent poweredBy flag.
+        api.getMeta()
+            .then((meta) => branding.set({ ...meta }))
+            .catch(() => {
+                // Keep boot/default branding — non-critical.
+            });
         try {
             user = await api.getCurrentUser();
         } catch {
@@ -83,14 +92,22 @@
     }
 </script>
 
+<svelte:head>
+    <title>{branding.value.brandName} — Lightweight Feedback Board</title>
+</svelte:head>
+
 <svelte:window onkeydown={onKeydown} />
 
 <div class="flex min-h-screen flex-col">
     <nav class="border-b border-border bg-background">
         <div class="mx-auto flex max-w-5xl items-center justify-between px-4 py-3">
             <a href="/" class="flex items-center gap-2 font-bold">
-                <span class="text-xl">🛡️</span>
-                <span>Rungu</span>
+                {#if branding.value.logoUrl}
+                    <img src={branding.value.logoUrl} alt={branding.value.brandName} class="h-6 w-6 rounded object-contain" />
+                {:else}
+                    <span class="text-xl">🛡️</span>
+                {/if}
+                <span>{branding.value.brandName}</span>
             </a>
 
             <div class="flex items-center gap-2">
@@ -136,7 +153,16 @@
     </main>
 
     <footer class="border-t border-border py-4 text-center text-xs text-muted-foreground">
-        <p>Rungu · Lightweight Feedback Board · Apache-2.0</p>
+        {#if !branding.value.poweredBy && branding.value.footerText}
+            <!-- Licensed white-label: operator's own footer line. -->
+            <p>{branding.value.footerText}</p>
+        {:else}
+            <!-- OSS growth loop: the badge is the default on every instance. -->
+            <p>
+                Powered by
+                <a href="https://github.com/codecoradev/rungu" target="_blank" rel="noopener" class="underline hover:no-underline">Rungu</a>
+            </p>
+        {/if}
     </footer>
 </div>
 

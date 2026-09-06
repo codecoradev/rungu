@@ -4,6 +4,7 @@
 //! Falls back to index.html for client-side routing.
 
 use axum::{
+    extract::State,
     http::{StatusCode, header},
     response::{Html, IntoResponse, Response},
 };
@@ -15,7 +16,13 @@ use rust_embed::Embed;
 struct Assets;
 
 /// Serve SPA static files or fallback to index.html.
-pub async fn spa_handler(uri: axum::http::Uri) -> Response {
+///
+/// The index.html fallback gets `window.__RUNGU_META__` injected right after
+/// `<head>` so a white-labeled instance renders its own brand from the very
+/// first paint (the static shell is baked at build time with Rungu defaults).
+/// Values mirror `GET /api/meta`; `branding.svelte.ts` reads the global at
+/// module init, and a `DOMContentLoaded` patch covers the pre-hydration DOM.
+pub async fn spa_handler(State(state): State<rungu_api::AppState>, uri: axum::http::Uri) -> Response {
     let path = uri.path().trim_start_matches('/');
 
     // Try exact file match first
@@ -32,13 +39,44 @@ pub async fn spa_handler(uri: axum::http::Uri) -> Response {
 
     // Fallback to index.html for client-side routing
     match Assets::get("index.html") {
-        Some(file) => (
-            StatusCode::OK,
-            [(header::CACHE_CONTROL, "no-cache")],
-            Html(String::from_utf8_lossy(&file.data).to_string()),
-        )
-            .into_response(),
+        Some(file) => {
+            let powered_by = state.license.badge_visible(&state.branding).await;
+            let html = String::from_utf8_lossy(&file.data).to_string();
+            Html(inject_branding(&state.branding, powered_by, html)).into_response()
+        }
         None => StatusCode::NOT_FOUND.into_response(),
+    }
+}
+
+/// Inject the white-label boot script into the SPA shell.
+///
+/// The script (a) exposes `window.__RUNGU_META__` for the Svelte branding
+/// store, and (b) patches `<title>` + the header brand span so the
+/// pre-hydration markup never shows the baked-in "Rungu" defaults.
+fn inject_branding(branding: &rungu_api::meta::InstanceBranding, powered_by: bool, html: String) -> String {
+    let meta = serde_json::json!({
+        "brandName": branding.brand_name,
+        "logoUrl": branding.logo_url,
+        "footerText": branding.footer_text,
+        "poweredBy": powered_by,
+    });
+    // Plain concatenation (no format!) so the JS braces need no escaping.
+    let script = "<script>window.__RUNGU_META__=".to_string()
+        + &meta.to_string()
+        + ";(function(){function p(){var m=window.__RUNGU_META__;if(!m||!m.brandName)return;"
+        + "var b=m.brandName;"
+        + "document.title=document.title.replace(/(\\s[\\u2014\\u00b7]\\s)Rungu(\\s[\\u2014\\u00b7]\\s|$)/,'$1'+b+'$2').replace(/^Rungu(\\s[\\u2014\\u00b7]\\s)/,b+'$1');"
+        + "var el=document.getElementById('rungu-brand-boot');if(el)el.textContent=b;}"
+        + "if(document.readyState==='loading'){document.addEventListener('DOMContentLoaded',p);}else{p();}})();</script>";
+    match html.find("<head>") {
+        Some(i) => {
+            let mut out = String::with_capacity(html.len() + script.len());
+            out.push_str(&html[..i + 6]);
+            out.push_str(&script);
+            out.push_str(&html[i + 6..]);
+            out
+        }
+        None => html,
     }
 }
 

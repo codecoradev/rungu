@@ -7,6 +7,7 @@ pub mod attachment_routes;
 pub mod auth_routes;
 pub mod comment_routes;
 pub mod error;
+pub mod meta;
 pub mod oauth;
 pub mod openapi;
 pub mod post_routes;
@@ -32,6 +33,10 @@ pub struct AppState {
     pub http_client: reqwest::Client,
     /// Storage backend for file attachments.
     pub storage: std::sync::Arc<dyn rungu_core::Storage>,
+    /// Instance branding (white-label, #185) — resolved from env at startup.
+    pub branding: crate::meta::InstanceBranding,
+    /// License status for the white-label badge (soft gate via Polar).
+    pub license: std::sync::Arc<crate::meta::LicenseStatus>,
 }
 
 impl FromRef<AppState> for rungu_auth::AuthConfig {
@@ -56,4 +61,5 @@ pub fn api_routes() -> Router<AppState> {
         .merge(attachment_routes::router())
         .merge(webhook_routes::router())
         .merge(admin_routes::router())
+        .merge(crate::meta::meta_routes())
 }

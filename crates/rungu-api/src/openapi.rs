@@ -49,6 +49,8 @@ use utoipa::OpenApi;
         crate::webhook_routes::test_webhook,
         crate::admin_routes::list_all_posts,
         crate::admin_routes::project_stats,
+        // Meta (instance branding)
+        crate::meta::get_meta,
         // Auth
         crate::auth_routes::list_providers,
         crate::auth_routes::login,
@@ -90,6 +92,7 @@ use utoipa::OpenApi;
         (name = "comments", description = "Comment endpoints"),
         (name = "attachments", description = "Image attachment endpoints"),
         (name = "webhooks", description = "Webhook subscription and delivery endpoints"),
+        (name = "meta", description = "Public instance branding metadata"),
         (name = "auth", description = "Authentication endpoints (OAuth2)"),
     ),
 )]

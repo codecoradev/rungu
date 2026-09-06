@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { branding } from '$lib/branding.svelte';
     import { onMount } from 'svelte';
     import CircleAlert from '@lucide/svelte/icons/circle-alert';
     import { api, ApiError } from '$lib/api/client';
@@ -166,7 +167,7 @@
 </script>
 
 <svelte:head>
-    <title>{post?.title ?? 'Post'} — Rungu</title>
+    <title>{(post?.title ?? 'Post') + ' — ' + branding.value.brandName}</title>
 </svelte:head>
 
 {#if loading}
