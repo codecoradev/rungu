@@ -245,3 +245,50 @@ cargo test --workspace           # tests
 - Each subagent works in an isolated git worktree
 - Shared files that frequently conflict: `lib.rs` (module registration) + `server.rs` (route merge)
 - After merging one PR, rebase other branches before merging
+
+---
+
+## Analytics (privacy-first, #186)
+
+- Events land in `analytics_events` (migration 003). Capture via
+  `crate::analytics::capture(&state.store, &project_id, post_id, event_type)` —
+  fire-and-forget (detached task); NEVER let capture failures bubble to the handler.
+- Five event types: `board_view`, `post_view`, `vote`, `comment`, `post_created`.
+- Privacy invariant: NO IP, cookies, or fingerprint ever stored. Do not add
+  request-scoped identifiers to `analytics_events`.
+- Aggregates: `analytics_totals`, `analytics_daily`, `analytics_top_posts`
+  (dialect-branched: SQLite `datetime('now', …)` vs PostgreSQL
+  `NOW() - (? || ' days')::interval`).
+- Admin UI: Analytics tab in `/admin` (project selector + 7d/30d/All-time).
+
+## White-label branding + license (#185)
+
+- Branding: `InstanceBranding` in `rungu-api/src/meta.rs`, from
+  `RUNGU_INSTANCE_NAME` / `RUNGU_LOGO_URL` / `RUNGU_FOOTER_TEXT`.
+- Served via public `GET /api/meta` (camelCase: `#[serde(rename_all = "camelCase")]`)
+  and injected into the SPA shell as `window.__RUNGU_META__` by
+  `rungud/src/spa.rs` (`inject_branding`). The static SvelteKit shell CANNOT read
+  response headers at boot — server-side injection is the mechanism.
+- The "Powered by Rungu" badge is the OSS growth loop: hard-coded default, hidden
+  ONLY by a valid Polar license (`RUNGU_LICENSE_KEY` + `RUNGU_LICENSE_ORG_ID`,
+  constant-checked at startup; 5xx/429 = fail-open, keep last-known-good).
+- Adding a field to `AppState`? Update ALL test `AppState` literals
+  (`api_test.rs`, `analytics_test.rs`, `branding_test.rs`, `remote_access_test.rs`,
+  `webhook_embed_test.rs`) — CI Docker Build will catch a missed one.
+- `sqlx::Any` REJECTS `foreign_keys=on` as a URL parameter. Enforce per-connection
+  SQLite PRAGMAs via `PoolOptions::after_connect` in `rungu-core::open_pool`
+  (keep the in-memory `max_connections(1)` special case: each connection is a
+  separate empty DB).
+
+## Remote machine access (#189)
+
+- `RUNGU_API_KEY` (env) + `Authorization: Bearer <key>` = the synthetic
+  `ai-agent` admin (`agent@rungu.local`, bootstrapped in `serve()`; its resolved
+  DB id reaches extractors via `AppState.agent_user_id` → `AgentUserId`).
+- `POST /mcp` = MCP over HTTP (JSON-RPC in/out) — reuses
+  `rungu_mcp::handle_message`; auth via `rungu_auth::middleware::verify_api_key`.
+- Wrong key on privileged endpoints = always 401, never falls through to cookies.
+- MCP conventions: notifications (no `id`) emit no response; unknown methods are
+  -32601; new tools MUST return the `{data: ...}` envelope, keep
+  `parse_category_strict`-style input validation, and update README/docs tool
+  count (26 as of v0.4.0).
