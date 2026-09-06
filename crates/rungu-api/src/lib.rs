@@ -39,11 +39,21 @@ pub struct AppState {
     pub branding: crate::meta::InstanceBranding,
     /// License status for the white-label badge (soft gate via Polar).
     pub license: std::sync::Arc<crate::meta::LicenseStatus>,
+    /// DB id of the synthetic ai-agent admin (#189, resolved at startup).
+    /// Extractors forge the agent identity with this id so `created_by`
+    /// FKs point at a real user row.
+    pub agent_user_id: std::sync::Arc<Option<String>>,
 }
 
 impl FromRef<AppState> for rungu_auth::AuthConfig {
     fn from_ref(state: &AppState) -> Self {
         state.config.clone()
+    }
+}
+
+impl FromRef<AppState> for rungu_auth::middleware::AgentUserId {
+    fn from_ref(state: &AppState) -> Self {
+        rungu_auth::middleware::AgentUserId((*state.agent_user_id).clone())
     }
 }
 

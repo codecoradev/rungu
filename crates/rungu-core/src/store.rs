@@ -56,12 +56,8 @@ fn map_user(row: &AnyRow) -> User {
 /// Map a SQLite row to a PostDetail (with user join + vote status).
 fn map_post_detail(row: &AnyRow) -> PostDetail {
     let post = map_post(row);
-    let creator = UserSummary {
-        id: row.get("user_id"),
-        email: row.get("user_email"),
-        name: row.get("user_name"),
-        avatar_url: row.get("user_avatar"),
-    };
+    let creator =
+        UserSummary { id: row.get("user_id"), name: row.get("user_name"), avatar_url: row.get("user_avatar") };
     PostDetail { post, creator, user_voted: false }
 }
 
@@ -97,12 +93,8 @@ fn map_comment(row: &AnyRow) -> Comment {
 /// Map a SQLite row to a CommentDetail (with user join).
 fn map_comment_detail(row: &AnyRow) -> CommentDetail {
     let comment = map_comment(row);
-    let creator = UserSummary {
-        id: row.get("user_id"),
-        email: row.get("user_email"),
-        name: row.get("user_name"),
-        avatar_url: row.get("user_avatar"),
-    };
+    let creator =
+        UserSummary { id: row.get("user_id"), name: row.get("user_name"), avatar_url: row.get("user_avatar") };
     CommentDetail { comment, creator }
 }
 
@@ -468,7 +460,7 @@ impl Store {
 
         // Main query with LIMIT/OFFSET appended
         let sql = format!(
-            "SELECT p.*, u.id as user_id, u.email as user_email, u.name as user_name, u.avatar_url as user_avatar \
+            "SELECT p.*, u.id as user_id, u.name as user_name, u.avatar_url as user_avatar \
              FROM posts p \
              {search_join}
              LEFT JOIN users u ON p.created_by = u.id \
@@ -537,7 +529,7 @@ impl Store {
         let total = count_q.fetch_one(&self.pool).await.context("Failed to count posts")?;
 
         let sql = format!(
-            "SELECT p.*, u.id as user_id, u.email as user_email, u.name as user_name, u.avatar_url as user_avatar, \
+            "SELECT p.*, u.id as user_id, u.name as user_name, u.avatar_url as user_avatar, \
              pr.slug as project_slug, pr.name as project_name \
              FROM posts p \
              LEFT JOIN users u ON p.created_by = u.id \
@@ -612,7 +604,7 @@ impl Store {
     /// Get a single post with detail.
     pub async fn get_post(&self, post_id: &str, user_id: Option<&str>) -> Result<Option<PostDetail>> {
         let row = sqlx::query(
-            "SELECT p.*, u.id as user_id, u.email as user_email, u.name as user_name, u.avatar_url as user_avatar \
+            "SELECT p.*, u.id as user_id, u.name as user_name, u.avatar_url as user_avatar \
              FROM posts p \
              LEFT JOIN users u ON p.created_by = u.id \
              WHERE p.id = ?",
@@ -778,7 +770,7 @@ impl Store {
     /// List comments for a post, ordered oldest-first for threading.
     pub async fn list_comments(&self, post_id: &str) -> Result<Vec<CommentDetail>> {
         let rows = sqlx::query(
-            "SELECT c.*, u.id as user_id, u.email as user_email, u.name as user_name, u.avatar_url as user_avatar \
+            "SELECT c.*, u.id as user_id, u.name as user_name, u.avatar_url as user_avatar \
              FROM comments c \
              LEFT JOIN users u ON c.created_by = u.id \
              WHERE c.post_id = ? \
@@ -839,14 +831,13 @@ impl Store {
         tx.commit().await.context("Failed to commit comment creation")?;
 
         // Fetch creator info for the response
-        let creator_row = sqlx::query("SELECT u.id, u.email, u.name, u.avatar_url FROM users u WHERE u.id = ?")
+        let creator_row = sqlx::query("SELECT u.id, u.name, u.avatar_url FROM users u WHERE u.id = ?")
             .bind(created_by)
             .fetch_one(&self.pool)
             .await?;
 
         let creator = UserSummary {
             id: creator_row.get("id"),
-            email: creator_row.get("email"),
             name: creator_row.get("name"),
             avatar_url: creator_row.get("avatar_url"),
         };
