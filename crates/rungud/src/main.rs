@@ -111,6 +111,23 @@ async fn async_main(cli: Cli) -> Result<()> {
     let config = config::Config::from_env();
     info!("Auth providers: {} active", config.auth.active_providers().len());
 
+    // Machine access bootstrap (#189): ensure the synthetic ai-agent admin
+    // exists when RUNGU_API_KEY is set, so agent-created rows have a valid
+    // `created_by` FK. Passing its own email in admin_emails auto-creates
+    // (or promotes) it as admin. Idempotent across restarts.
+    if config.auth.api_key.is_some() {
+        let bootstrap = rungu_core::Store::new_with_kind(pool.clone(), is_sqlite);
+        let agent = bootstrap
+            .find_or_create_user(
+                rungu_auth::middleware::AGENT_USER_EMAIL,
+                Some(rungu_auth::middleware::AGENT_USER_NAME),
+                None,
+                &[rungu_auth::middleware::AGENT_USER_EMAIL.to_string()],
+            )
+            .await?;
+        info!("Machine access enabled: API key active as {} ({})", agent.email, agent.id);
+    }
+
     match cli.command {
         Some(Commands::Serve { listen }) => {
             server::serve(config, pool, is_sqlite, &listen).await?;

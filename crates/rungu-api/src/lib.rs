@@ -8,6 +8,7 @@ pub mod attachment_routes;
 pub mod auth_routes;
 pub mod comment_routes;
 pub mod error;
+pub mod mcp_http;
 pub mod meta;
 pub mod oauth;
 pub mod openapi;
