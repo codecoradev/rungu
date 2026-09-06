@@ -39,6 +39,7 @@ async fn setup_app() -> (axum::Router, Store) {
         ),
         branding: rungu_api::meta::InstanceBranding::default(),
         license: std::sync::Arc::new(rungu_api::meta::LicenseStatus::new()),
+        agent_user_id: std::sync::Arc::new(None),
     };
     let app = axum::Router::new().merge(api_routes().with_state(state));
     (app, store)

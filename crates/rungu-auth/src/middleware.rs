@@ -69,13 +69,24 @@ fn api_key_matches(config: &AuthConfig, presented: &str) -> bool {
 }
 
 /// The synthetic identity behind a valid API key: full admin.
-fn agent_identity() -> CurrentUserData {
+///
+/// `agent_user_id` is the DB id resolved at startup (bootstrap). When it is
+/// unavailable (tests, keyless configs constructing identities directly) the
+/// email doubles as the id — those rows never hit FKs.
+fn agent_identity(agent_user_id: Option<&str>) -> CurrentUserData {
     CurrentUserData {
-        id: AGENT_USER_EMAIL.to_string(),
+        id: agent_user_id.unwrap_or(AGENT_USER_EMAIL).to_string(),
         email: AGENT_USER_EMAIL.to_string(),
         role: rungu_proto::UserRole::Admin,
     }
 }
+
+/// Resolved DB id of the ai-agent user, `FromRef`-extractable.
+///
+/// Implement `FromRef<S>` for this in the host crate (rungu-api reads it from
+/// `AppState.agent_user_id`). `None` = machine access not bootstrapped.
+#[derive(Debug, Clone, Default)]
+pub struct AgentUserId(pub Option<String>);
 
 /// Extract a Bearer token from the `Authorization` header, if any.
 fn extract_bearer(parts: &Parts) -> Option<String> {
@@ -102,17 +113,19 @@ impl<S> FromRequestParts<S> for CurrentUser
 where
     S: Send + Sync,
     AuthConfig: FromRef<S>,
+    AgentUserId: FromRef<S>,
 {
     type Rejection = axum::http::StatusCode;
 
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
         let config = AuthConfig::from_ref(state);
+        let agent_id = AgentUserId::from_ref(state);
 
         // Machine access (#189). A presented-but-wrong key is an immediate
         // 401 — never fall through to cookie auth (prevents confusion attacks).
         if let Some(bearer) = extract_bearer(parts) {
             if api_key_matches(&config, &bearer) {
-                return Ok(CurrentUser(agent_identity()));
+                return Ok(CurrentUser(agent_identity(agent_id.0.as_deref())));
             }
             warn!("Rejected request with invalid API key");
             return Err(axum::http::StatusCode::UNAUTHORIZED);
@@ -143,15 +156,17 @@ impl<S> FromRequestParts<S> for OptionalCurrentUser
 where
     S: Send + Sync,
     AuthConfig: FromRef<S>,
+    AgentUserId: FromRef<S>,
 {
     type Rejection = std::convert::Infallible;
 
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
         let config = AuthConfig::from_ref(state);
+        let agent_id = AgentUserId::from_ref(state);
 
         if let Some(bearer) = extract_bearer(parts) {
             if api_key_matches(&config, &bearer) {
-                return Ok(Self { user: Some(agent_identity()) });
+                return Ok(Self { user: Some(agent_identity(agent_id.0.as_deref())) });
             }
             warn!("Rejected optional-auth request with invalid API key");
             return Ok(Self { user: None });
@@ -199,6 +214,12 @@ mod tests {
     impl FromRef<TestState> for AuthConfig {
         fn from_ref(state: &TestState) -> Self {
             state.auth.clone()
+        }
+    }
+
+    impl FromRef<TestState> for AgentUserId {
+        fn from_ref(_state: &TestState) -> Self {
+            AgentUserId(None)
         }
     }
 

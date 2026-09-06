@@ -40,6 +40,7 @@ async fn setup_app() -> (axum::Router, Store) {
         ),
         branding: rungu_api::meta::InstanceBranding::default(),
         license: std::sync::Arc::new(rungu_api::meta::LicenseStatus::new()),
+        agent_user_id: std::sync::Arc::new(None),
     };
     // Tests use bare paths (e.g. "/projects") — match the production router structure:
     // API routes under /api, auth routes at root.

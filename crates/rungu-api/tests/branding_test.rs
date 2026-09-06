@@ -39,6 +39,7 @@ async fn setup_branded_app(branding: InstanceBranding, license: LicenseStatus) -
         ),
         branding,
         license: std::sync::Arc::new(license),
+        agent_user_id: std::sync::Arc::new(None),
     };
     axum::Router::new().merge(api_routes().with_state(state))
 }

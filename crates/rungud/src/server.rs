@@ -22,6 +22,25 @@ use crate::spa::spa_handler;
 
 /// Build the Axum router and start serving.
 pub async fn serve(config: Config, pool: sqlx::AnyPool, is_sqlite: bool, listen: &str) -> anyhow::Result<()> {
+    // Machine access bootstrap (#189): resolve the synthetic ai-agent admin
+    // when RUNGU_API_KEY is set. Its DB id feeds the auth extractors so
+    // agent-created rows carry a valid created_by FK.
+    let agent_user_id: std::sync::Arc<Option<String>> = if config.auth.api_key.is_some() {
+        let store = rungu_core::Store::new_with_kind(pool.clone(), is_sqlite);
+        let agent = store
+            .find_or_create_user(
+                rungu_auth::middleware::AGENT_USER_EMAIL,
+                Some(rungu_auth::middleware::AGENT_USER_NAME),
+                None,
+                &[rungu_auth::middleware::AGENT_USER_EMAIL.to_string()],
+            )
+            .await?;
+        info!("Machine access enabled: API key active as {} ({})", agent.email, agent.id);
+        std::sync::Arc::new(Some(agent.id))
+    } else {
+        std::sync::Arc::new(None)
+    };
+
     let store = rungu_core::Store::new_with_kind(pool, is_sqlite);
 
     // Single shared HTTP client for outbound calls (OAuth token exchange, userinfo).
@@ -59,6 +78,7 @@ pub async fn serve(config: Config, pool: sqlx::AnyPool, is_sqlite: bool, listen:
         storage: std::sync::Arc::from(rungu_core::create_storage()?),
         branding: config.branding.clone(),
         license,
+        agent_user_id,
     };
 
     // CORS — secure by default.
