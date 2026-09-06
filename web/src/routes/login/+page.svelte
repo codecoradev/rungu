@@ -15,8 +15,15 @@
     // the user back there after successful auth. Client-side path must be
     // validated the same way — only same-origin absolute paths allowed.
     const rawRedirect = page.url.searchParams.get('redirect') || '/';
+    // Reject: not starting with '/', protocol-relative '//', a leading '\\'
+    // (browsers normalize '/\\evil.com' to scheme-relative), and control chars.
     const redirectTo =
-        rawRedirect.startsWith('/') && !rawRedirect.startsWith('//') ? rawRedirect : '/';
+        rawRedirect.startsWith('/') &&
+        !rawRedirect.startsWith('//') &&
+        !rawRedirect.startsWith('/\\') &&
+        !/[\u0000-\u001f]/.test(rawRedirect)
+            ? rawRedirect
+            : '/';
 
     onMount(async () => {
         try {

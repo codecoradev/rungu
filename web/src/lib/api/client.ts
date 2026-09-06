@@ -39,13 +39,17 @@ class ApiError extends Error {
 }
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
+    // Merge deliberately: spreading `...options` last would clobber the
+    // merged headers with the caller's raw object (losing the default
+    // Content-Type) and could override `credentials`.
+    const { headers: extraHeaders, ...rest } = options ?? {};
     const res = await fetch(`${BASE}${path}`, {
         credentials: 'include',
+        ...rest,
         headers: {
             'Content-Type': 'application/json',
-            ...options?.headers,
+            ...extraHeaders,
         },
-        ...options,
     });
 
     if (!res.ok) {

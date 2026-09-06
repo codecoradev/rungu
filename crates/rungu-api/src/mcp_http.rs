@@ -44,6 +44,15 @@ pub async fn mcp_http(
         return (StatusCode::UNAUTHORIZED, Json(serde_json::json!({ "error": "Invalid API key" }))).into_response();
     }
 
+    // Size gate BEFORE any parse work — reject oversized bodies first.
+    if body.len() > 1_048_576 {
+        return (
+            StatusCode::PAYLOAD_TOO_LARGE,
+            Json(serde_json::json!({ "jsonrpc": "2.0", "error": { "code": -32600, "message": "Request too large (max 1MB)" }, "id": null })),
+        )
+            .into_response();
+    }
+
     let Ok(input) = std::str::from_utf8(&body) else {
         return (
             StatusCode::BAD_REQUEST,
@@ -51,14 +60,6 @@ pub async fn mcp_http(
         )
             .into_response();
     };
-
-    if input.len() > 1_048_576 {
-        return (
-            StatusCode::PAYLOAD_TOO_LARGE,
-            Json(serde_json::json!({ "jsonrpc": "2.0", "error": { "code": -32600, "message": "Request too large (max 1MB)" }, "id": null })),
-        )
-            .into_response();
-    }
 
     let response = handle_message(input, &state.store.pool_for_mcp(), state.store.is_sqlite()).await;
     (StatusCode::OK, [(axum::http::header::CONTENT_TYPE, "application/json")], response).into_response()

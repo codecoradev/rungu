@@ -60,9 +60,13 @@ fn inject_branding(branding: &rungu_api::meta::InstanceBranding, powered_by: boo
         "footerText": branding.footer_text,
         "poweredBy": powered_by,
     });
+    // `</script>` in a brand value would close the boot <script> early (XSS).
+    // serde_json does not escape "/", so do it ourselves: every "/" becomes
+    // "\u002F" — valid inside a JSON string, inert inside a <script> block.
+    let meta_json = meta.to_string().replace('/', "\\u002F");
     // Plain concatenation (no format!) so the JS braces need no escaping.
     let script = "<script>window.__RUNGU_META__=".to_string()
-        + &meta.to_string()
+        + &meta_json
         + ";(function(){function p(){var m=window.__RUNGU_META__;if(!m||!m.brandName)return;"
         + "var b=m.brandName;"
         + "document.title=document.title.replace(/(\\s[\\u2014\\u00b7]\\s)Rungu(\\s[\\u2014\\u00b7]\\s|$)/,'$1'+b+'$2').replace(/^Rungu(\\s[\\u2014\\u00b7]\\s)/,b+'$1');"

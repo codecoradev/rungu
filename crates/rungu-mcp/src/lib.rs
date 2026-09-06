@@ -58,14 +58,27 @@ pub async fn handle_message(input: &str, pool: &AnyPool, is_sqlite: bool) -> Str
     };
 
     let id = msg.get("id").cloned();
-    let method = msg.get("method").and_then(|m| m.as_str()).unwrap_or("");
+    let method = msg.get("method").and_then(|m| m.as_str()).unwrap_or("").to_string();
     let params = msg.get("params").cloned().unwrap_or(json!({}));
 
+    // JSON-RPC notifications (no "id") get NO response — replying corrupts
+    // protocol-conformant client streams. Side effects still run.
+    if id.is_none() {
+        let store = Store::new_with_kind(pool.clone(), is_sqlite);
+        let _ = handle_request(&method, &params, &store).await;
+        return String::new();
+    }
+
     let store = Store::new_with_kind(pool.clone(), is_sqlite);
-    let result = handle_request(method, &params, &store).await;
+    let result = handle_request(&method, &params, &store).await;
 
     match result {
         Ok(val) => json!({ "jsonrpc": "2.0", "result": val, "id": id }).to_string(),
+        // Unknown tool/method is -32601 (Method not found); -32603 stays for
+        // handler-internal failures.
+        Err(msg) if msg.starts_with("Unknown") => {
+            json!({ "jsonrpc": "2.0", "error": {"code": -32601, "message": msg}, "id": id }).to_string()
+        }
         Err(msg) => json!({ "jsonrpc": "2.0", "error": {"code": -32603, "message": msg}, "id": id }).to_string(),
     }
 }
@@ -134,6 +147,18 @@ fn parse_category(s: &str) -> PostCategory {
         "feature" => PostCategory::Feature,
         "question" => PostCategory::Question,
         _ => PostCategory::Feedback,
+    }
+}
+
+/// Strict variant for update paths: an unknown category is a client error,
+/// not something to silently coerce to "feedback" (#190 scan).
+fn parse_category_strict(s: &str) -> Option<PostCategory> {
+    match s {
+        "bug" => Some(PostCategory::Bug),
+        "feature" => Some(PostCategory::Feature),
+        "question" => Some(PostCategory::Question),
+        "feedback" => Some(PostCategory::Feedback),
+        _ => None,
     }
 }
 
@@ -628,7 +653,7 @@ async fn delete_post(params: &Value, store: &Store) -> Result<Value, String> {
 async fn update_post_category(params: &Value, store: &Store) -> Result<Value, String> {
     let id = get_str(params, "id")?;
     let category_str = get_str(params, "category")?;
-    let category = parse_category(category_str);
+    let category = parse_category_strict(category_str).ok_or_else(|| format!("Unknown category: {category_str}"))?;
 
     store.update_post_category(id, category).await.map_err(|e| format!("Failed to update post category: {e}"))?;
 
@@ -737,7 +762,8 @@ mod tests {
         let input = r#"{"jsonrpc":"2.0","method":"nonexistent","id":1}"#;
         let response = handle_message(input, &pool, true).await;
         let parsed: Value = serde_json::from_str(&response).unwrap();
-        assert_eq!(parsed["error"]["code"], -32603);
+        // Unknown methods are -32601 (Method not found) per JSON-RPC 2.0 (#190 scan).
+        assert_eq!(parsed["error"]["code"], -32601);
         assert!(parsed["error"]["message"].as_str().unwrap().contains("Unknown method"));
     }
 

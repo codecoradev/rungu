@@ -20,34 +20,54 @@ pub use store::Store;
 /// - `postgres://user:pass@host/db` → PostgreSQL
 pub async fn open_pool(database_url: &str) -> Result<AnyPool> {
     sqlx::any::install_default_drivers();
+    let is_sqlite = database_url.starts_with("sqlite:");
 
-    if database_url.starts_with("sqlite:") && database_url.contains(":memory:") {
-        // In-memory: single connection (each connection gets its own DB)
-        let pool = sqlx::pool::PoolOptions::<sqlx::Any>::new().max_connections(1).connect(database_url).await?;
-        Ok(pool)
-    } else {
-        // SQLite file or PostgreSQL — connect via AnyPool
-        // For SQLite files, ensure mode=rwc (read-write-create) is in the URL
-        let url = if database_url.starts_with("sqlite:")
-            && !database_url.contains(":memory:")
-            && !database_url.contains("?mode=")
-        {
-            if database_url.contains("?") {
-                format!("{database_url}&mode=rwc")
-            } else {
-                format!("{database_url}?mode=rwc")
-            }
-        } else {
-            database_url.to_string()
-        };
-        let pool = AnyPool::connect(&url).await?;
-        // Enable WAL mode for SQLite file databases
-        if database_url.starts_with("sqlite:") {
-            let _ = sqlx::query("PRAGMA journal_mode=WAL").execute(&pool).await;
-            let _ = sqlx::query("PRAGMA synchronous=NORMAL").execute(&pool).await;
-        }
-        Ok(pool)
+    // In-memory SQLite: every connection is a SEPARATE empty database, so
+    // the pool MUST stay at one connection or migrations/tables vanish.
+    if is_sqlite && database_url.contains(":memory:") {
+        let pool = sqlx::pool::PoolOptions::<sqlx::Any>::new()
+            .max_connections(1)
+            .after_connect(|conn, _meta| {
+                Box::pin(async move {
+                    let _ = sqlx::query("PRAGMA foreign_keys=ON").execute(&mut *conn).await;
+                    Ok(())
+                })
+            })
+            .connect(database_url)
+            .await?;
+        return Ok(pool);
     }
+
+    // SQLite file databases: ensure mode=rwc (read-write-create) in the URL.
+    let database_url = if is_sqlite && !database_url.contains("mode=") {
+        if database_url.contains('?') { format!("{database_url}&mode=rwc") } else { format!("{database_url}?mode=rwc") }
+    } else {
+        database_url.to_string()
+    };
+
+    // `PRAGMA foreign_keys` is per-connection in SQLite: a startup PRAGMA
+    // covers only the one connection it ran on, leaving every other pooled
+    // connection with FK constraints silently disabled (#190 scan). sqlx
+    // does NOT accept `foreign_keys` as a URL parameter (AnyPool URL parse
+    // error), so the correct mechanism is PoolOptions::after_connect —
+    // the closure runs for EVERY connection the pool opens.
+    let pool = sqlx::pool::PoolOptions::<sqlx::Any>::new()
+        .after_connect(move |conn, _meta| {
+            Box::pin(async move {
+                if is_sqlite {
+                    // journal_mode/synchronous are also per-connection for
+                    // Any; harmless to re-assert per connection.
+                    let _ = sqlx::query("PRAGMA journal_mode=WAL").execute(&mut *conn).await;
+                    let _ = sqlx::query("PRAGMA synchronous=NORMAL").execute(&mut *conn).await;
+                    let _ = sqlx::query("PRAGMA foreign_keys=ON").execute(&mut *conn).await;
+                }
+                Ok(())
+            })
+        })
+        .connect(&database_url)
+        .await?;
+
+    Ok(pool)
 }
 
 /// Run all database migrations.
