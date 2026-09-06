@@ -130,20 +130,35 @@ struct PolarLicenseKey {
 pub async fn validate_license(http: &reqwest::Client, key: &str, org_id: &str) -> Result<LicenseInfo, String> {
     let resp = http
         .post(POLAR_LICENSE_VALIDATE_URL)
+        .timeout(std::time::Duration::from_secs(10))
         .json(&serde_json::json!({ "key": key, "organization_id": org_id }))
         .send()
         .await
         .map_err(|e| format!("license API unreachable: {e}"))?;
 
-    if !resp.status().is_success() {
+    let status = resp.status();
+    if status.is_server_error() || status.as_u16() == 429 {
+        // 5xx/429 = Polar-side trouble, NOT a license verdict. Surface as a
+        // transport error so the caller keeps last-known-good (fail-open)
+        // instead of flipping a licensed instance to unlicensed (#190 scan).
+        return Err(format!("license API unavailable (HTTP {status})"));
+    }
+    if !status.is_success() {
         // 404/402/etc → key not found, revoked, or blocked. Not a network
         // failure — record definitively as unlicensed.
         return Ok(LicenseInfo { licensed: false, checked_at: chrono::Utc::now().timestamp(), expires_at: None });
     }
 
     let body: PolarLicenseKey = resp.json().await.map_err(|e| format!("license API bad response: {e}"))?;
-    let expires_at =
-        body.expires_at.and_then(|s| chrono::DateTime::parse_from_rfc3339(&s).ok()).map(|dt| dt.timestamp());
+    // An unparseable expiry is a response-integrity problem — do not
+    // silently grant lifetime-tier semantics (#190 scan).
+    let expires_at = match body.expires_at.as_deref() {
+        None | Some("") => None,
+        Some(s) => match chrono::DateTime::parse_from_rfc3339(s) {
+            Ok(dt) => Some(dt.timestamp()),
+            Err(e) => return Err(format!("license API bad expires_at: {e}")),
+        },
+    };
 
     Ok(LicenseInfo {
         licensed: body.status == "granted"

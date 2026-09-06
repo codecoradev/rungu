@@ -63,7 +63,11 @@ async fn embed_html(State(state): State<rungu_api::AppState>, Path(slug): Path<S
     // license (soft gate) — see `rungu_api::meta`.
     let powered_by = state.license.badge_visible(&state.branding).await;
     // serde_json string escaping doubles as safe JS string-literal quoting.
-    let brand_json = serde_json::to_string(&state.branding.brand_name).unwrap_or_else(|_| "\"Rungu\"".to_string());
+    // Escape "/" to \u002F as well: `</script>` inside a brand name would
+    // otherwise break out of the inline <script> block (XSS).
+    let brand_json = serde_json::to_string(&state.branding.brand_name)
+        .unwrap_or_else(|_| "\"Rungu\"".to_string())
+        .replace('/', "\\u002F");
     let html = EMBED_HTML_TEMPLATE
         .replace("__SLUG__", &slug_escaped)
         .replace("__POWERED_BY__", if powered_by { "true" } else { "false" })

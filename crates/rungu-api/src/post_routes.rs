@@ -67,7 +67,7 @@ pub async fn list_posts(
     // Analytics: board view (#186) — fire-and-forget, aggregate only.
     crate::analytics::capture(&state.store, &project.id, None, "board_view");
 
-    let page = query.page.unwrap_or(1).max(1);
+    let page = query.page.unwrap_or(1).clamp(1, 10_000_000);
     let per_page = query.per_page.unwrap_or(20).clamp(1, 100);
     let offset = (page - 1) * per_page;
 
@@ -142,7 +142,12 @@ pub async fn create_post(
         return Err(ApiError::bad_request("Title must be 200 characters or less"));
     }
 
-    let category = body.category.as_deref().and_then(parse_category).unwrap_or_default();
+    // Explicit but invalid category → 400 (consistent with the list filter).
+    // Absent category → default. Silent coercion hides client typos.
+    let category = match body.category.as_deref() {
+        None | Some("") => parse_category("feedback").unwrap_or_default(),
+        Some(s) => parse_category(s).ok_or_else(|| ApiError::bad_request("Invalid category"))?,
+    };
 
     let post = state
         .store
@@ -434,7 +439,7 @@ pub async fn get_project_changelog(
     let project =
         state.store.get_project_by_slug(&slug).await?.ok_or_else(|| ApiError::not_found("Project not found"))?;
 
-    let page = query.page.unwrap_or(1).max(1);
+    let page = query.page.unwrap_or(1).clamp(1, 10_000_000);
     let per_page = query.per_page.unwrap_or(20).clamp(1, 100);
     let offset = (page - 1) * per_page;
 

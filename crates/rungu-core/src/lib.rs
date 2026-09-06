@@ -32,16 +32,31 @@ pub async fn open_pool(database_url: &str) -> Result<AnyPool> {
             && !database_url.contains(":memory:")
             && !database_url.contains("?mode=")
         {
+            // `foreign_keys` is per-connection in SQLite: the URL parameter
+            // makes sqlx apply it to EVERY pooled connection (a startup
+            // `PRAGMA` would only cover one).
             if database_url.contains("?") {
-                format!("{database_url}&mode=rwc")
+                format!("{database_url}&mode=rwc&foreign_keys=on")
             } else {
-                format!("{database_url}?mode=rwc")
+                format!("{database_url}?mode=rwc&foreign_keys=on")
+            }
+        } else if database_url.starts_with("sqlite:") && !database_url.contains("foreign_keys=") {
+            if database_url.contains("?") {
+                format!("{database_url}&foreign_keys=on")
+            } else {
+                format!("{database_url}?foreign_keys=on")
             }
         } else {
             database_url.to_string()
         };
         let pool = AnyPool::connect(&url).await?;
-        // Enable WAL mode for SQLite file databases
+        // Enable WAL mode for SQLite file databases.
+        //
+        // PRAGMAs execute on ONE pooled connection; `journal_mode` is
+        // database-persistent so this is enough for WAL, but `foreign_keys`
+        // is per-connection — so it must also be set via the connect-time
+        // URL parameter below, or FK constraints silently never enforce on
+        // every other pooled connection (#190 scan finding).
         if database_url.starts_with("sqlite:") {
             let _ = sqlx::query("PRAGMA journal_mode=WAL").execute(&pool).await;
             let _ = sqlx::query("PRAGMA synchronous=NORMAL").execute(&pool).await;

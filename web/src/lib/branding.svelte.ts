@@ -58,8 +58,22 @@ export const branding = {
     get value(): InstanceMeta {
         return current;
     },
-    /** Replace the snapshot (called after `GET /api/meta` resolves). */
+    /**
+     * Replace the snapshot (called after `GET /api/meta` resolves).
+     * Sanitized: nonsense types / empty brand fall back to the current
+     * value so a broken meta response can't corrupt store invariants.
+     */
     set(meta: Partial<InstanceMeta>) {
-        current = { ...current, ...meta };
+        const next: Partial<InstanceMeta> = { ...meta };
+        if (next.brandName !== undefined && (typeof next.brandName !== 'string' || next.brandName.trim() === '')) {
+            delete next.brandName;
+        }
+        if (next.footerText !== undefined && typeof next.footerText !== 'string') {
+            delete next.footerText;
+        }
+        if (next.poweredBy !== undefined && typeof next.poweredBy !== 'boolean') {
+            delete next.poweredBy;
+        }
+        current = { ...current, ...next };
     },
 };
