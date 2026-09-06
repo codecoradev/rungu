@@ -25,6 +25,9 @@
     // True while re-fetching with posts already on screen (filter/search refill).
     // Gates the dimming overlay so the first load still shows skeletons. #148
     let refetching = $state(false);
+    // Monotonic guard against stale loads (#173): every loadBoard() bumps the
+    // generation; only the latest generation may commit its response.
+    let loadGeneration = $state(0);
     let error = $state('');
 
     let sort = $state('newest');
@@ -71,8 +74,14 @@
         refetching = posts.length > 0;
         loading = posts.length === 0;
         error = '';
+
+        // Stale-response guard (#173): mutations and filter changes can fire
+        // loadBoard() concurrently. Capture the generation; a newer load
+        // invalidates this one, so an older response never overwrites it.
+        const generation = ++loadGeneration;
+
         try {
-            project = await api.getProject(slug);
+            const projectData = await api.getProject(slug);
             const result = await api.listPosts(slug, {
                 sort,
                 status: statusFilter || undefined,
@@ -80,14 +89,19 @@
                 q: searchQuery || undefined,
                 per_page: 50,
             });
+            if (generation !== loadGeneration) return; // a newer load superseded this one
+            project = projectData;
             posts = result.data;
             total = result.pagination.total;
             focusedPostIndex = -1;
         } catch (e) {
+            if (generation !== loadGeneration) return;
             error = e instanceof ApiError && e.status === 404 ? 'Project not found' : 'Failed to load board';
         } finally {
-            loading = false;
-            refetching = false;
+            if (generation === loadGeneration) {
+                loading = false;
+                refetching = false;
+            }
         }
     }
 
