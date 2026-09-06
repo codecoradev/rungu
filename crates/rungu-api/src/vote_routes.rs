@@ -37,9 +37,12 @@ pub async fn toggle_vote(
     Path(id): Path<String>,
     CurrentUser(user): CurrentUser,
 ) -> Result<impl IntoResponse, ApiError> {
-    let _ = state.store.get_post(&id, None).await?.ok_or_else(|| ApiError::not_found("Post not found"))?;
+    let post = state.store.get_post(&id, None).await?.ok_or_else(|| ApiError::not_found("Post not found"))?;
 
     let voted = state.store.toggle_vote(&user.id, &id).await?;
+
+    // Analytics: vote cast or retracted (#186) — still a high-intent signal.
+    crate::analytics::capture(&state.store, &post.post.project_id, Some(&post.post.id), "vote");
 
     let post = state.store.get_post(&id, Some(&user.id)).await?;
     let vote_count = post.map(|p| p.post.vote_count).unwrap_or(0);
