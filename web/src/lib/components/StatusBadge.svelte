@@ -1,6 +1,5 @@
 <script lang="ts">
     import { Badge } from '$lib/components/ui/badge';
-    import { statusColor } from '$lib/utils';
     import type { PostStatus } from '$lib/api/types';
 
     let { status }: { status: PostStatus } = $props();
@@ -13,17 +12,26 @@
         declined: 'Declined',
     };
 
-    // Color dots for visual differentiation beyond badge variant
+    // Soft-tinted pill per status — one consistent treatment instead of a mix of
+    // badge variants. Colors come from the --color-status-* tokens (app.css).
+    const badgeClass: Record<PostStatus, string> = {
+        open: 'bg-status-open/10 text-status-open',
+        planned: 'bg-status-planned/10 text-status-planned',
+        in_progress: 'bg-status-in-progress/10 text-status-in-progress',
+        done: 'bg-status-done/10 text-status-done',
+        declined: 'bg-status-declined/10 text-status-declined',
+    };
+
     const dotColors: Record<PostStatus, string> = {
-        open: 'bg-blue-500',
-        planned: 'bg-violet-500',
-        in_progress: 'bg-amber-500',
-        done: 'bg-emerald-500',
-        declined: 'bg-red-500',
+        open: 'bg-status-open',
+        planned: 'bg-status-planned',
+        in_progress: 'bg-status-in-progress',
+        done: 'bg-status-done',
+        declined: 'bg-status-declined',
     };
 </script>
 
-<Badge variant={statusColor(status)} class="gap-1.5">
+<Badge variant="outline" class="gap-1.5 border-transparent {badgeClass[status]}">
     <span class="size-1.5 rounded-full {dotColors[status]}"></span>
     {labels[status]}
 </Badge>

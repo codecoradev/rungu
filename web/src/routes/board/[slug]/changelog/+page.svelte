@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { branding } from '$lib/branding.svelte';
     import { onMount } from 'svelte';
     import { api, ApiError } from '$lib/api/client';
     import type { Project, PostDetail } from '$lib/api/types';
@@ -92,7 +93,7 @@
 </script>
 
 <svelte:head>
-    <title>{project ? `${project.name} · Changelog` : 'Changelog'} · Rungu</title>
+    <title>{(project ? `${project.name} · Changelog` : 'Changelog') + ' · ' + branding.value.brandName}</title>
 </svelte:head>
 
 <div class="mx-auto max-w-3xl px-4 py-8">

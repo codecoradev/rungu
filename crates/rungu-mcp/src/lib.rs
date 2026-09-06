@@ -58,14 +58,27 @@ pub async fn handle_message(input: &str, pool: &AnyPool, is_sqlite: bool) -> Str
     };
 
     let id = msg.get("id").cloned();
-    let method = msg.get("method").and_then(|m| m.as_str()).unwrap_or("");
+    let method = msg.get("method").and_then(|m| m.as_str()).unwrap_or("").to_string();
     let params = msg.get("params").cloned().unwrap_or(json!({}));
 
+    // JSON-RPC notifications (no "id") get NO response — replying corrupts
+    // protocol-conformant client streams. Side effects still run.
+    if id.is_none() {
+        let store = Store::new_with_kind(pool.clone(), is_sqlite);
+        let _ = handle_request(&method, &params, &store).await;
+        return String::new();
+    }
+
     let store = Store::new_with_kind(pool.clone(), is_sqlite);
-    let result = handle_request(method, &params, &store).await;
+    let result = handle_request(&method, &params, &store).await;
 
     match result {
         Ok(val) => json!({ "jsonrpc": "2.0", "result": val, "id": id }).to_string(),
+        // Unknown tool/method is -32601 (Method not found); -32603 stays for
+        // handler-internal failures.
+        Err(msg) if msg.starts_with("Unknown") => {
+            json!({ "jsonrpc": "2.0", "error": {"code": -32601, "message": msg}, "id": id }).to_string()
+        }
         Err(msg) => json!({ "jsonrpc": "2.0", "error": {"code": -32603, "message": msg}, "id": id }).to_string(),
     }
 }
@@ -87,6 +100,13 @@ async fn handle_request(method: &str, params: &Value, store: &Store) -> Result<V
         "delete_comment" => delete_comment(params, store).await,
         "get_stats" => get_stats(params, store).await,
         "get_trending" => get_trending(params, store).await,
+        "get_analytics" => get_analytics(params, store).await,
+        "get_top_posts" => get_top_posts(params, store).await,
+        "create_project" => create_project(params, store).await,
+        "delete_project" => delete_project(params, store).await,
+        "list_webhooks" => list_webhooks(params, store).await,
+        "create_webhook" => create_webhook(params, store).await,
+        "delete_webhook" => delete_webhook(params, store).await,
         "list_attachments" => list_attachments(params, store).await,
         "delete_post" => delete_post(params, store).await,
         "update_post_category" => update_post_category(params, store).await,
@@ -127,6 +147,18 @@ fn parse_category(s: &str) -> PostCategory {
         "feature" => PostCategory::Feature,
         "question" => PostCategory::Question,
         _ => PostCategory::Feedback,
+    }
+}
+
+/// Strict variant for update paths: an unknown category is a client error,
+/// not something to silently coerce to "feedback" (#190 scan).
+fn parse_category_strict(s: &str) -> Option<PostCategory> {
+    match s {
+        "bug" => Some(PostCategory::Bug),
+        "feature" => Some(PostCategory::Feature),
+        "question" => Some(PostCategory::Question),
+        "feedback" => Some(PostCategory::Feedback),
+        _ => None,
     }
 }
 
@@ -429,6 +461,141 @@ async fn get_trending(params: &Value, store: &Store) -> Result<Value, String> {
     Ok(json!({ "data": posts, "total": total }))
 }
 
+/// Aggregate analytics for a project (#186) — event totals + daily trend.
+/// Privacy-first: counts only, no IP / user data exists in the source table.
+async fn get_analytics(params: &Value, store: &Store) -> Result<Value, String> {
+    let slug = get_str(params, "slug")?;
+    let days = get_optional_u64(params, "days").unwrap_or(30).clamp(0, 365) as u32;
+
+    let project = store
+        .get_project_by_slug(slug)
+        .await
+        .map_err(|e| format!("Failed to get project: {e}"))?
+        .ok_or_else(|| format!("Project not found: {slug}"))?;
+
+    let totals =
+        store.analytics_totals(&project.id, days).await.map_err(|e| format!("Failed to get analytics: {e}"))?;
+    let daily =
+        store.analytics_daily(&project.id, days).await.map_err(|e| format!("Failed to get daily analytics: {e}"))?;
+
+    let daily_rows: Vec<Value> = daily
+        .into_iter()
+        .map(|(day, event_type, count)| json!({ "day": day, "event_type": event_type, "count": count }))
+        .collect();
+
+    Ok(json!({
+        "data": {
+            "project": slug,
+            "days": days,
+            "totals": totals,
+            "daily": daily_rows,
+        }
+    }))
+}
+
+/// Top posts by views (#186) — with vote counts and vote/view conversion,
+/// ready for AI-assisted prioritization ("which requests get attention but no votes?").
+async fn get_top_posts(params: &Value, store: &Store) -> Result<Value, String> {
+    let slug = get_str(params, "slug")?;
+    let days = get_optional_u64(params, "days").unwrap_or(30).clamp(0, 365) as u32;
+    let limit = get_optional_u64(params, "limit").unwrap_or(10).clamp(1, 50) as i64;
+
+    let project = store
+        .get_project_by_slug(slug)
+        .await
+        .map_err(|e| format!("Failed to get project: {e}"))?
+        .ok_or_else(|| format!("Project not found: {slug}"))?;
+
+    let top = store
+        .analytics_top_posts(&project.id, days, limit)
+        .await
+        .map_err(|e| format!("Failed to get top posts: {e}"))?;
+
+    let mut rows: Vec<Value> = Vec::with_capacity(top.len());
+    for (post_id, views) in top {
+        let (title, vote_count) = match store.get_post(&post_id, None).await {
+            Ok(Some(detail)) => (detail.post.title, detail.post.vote_count),
+            _ => (String::from("(deleted)"), 0),
+        };
+        let conversion = if views > 0 { (vote_count as f64 / views as f64 * 1000.0).round() / 10.0 } else { 0.0 };
+        rows.push(json!({
+            "post_id": post_id,
+            "title": title,
+            "views": views,
+            "vote_count": vote_count,
+            "vote_view_pct": conversion,
+        }));
+    }
+
+    Ok(json!({ "data": rows }))
+}
+
+/// Create a project (admin parity — mirrors REST POST /api/projects).
+async fn create_project(params: &Value, store: &Store) -> Result<Value, String> {
+    let name = get_str(params, "name")?;
+    let slug = get_optional_str(params, "slug").unwrap_or("");
+    let description = get_optional_str(params, "description").unwrap_or("");
+    let slug = if slug.is_empty() { name.to_lowercase().replace(' ', "-") } else { slug.to_string() };
+
+    let project =
+        store.create_project(name, &slug, description).await.map_err(|e| format!("Failed to create project: {e}"))?;
+    Ok(json!({ "data": project }))
+}
+
+/// Delete a project and everything in it (admin parity — irreversible).
+async fn delete_project(params: &Value, store: &Store) -> Result<Value, String> {
+    let slug = get_str(params, "slug")?;
+    let project = store
+        .get_project_by_slug(slug)
+        .await
+        .map_err(|e| format!("Failed to get project: {e}"))?
+        .ok_or_else(|| format!("Project not found: {slug}"))?;
+    store.delete_project(&project.id).await.map_err(|e| format!("Failed to delete project: {e}"))?;
+    Ok(json!({ "deleted": true, "id": project.id, "slug": slug }))
+}
+
+/// List webhooks for a project (admin parity; secrets are NOT included).
+async fn list_webhooks(params: &Value, store: &Store) -> Result<Value, String> {
+    let slug = get_str(params, "slug")?;
+    let project = store
+        .get_project_by_slug(slug)
+        .await
+        .map_err(|e| format!("Failed to get project: {e}"))?
+        .ok_or_else(|| format!("Project not found: {slug}"))?;
+    let webhooks = store.list_webhooks(&project.id).await.map_err(|e| format!("Failed to list webhooks: {e}"))?;
+    Ok(json!({ "data": webhooks, "total": webhooks.len() }))
+}
+
+/// Create a webhook subscription (admin parity). Auto-generates a signing
+/// secret when `secret` is omitted; the secret is returned exactly once here.
+async fn create_webhook(params: &Value, store: &Store) -> Result<Value, String> {
+    let slug = get_str(params, "slug")?;
+    let url = get_str(params, "url")?;
+    let events = get_optional_str(params, "events").unwrap_or("*");
+    let secret = match get_optional_str(params, "secret") {
+        Some(s) if !s.is_empty() => s.to_string(),
+        _ => uuid::Uuid::new_v4().to_string(),
+    };
+
+    let project = store
+        .get_project_by_slug(slug)
+        .await
+        .map_err(|e| format!("Failed to get project: {e}"))?
+        .ok_or_else(|| format!("Project not found: {slug}"))?;
+    let webhook = store
+        .create_webhook(&project.id, url, events, &secret)
+        .await
+        .map_err(|e| format!("Failed to create webhook: {e}"))?;
+    Ok(json!({ "data": webhook, "signing_secret": secret }))
+}
+
+/// Delete a webhook (admin parity).
+async fn delete_webhook(params: &Value, store: &Store) -> Result<Value, String> {
+    let id = get_str(params, "id")?;
+    store.delete_webhook(id).await.map_err(|e| format!("Failed to delete webhook: {e}"))?;
+    Ok(json!({ "deleted": true, "id": id }))
+}
+
 /// Run the MCP server, reading JSON-RPC from stdin and writing to stdout.
 pub async fn run_server(pool: AnyPool, is_sqlite: bool) -> Result<()> {
     let stdin = std::io::stdin();
@@ -486,7 +653,7 @@ async fn delete_post(params: &Value, store: &Store) -> Result<Value, String> {
 async fn update_post_category(params: &Value, store: &Store) -> Result<Value, String> {
     let id = get_str(params, "id")?;
     let category_str = get_str(params, "category")?;
-    let category = parse_category(category_str);
+    let category = parse_category_strict(category_str).ok_or_else(|| format!("Unknown category: {category_str}"))?;
 
     store.update_post_category(id, category).await.map_err(|e| format!("Failed to update post category: {e}"))?;
 
@@ -595,7 +762,8 @@ mod tests {
         let input = r#"{"jsonrpc":"2.0","method":"nonexistent","id":1}"#;
         let response = handle_message(input, &pool, true).await;
         let parsed: Value = serde_json::from_str(&response).unwrap();
-        assert_eq!(parsed["error"]["code"], -32603);
+        // Unknown methods are -32601 (Method not found) per JSON-RPC 2.0 (#190 scan).
+        assert_eq!(parsed["error"]["code"], -32601);
         assert!(parsed["error"]["message"].as_str().unwrap().contains("Unknown method"));
     }
 

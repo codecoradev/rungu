@@ -1,4 +1,6 @@
 <script lang="ts">
+    import { branding } from '$lib/branding.svelte';
+    import type { AnalyticsSummary, AnalyticsTopRow } from '$lib/api/types';
     import { onMount } from 'svelte';
     import { api, ApiError } from '$lib/api/client';
     import type { Project, CurrentUser, PostDetail, PostStatus, Webhook, WebhookDelivery, WebhookTestResult, ProjectStats } from '$lib/api/types';
@@ -17,7 +19,11 @@
     let error = $state('');
 
     // Tabs: 'projects' | 'moderation' | 'webhooks'
-    let tab = $state<'projects' | 'moderation' | 'webhooks'>('projects');
+    let tab = $state<'projects' | 'moderation' | 'webhooks' | 'analytics'>('projects');
+    let analyticsDays = $state<30 | 7 | 0>(30);
+    let analyticsSummary = $state<AnalyticsSummary | null>(null);
+    let analyticsTop = $state<AnalyticsTopRow[]>([]);
+    let analyticsLoading = $state(false);
 
     // Create form
     let newName = $state('');
@@ -293,15 +299,34 @@
         }
     }
 
+    async function loadAnalytics(days: 30 | 7 | 0 = analyticsDays) {
+        if (selectedProject === '') return;
+        analyticsLoading = true;
+        try {
+            const [summary, top] = await Promise.all([
+                api.adminAnalytics(selectedProject, days),
+                api.adminAnalyticsTop(selectedProject, days),
+            ]);
+            analyticsSummary = summary;
+            analyticsTop = top;
+            analyticsDays = days;
+        } catch {
+            error = 'Failed to load analytics';
+        } finally {
+            analyticsLoading = false;
+        }
+    }
+
     const tabs = [
         { id: 'projects', label: 'Projects' },
         { id: 'moderation', label: 'Moderation' },
         { id: 'webhooks', label: 'Webhooks' },
+        { id: 'analytics', label: 'Analytics' },
     ] as const;
 </script>
 
 <svelte:head>
-    <title>Admin — Rungu</title>
+    <title>{'Admin — ' + branding.value.brandName}</title>
 </svelte:head>
 
 {#if loading}
@@ -341,6 +366,10 @@
                     if (t.id === 'webhooks' && selectedProject === '' && projects.length > 0) {
                         selectedProject = projects[0].slug;
                         loadWebhooks();
+                    }
+                    if (t.id === 'analytics') {
+                        if (selectedProject === '' && projects.length > 0) selectedProject = projects[0].slug;
+                        if (analyticsSummary === null) loadAnalytics();
                     }
                 }}
             >
@@ -616,6 +645,120 @@
                 </div>
             {/if}
         {/if}
+    {/if}
+
+    <!-- ═══ ANALYTICS TAB ═══ -->
+    {#if tab === 'analytics'}
+        <div class="space-y-4">
+            <!-- Controls -->
+            <div class="flex flex-wrap items-center gap-2">
+                {#if projects.length > 0}
+                    <select
+                        class="h-9 rounded-md border border-input bg-background px-3 text-sm"
+                        bind:value={selectedProject}
+                        onchange={() => loadAnalytics(analyticsDays)}
+                    >
+                        {#each projects as p (p.slug)}
+                            <option value={p.slug}>{p.name}</option>
+                        {/each}
+                    </select>
+                {/if}
+                <div class="flex gap-1" role="group" aria-label="Time range">
+                    {#each [7, 30, 0] as d (d)}
+                        <Button
+                            size="sm"
+                            variant={analyticsDays === d ? 'default' : 'outline'}
+                            onclick={() => loadAnalytics(d as 7 | 30 | 0)}
+                        >
+                            {d === 0 ? 'All time' : `${d}d`}
+                        </Button>
+                    {/each}
+                </div>
+            </div>
+
+            {#if analyticsLoading}
+                <Skeleton class="h-40 w-full" />
+            {:else if analyticsSummary}
+                <!-- Totals cards -->
+                <div class="grid grid-cols-2 gap-3 sm:grid-cols-5">
+                    {#each ['board_view', 'post_view', 'vote', 'comment', 'post_created'] as et (et)}
+                        <Card.Root>
+                            <Card.Content class="p-4">
+                                <p class="text-xs text-muted-foreground">{et.replace('_', ' ')}</p>
+                                <p class="mt-1 text-2xl font-bold">{analyticsSummary.totals[et] ?? 0}</p>
+                            </Card.Content>
+                        </Card.Root>
+                    {/each}
+                </div>
+
+                <!-- Daily trend (pure SVG bars, no chart lib) -->
+                <Card.Root>
+                    <Card.Header>
+                        <Card.Title class="text-base">Daily activity — last {analyticsSummary.days === 0 ? 'all time' : `${analyticsSummary.days} days`}</Card.Title>
+                    </Card.Header>
+                    <Card.Content>
+                        {@const byDay = Object.groupBy(analyticsSummary.daily, (r) => r.day)}
+                        {@const days = Object.keys(byDay).sort()}
+                        {#if days.length === 0}
+                            <p class="py-6 text-center text-sm text-muted-foreground">No events in this window yet.</p>
+                        {:else}
+                            <div class="flex items-end gap-1 overflow-x-auto pb-2" role="img" aria-label="Daily event bar chart">
+                                {#each days as day (day)}
+                                    {@const rows = byDay[day] ?? []}
+                                    {@const total = rows.reduce((s, r) => s + r.count, 0)}
+                                    {@const max = Math.max(...days.map((dd) => (byDay[dd] ?? []).reduce((s, r) => s + r.count, 0)))}
+                                    <div class="flex min-w-[24px] flex-1 flex-col items-center gap-1">
+                                        <div
+                                            class="w-full rounded-sm bg-primary/70"
+                                            style="height: {Math.max(4, Math.round((total / (max || 1)) * 80))}px"
+                                            title="{day}: {total} events"
+                                        ></div>
+                                        <span class="text-[10px] text-muted-foreground">{day.slice(8)}</span>
+                                    </div>
+                                {/each}
+                            </div>
+                        {/if}
+                    </Card.Content>
+                </Card.Root>
+
+                <!-- Top posts -->
+                <Card.Root>
+                    <Card.Header>
+                        <Card.Title class="text-base">Top posts by views</Card.Title>
+                    </Card.Header>
+                    <Card.Content>
+                        {#if analyticsTop.length === 0}
+                            <p class="py-6 text-center text-sm text-muted-foreground">No views recorded in this window yet.</p>
+                        {:else}
+                            <div class="overflow-x-auto">
+                                <table class="w-full text-sm">
+                                    <thead>
+                                        <tr class="border-b text-left text-xs text-muted-foreground">
+                                            <th class="py-2 pr-4 font-medium">Post</th>
+                                            <th class="py-2 pr-4 text-right font-medium">Views</th>
+                                            <th class="py-2 pr-4 text-right font-medium">Votes</th>
+                                            <th class="py-2 text-right font-medium">Vote/view</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {#each analyticsTop as row (row.post_id)}
+                                            <tr class="border-b last:border-0">
+                                                <td class="py-2 pr-4">
+                                                    <a href="/board/{selectedProject}/post/{row.post_id}" class="hover:underline">{row.title}</a>
+                                                </td>
+                                                <td class="py-2 pr-4 text-right tabular-nums">{row.views}</td>
+                                                <td class="py-2 pr-4 text-right tabular-nums">{row.vote_count}</td>
+                                                <td class="py-2 text-right tabular-nums">{row.vote_view_pct}%</td>
+                                            </tr>
+                                        {/each}
+                                    </tbody>
+                                </table>
+                            </div>
+                        {/if}
+                    </Card.Content>
+                </Card.Root>
+            {/if}
+        </div>
     {/if}
 {/if}
 

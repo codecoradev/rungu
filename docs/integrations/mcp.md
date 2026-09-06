@@ -58,8 +58,15 @@ Add to your MCP configuration:
 | `delete_comment` | Delete a comment by ID |
 | `get_stats` | Project stats (total posts, by status, by category) |
 | `get_trending` | Top voted posts in last 7 days |
+| `get_analytics` | Event totals + daily trend (views, votes, comments) — privacy-first aggregates |
+| `get_top_posts` | Top posts by views with vote/view conversion (AI prioritization) |
 | `list_attachments` | List image attachments for a post |
 | `delete_attachment` | Delete an attachment by ID |
+| `create_project` | Create a new feedback project (admin) |
+| `delete_project` | Delete a project and all its content (admin, irreversible) |
+| `list_webhooks` | List webhook subscriptions for a project (admin) |
+| `create_webhook` | Create a webhook subscription (admin; secret returned once) |
+| `delete_webhook` | Delete a webhook subscription (admin) |
 
 ## Example Usage
 

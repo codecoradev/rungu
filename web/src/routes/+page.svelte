@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { branding } from '$lib/branding.svelte';
     import { onMount } from 'svelte';
     import { api } from '$lib/api/client';
     import type { Project } from '$lib/api/types';
@@ -18,7 +19,7 @@
 </script>
 
 <svelte:head>
-    <title>Rungu — Lightweight Feedback Board</title>
+    <title>{branding.value.brandName} — Lightweight Feedback Board</title>
     <meta name="description" content="Collect feature requests, bug reports, and suggestions." />
 </svelte:head>
 

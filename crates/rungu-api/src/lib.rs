@@ -3,10 +3,13 @@
 //! REST API routes — Axum handlers for projects, posts, votes, comments, auth.
 
 pub mod admin_routes;
+pub mod analytics;
 pub mod attachment_routes;
 pub mod auth_routes;
 pub mod comment_routes;
 pub mod error;
+pub mod mcp_http;
+pub mod meta;
 pub mod oauth;
 pub mod openapi;
 pub mod post_routes;
@@ -32,11 +35,25 @@ pub struct AppState {
     pub http_client: reqwest::Client,
     /// Storage backend for file attachments.
     pub storage: std::sync::Arc<dyn rungu_core::Storage>,
+    /// Instance branding (white-label, #185) — resolved from env at startup.
+    pub branding: crate::meta::InstanceBranding,
+    /// License status for the white-label badge (soft gate via Polar).
+    pub license: std::sync::Arc<crate::meta::LicenseStatus>,
+    /// DB id of the synthetic ai-agent admin (#189, resolved at startup).
+    /// Extractors forge the agent identity with this id so `created_by`
+    /// FKs point at a real user row.
+    pub agent_user_id: std::sync::Arc<Option<String>>,
 }
 
 impl FromRef<AppState> for rungu_auth::AuthConfig {
     fn from_ref(state: &AppState) -> Self {
         state.config.clone()
+    }
+}
+
+impl FromRef<AppState> for rungu_auth::middleware::AgentUserId {
+    fn from_ref(state: &AppState) -> Self {
+        rungu_auth::middleware::AgentUserId((*state.agent_user_id).clone())
     }
 }
 
@@ -56,4 +73,5 @@ pub fn api_routes() -> Router<AppState> {
         .merge(attachment_routes::router())
         .merge(webhook_routes::router())
         .merge(admin_routes::router())
+        .merge(crate::meta::meta_routes())
 }

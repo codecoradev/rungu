@@ -2,6 +2,63 @@
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-09-06
+
+The AI + branding release. Rungu now speaks to AI agents natively (26 MCP
+tools, local or remote), presents itself under your own brand, and shows
+operators what is happening — all privacy-first, no cookies.
+
+### Added
+
+- **Instance white-labeling** (#185) — `RUNGU_INSTANCE_NAME`, `RUNGU_LOGO_URL`,
+  and `RUNGU_FOOTER_TEXT` rebrand the header, every page title, the login
+  page, and the embed board. Public `GET /api/meta` exposes the values.
+- **License-based badge removal** (#185) — `RUNGU_LICENSE_KEY` +
+  `RUNGU_LICENSE_ORG_ID` (Polar) hide the "Powered by Rungu" badge:
+  $49 per major version or $70 lifetime. Soft gate — an invalid or expired
+  license only brings the badge back; the board is never throttled.
+- **Privacy-first analytics** (#186) — aggregate event counters
+  (`board_view`, `post_view`, `vote`, `comment`, `post_created`). No IPs, no
+  cookies, no fingerprints — ever.
+- **Analytics admin dashboard** (#187) — totals cards, daily activity chart,
+  and a top-posts table with vote/view conversion, under Admin → Analytics.
+- **MCP analysis tools** (#186) — `get_analytics` (totals + daily trend) and
+  `get_top_posts` (views + vote/view conversion) for AI-assisted
+  prioritization.
+- **Remote machine access** (#189) — set `RUNGU_API_KEY` and AI agents get
+  full admin power over REST from anywhere, as the synthetic `ai-agent` admin.
+- **MCP over HTTP** (#189) — `POST /mcp` with Bearer auth: the same toolset
+  remote clients get via `{"url": ..., "headers": ...}` config.
+- **MCP admin tools** (#189) — `create_project`, `delete_project`,
+  `list_webhooks`, `create_webhook`, `delete_webhook` (26 tools total).
+
+### Fixed
+
+- **SQLite foreign-key enforcement** (#191 scan) — `PRAGMA foreign_keys` only
+  covered a single pooled connection; now enforced on every connection via
+  `after_connect`.
+- **XSS breakout via brand values** (#191 scan) — `</script>` sequences in
+  branding strings can no longer escape the injected script blocks (SPA shell
+  + embed board).
+- **License fail-open** (#191 scan) — Polar 5xx/429 no longer flip a licensed
+  instance to unlicensed; validation requests time out at 10s.
+- **Webhook event header** (#191 scan) — `X-Rungu-Event` now carries the
+  actual event type instead of the subscription pattern.
+- **Stale board loads** (#173) — a generation counter ensures the newest
+  `loadBoard()` wins; older responses can no longer overwrite fresh results.
+- **Vote rollback** (#174) — failed votes revert the optimistic UI update and
+  surface a login-aware error toast.
+- **Creator email exposure** (#192) — author emails are removed from all
+  public post, comment, roadmap, and changelog payloads.
+- **Open-redirect hardening** (#191 scan) — backslash and control-character
+  variants of the login `?redirect=` bypass are rejected.
+- **Pagination overflow** (#191 scan) — oversized `page` params no longer
+  overflow the offset computation (3 endpoints).
+- **MCP protocol conformance** (#191 scan) — notifications emit no response,
+  unknown methods return -32601, and invalid categories are rejected instead
+  of silently coerced.
+
+
 ## [0.3.1] - 2026-08-21
 
 The polish release. Sharper moderation controls, smarter rate limiting, and a

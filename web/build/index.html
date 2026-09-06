@@ -3,47 +3,60 @@
     <head>
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E🛡️%3C/text%3E%3C/svg%3E" />
+        <!-- Favicon: lucide "shield" glyph in brand blue (matches the 🛡️ wordmark) -->
+        <link
+            rel="icon"
+            href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%232563eb'%3E%3Cpath d='M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1 1 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z'/%3E%3C/svg%3E"
+        />
         <script>
-            // Prevent flash of wrong theme — runs before page render
+            // Prevent flash of wrong theme — runs before page render.
+            // Mirrors the logic in src/lib/theme.ts: 'system' resolves via the
+            // OS preference, so we must NOT treat a stored 'system' value as a
+            // concrete dark choice (that caused a dark→light flash for
+            // system + light-OS users).
             (function () {
                 try {
                     var stored = localStorage.getItem('rungu-theme');
-                    var prefersLight = window.matchMedia('(prefers-color-scheme: light)').matches;
-                    var isLight = stored ? stored === 'light' : prefersLight;
-                    if (isLight) {
-                        document.documentElement.classList.add('light');
+                    var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+                    var isDark =
+                        stored === 'dark' ||
+                        ((!stored || stored === 'system') && prefersDark);
+                    if (isDark) {
+                        document.documentElement.classList.add('dark');
                     }
                 } catch (e) {
-                    // localStorage unavailable (incognito, disabled) — default to dark
+                    // localStorage unavailable (incognito, disabled) — follow OS only.
                 }
             })();
         </script>
-        <link href="/_app/immutable/entry/start.Dnd9C_-i.js" rel="modulepreload">
-		<link href="/_app/immutable/chunks/BsciTEFe.js" rel="modulepreload">
-		<link href="/_app/immutable/chunks/D1Nk-IaZ.js" rel="modulepreload">
-		<link href="/_app/immutable/entry/app.DBGS7LLo.js" rel="modulepreload">
-		<link href="/_app/immutable/chunks/kNaey6uv.js" rel="modulepreload">
+        <link href="/_app/immutable/entry/start.BzCpUOkQ.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/ChEY3tmw.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/a0y3swf0.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/D2gh7k4E.js" rel="modulepreload">
+		<link href="/_app/immutable/entry/app.DGOfXZZh.js" rel="modulepreload">
 		<link href="/_app/immutable/chunks/xihTtKlq.js" rel="modulepreload">
-		<link href="/_app/immutable/nodes/0.kc8TwQYS.js" rel="modulepreload">
-		<link href="/_app/immutable/chunks/dllj69Xu.js" rel="modulepreload">
-		<link href="/_app/immutable/chunks/D87HiN3f.js" rel="modulepreload">
+		<link href="/_app/immutable/nodes/0.c15DNYrY.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/BhCwD4We.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/KhsM_9jm.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/CWyAGgfP.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/DON2Z4Sj.js" rel="modulepreload">
+		<link href="/_app/immutable/chunks/CcP7PItY.js" rel="modulepreload">
 		
-		<link href="/_app/immutable/assets/0.DTL-L2IS.css" rel="stylesheet">
+		<link href="/_app/immutable/assets/0.DnhPqpYD.css" rel="stylesheet">
     </head>
     <body data-sveltekit-preload-data="hover">
         <div style="display: contents">
 			<script>
 				{
-					__sveltekit_8ea3jr = {
+					__sveltekit_ytjznj = {
 						base: ""
 					};
 
 					const element = document.currentScript.parentElement;
 
 					Promise.all([
-						import("/_app/immutable/entry/start.Dnd9C_-i.js"),
-						import("/_app/immutable/entry/app.DBGS7LLo.js")
+						import("/_app/immutable/entry/start.BzCpUOkQ.js"),
+						import("/_app/immutable/entry/app.DGOfXZZh.js")
 					]).then(([kit, app]) => {
 						kit.start(app, element);
 					});

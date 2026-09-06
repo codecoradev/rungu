@@ -179,7 +179,7 @@ pub fn dispatch_event(
 
             let signature = sign_payload(&payload_str, &secret);
 
-            let result = deliver_with_retry(&http, &webhook, &payload_str, &signature, pinned).await;
+            let result = deliver_with_retry(&http, &webhook, &payload_str, &signature, pinned, event_str).await;
 
             let (status_code, success, last_error) = match result {
                 Ok(code) => (Some(code), true, String::new()),
@@ -254,6 +254,7 @@ async fn deliver_with_retry(
     payload: &str,
     signature: &str,
     pinned: std::net::SocketAddr,
+    event_type: &str,
 ) -> Result<i32, (u32, String)> {
     let url = url::Url::parse(&webhook.url).map_err(|e| (1, format!("Invalid webhook URL: {e}")))?;
     let host = url.host_str().unwrap_or_default().to_string();
@@ -280,7 +281,9 @@ async fn deliver_with_retry(
         let result = no_redirect_client
             .post(url.clone())
             .header("Content-Type", "application/json")
-            .header("X-Rungu-Event", webhook.events.clone())
+            // The actual event type (e.g. "post.created"), not the
+            // subscription pattern — receivers match on this (#190 scan).
+            .header("X-Rungu-Event", event_type)
             .header("X-Rungu-Signature", format!("sha256={signature}"))
             .header("User-Agent", "Rungu-Webhook/1.0")
             .timeout(DELIVERY_TIMEOUT)

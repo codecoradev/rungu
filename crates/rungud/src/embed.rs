@@ -9,7 +9,7 @@
 //! read-only and safe to embed.
 
 use axum::Router;
-use axum::extract::Path;
+use axum::extract::{Path, State};
 use axum::http::{StatusCode, header};
 use axum::response::{Html, IntoResponse, Response};
 use axum::routing::get;
@@ -53,13 +53,25 @@ async fn embed_js() -> Response {
 /// The page is self-contained: minimal inline CSS (dark-mode aware via
 /// `prefers-color-scheme`) and vanilla JS that fetches posts from the REST
 /// API. No external dependencies, no framework.
-async fn embed_html(Path(slug): Path<String>) -> Response {
+async fn embed_html(State(state): State<rungu_api::AppState>, Path(slug): Path<String>) -> Response {
     // Sanitise the slug for safe interpolation into the HTML template.
     // The slug is also used as a URL path segment by the fetch call; we
     // encode it to prevent any HTML/JS injection.
     let slug_escaped = slug.chars().filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_').collect::<String>();
 
-    let html = EMBED_HTML_TEMPLATE.replace("__SLUG__", &slug_escaped);
+    // White-label branding (#185). The badge can only disappear with a valid
+    // license (soft gate) — see `rungu_api::meta`.
+    let powered_by = state.license.badge_visible(&state.branding).await;
+    // serde_json string escaping doubles as safe JS string-literal quoting.
+    // Escape "/" to \u002F as well: `</script>` inside a brand name would
+    // otherwise break out of the inline <script> block (XSS).
+    let brand_json = serde_json::to_string(&state.branding.brand_name)
+        .unwrap_or_else(|_| "\"Rungu\"".to_string())
+        .replace('/', "\\u002F");
+    let html = EMBED_HTML_TEMPLATE
+        .replace("__SLUG__", &slug_escaped)
+        .replace("__POWERED_BY__", if powered_by { "true" } else { "false" })
+        .replace("__BRAND_NAME__", &brand_json);
 
     (
         StatusCode::OK,
@@ -86,7 +98,7 @@ const EMBED_HTML_TEMPLATE: &str = r##"<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Feedback Board</title>
+<title>Feedback</title>
 <style>
   :root {
     --bg: #ffffff;
@@ -201,7 +213,7 @@ const EMBED_HTML_TEMPLATE: &str = r##"<!DOCTYPE html>
 </head>
 <body>
   <div class="header">
-    <h2>Feedback</h2>
+    <h2 id="brand-name">__BRAND__</h2>
     <a class="btn-feedback" id="share-btn" href="#" target="_blank" rel="noopener">Share Feedback</a>
   </div>
   <div id="board" class="post-list">
@@ -210,6 +222,18 @@ const EMBED_HTML_TEMPLATE: &str = r##"<!DOCTYPE html>
   <script>
   (function() {
     var SLUG = '__SLUG__';
+    var POWERED_BY = '__POWERED_BY__' === 'true';
+    var BRAND = document.getElementById('brand-name');
+    if (BRAND) {
+      BRAND.textContent = __BRAND_NAME__;
+      document.title = 'Feedback · ' + BRAND.textContent;
+    }
+    if (POWERED_BY) {
+      var badge = document.createElement('div');
+      badge.style.cssText = 'text-align:center;padding:10px 0;font-size:11px;opacity:.65;';
+      badge.innerHTML = 'Powered by <a href="https://github.com/codecoradev/rungu" target="_blank" rel="noopener" style="color:inherit;">Rungu</a>';
+      document.body.appendChild(badge);
+    }
     var board = document.getElementById('board');
     var shareBtn = document.getElementById('share-btn');
 
