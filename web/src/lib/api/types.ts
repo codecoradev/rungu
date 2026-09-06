@@ -166,3 +166,26 @@ export interface ProjectStats {
     total_votes: number;
     total_comments: number;
 }
+
+// ── Analytics (#186/#187) ────────────────────────────────────────────────
+
+export interface AnalyticsDailyRow {
+    day: string;
+    event_type: string;
+    count: number;
+}
+
+export interface AnalyticsSummary {
+    project_id: string;
+    days: number;
+    totals: Record<string, number>;
+    daily: AnalyticsDailyRow[];
+}
+
+export interface AnalyticsTopRow {
+    post_id: string;
+    title: string;
+    views: number;
+    vote_count: number;
+    vote_view_pct: number;
+}
