@@ -55,11 +55,16 @@ pub async fn open_pool(database_url: &str) -> Result<AnyPool> {
 pub async fn run_migrations(pool: &AnyPool, database_url: &str) -> Result<()> {
     let is_sqlite = database_url.starts_with("sqlite:");
     let migrations = if is_sqlite {
-        [include_str!("../migrations/sqlite/001_initial.sql"), include_str!("../migrations/sqlite/002_webhooks.sql")]
+        [
+            include_str!("../migrations/sqlite/001_initial.sql"),
+            include_str!("../migrations/sqlite/002_webhooks.sql"),
+            include_str!("../migrations/sqlite/003_analytics.sql"),
+        ]
     } else {
         [
             include_str!("../migrations/postgres/001_initial.sql"),
             include_str!("../migrations/postgres/002_webhooks.sql"),
+            include_str!("../migrations/postgres/003_analytics.sql"),
         ]
     };
 

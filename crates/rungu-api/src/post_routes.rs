@@ -64,6 +64,9 @@ pub async fn list_posts(
     let project =
         state.store.get_project_by_slug(&slug).await?.ok_or_else(|| ApiError::not_found("Project not found"))?;
 
+    // Analytics: board view (#186) — fire-and-forget, aggregate only.
+    crate::analytics::capture(&state.store, &project.id, None, "board_view");
+
     let page = query.page.unwrap_or(1).max(1);
     let per_page = query.per_page.unwrap_or(20).clamp(1, 100);
     let offset = (page - 1) * per_page;
@@ -146,6 +149,9 @@ pub async fn create_post(
         .create_post(&project.id, title, body.description.unwrap_or_default().as_str(), category, &user.id)
         .await?;
 
+    // Analytics: post created (#186).
+    crate::analytics::capture(&state.store, &project.id, Some(&post.id), "post_created");
+
     // Fire webhook event: post.created
     crate::webhook::dispatch_event(
         std::sync::Arc::new(state.store.clone()),
@@ -187,6 +193,9 @@ pub async fn get_post(
     let user_id = user.user.as_ref().map(|cu| cu.id.as_str());
 
     let post = state.store.get_post(&id, user_id).await?.ok_or_else(|| ApiError::not_found("Post not found"))?;
+
+    // Analytics: post view (#186).
+    crate::analytics::capture(&state.store, &post.post.project_id, Some(&post.post.id), "post_view");
 
     Ok(Json(serde_json::json!({ "data": post })))
 }

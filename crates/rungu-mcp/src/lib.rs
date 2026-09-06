@@ -87,6 +87,8 @@ async fn handle_request(method: &str, params: &Value, store: &Store) -> Result<V
         "delete_comment" => delete_comment(params, store).await,
         "get_stats" => get_stats(params, store).await,
         "get_trending" => get_trending(params, store).await,
+        "get_analytics" => get_analytics(params, store).await,
+        "get_top_posts" => get_top_posts(params, store).await,
         "list_attachments" => list_attachments(params, store).await,
         "delete_post" => delete_post(params, store).await,
         "update_post_category" => update_post_category(params, store).await,
@@ -427,6 +429,75 @@ async fn get_trending(params: &Value, store: &Store) -> Result<Value, String> {
         .map_err(|e| format!("Failed to get trending posts: {e}"))?;
 
     Ok(json!({ "data": posts, "total": total }))
+}
+
+/// Aggregate analytics for a project (#186) — event totals + daily trend.
+/// Privacy-first: counts only, no IP / user data exists in the source table.
+async fn get_analytics(params: &Value, store: &Store) -> Result<Value, String> {
+    let slug = get_str(params, "slug")?;
+    let days = get_optional_u64(params, "days").unwrap_or(30).clamp(0, 365) as u32;
+
+    let project = store
+        .get_project_by_slug(slug)
+        .await
+        .map_err(|e| format!("Failed to get project: {e}"))?
+        .ok_or_else(|| format!("Project not found: {slug}"))?;
+
+    let totals =
+        store.analytics_totals(&project.id, days).await.map_err(|e| format!("Failed to get analytics: {e}"))?;
+    let daily =
+        store.analytics_daily(&project.id, days).await.map_err(|e| format!("Failed to get daily analytics: {e}"))?;
+
+    let daily_rows: Vec<Value> = daily
+        .into_iter()
+        .map(|(day, event_type, count)| json!({ "day": day, "event_type": event_type, "count": count }))
+        .collect();
+
+    Ok(json!({
+        "data": {
+            "project": slug,
+            "days": days,
+            "totals": totals,
+            "daily": daily_rows,
+        }
+    }))
+}
+
+/// Top posts by views (#186) — with vote counts and vote/view conversion,
+/// ready for AI-assisted prioritization ("which requests get attention but no votes?").
+async fn get_top_posts(params: &Value, store: &Store) -> Result<Value, String> {
+    let slug = get_str(params, "slug")?;
+    let days = get_optional_u64(params, "days").unwrap_or(30).clamp(0, 365) as u32;
+    let limit = get_optional_u64(params, "limit").unwrap_or(10).clamp(1, 50) as i64;
+
+    let project = store
+        .get_project_by_slug(slug)
+        .await
+        .map_err(|e| format!("Failed to get project: {e}"))?
+        .ok_or_else(|| format!("Project not found: {slug}"))?;
+
+    let top = store
+        .analytics_top_posts(&project.id, days, limit)
+        .await
+        .map_err(|e| format!("Failed to get top posts: {e}"))?;
+
+    let mut rows: Vec<Value> = Vec::with_capacity(top.len());
+    for (post_id, views) in top {
+        let (title, vote_count) = match store.get_post(&post_id, None).await {
+            Ok(Some(detail)) => (detail.post.title, detail.post.vote_count),
+            _ => (String::from("(deleted)"), 0),
+        };
+        let conversion = if views > 0 { (vote_count as f64 / views as f64 * 1000.0).round() / 10.0 } else { 0.0 };
+        rows.push(json!({
+            "post_id": post_id,
+            "title": title,
+            "views": views,
+            "vote_count": vote_count,
+            "vote_view_pct": conversion,
+        }));
+    }
+
+    Ok(json!({ "data": rows }))
 }
 
 /// Run the MCP server, reading JSON-RPC from stdin and writing to stdout.

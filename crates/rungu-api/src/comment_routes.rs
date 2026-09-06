@@ -91,6 +91,9 @@ pub async fn create_comment(
 
     let comment = state.store.create_comment(&post_id, content, body.parent_id.as_deref(), &user.id).await?;
 
+    // Analytics: comment created (#186).
+    crate::analytics::capture(&state.store, &_post.post.project_id, Some(&post_id), "comment");
+
     // Fire webhook event: comment.created
     crate::webhook::dispatch_event(
         std::sync::Arc::new(state.store.clone()),

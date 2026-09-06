@@ -3,6 +3,7 @@
 //! REST API routes — Axum handlers for projects, posts, votes, comments, auth.
 
 pub mod admin_routes;
+pub mod analytics;
 pub mod attachment_routes;
 pub mod auth_routes;
 pub mod comment_routes;

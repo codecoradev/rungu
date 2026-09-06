@@ -51,6 +51,8 @@ use utoipa::OpenApi;
         crate::admin_routes::project_stats,
         // Meta (instance branding)
         crate::meta::get_meta,
+        crate::admin_routes::project_analytics,
+        crate::admin_routes::project_analytics_top,
         // Auth
         crate::auth_routes::list_providers,
         crate::auth_routes::login,

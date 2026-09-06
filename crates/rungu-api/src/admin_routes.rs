@@ -34,6 +34,8 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/admin/posts", axum::routing::get(list_all_posts))
         .route("/admin/projects/{slug}/stats", axum::routing::get(project_stats))
+        .route("/admin/analytics/{slug}", axum::routing::get(project_analytics))
+        .route("/admin/analytics/{slug}/top", axum::routing::get(project_analytics_top))
 }
 
 // ── Handlers ───────────────────────────────────────────────────────────
@@ -119,4 +121,116 @@ pub async fn project_stats(
     let stats = state.store.project_stats(&project.id).await?;
 
     Ok(Json(serde_json::json!({ "data": stats })))
+}
+
+/// Analytics summary for a project (#186) — event totals + daily trend.
+/// Privacy-first: aggregate counts only (no IP / user data is ever stored).
+#[utoipa::path(
+    get,
+    path = "/api/admin/analytics/{slug}",
+    params(
+        ("slug" = String, Path, description = "Project slug"),
+        ("days" = Option<u32>, Query, description = "Window in days (default 30, 0 = all time)"),
+    ),
+    responses(
+        (status = 200, description = "Event totals and daily trend", body = serde_json::Value),
+        (status = 401, description = "Not authenticated", body = serde_json::Value),
+        (status = 403, description = "Admin access required", body = serde_json::Value),
+        (status = 404, description = "Project not found", body = serde_json::Value),
+    ),
+    security(("session" = [])),
+    tag = "admin",
+)]
+pub async fn project_analytics(
+    State(state): State<AppState>,
+    Path(slug): Path<String>,
+    axum::extract::Query(query): axum::extract::Query<AnalyticsQuery>,
+    CurrentUser(user): CurrentUser,
+) -> Result<impl IntoResponse, ApiError> {
+    // Authz BEFORE any query validation per repo convention (#162).
+    ApiError::require_admin(&user)?;
+
+    let project =
+        state.store.get_project_by_slug(&slug).await?.ok_or_else(|| ApiError::not_found("Project not found"))?;
+
+    let days = query.days.unwrap_or(30).clamp(0, 365);
+    let totals = state.store.analytics_totals(&project.id, days).await?;
+    let daily = state.store.analytics_daily(&project.id, days).await?;
+
+    let daily_rows: Vec<serde_json::Value> = daily
+        .into_iter()
+        .map(|(day, event_type, count)| serde_json::json!({ "day": day, "event_type": event_type, "count": count }))
+        .collect();
+
+    Ok(Json(serde_json::json!({
+        "data": {
+            "project_id": project.id,
+            "days": days,
+            "totals": totals,
+            "daily": daily_rows,
+        }
+    })))
+}
+
+/// Top posts by views for a project (#186) — with vote-count and
+/// vote/view conversion joined in for prioritization analysis.
+#[utoipa::path(
+    get,
+    path = "/api/admin/analytics/{slug}/top",
+    params(
+        ("slug" = String, Path, description = "Project slug"),
+        ("days" = Option<u32>, Query, description = "Window in days (default 30, 0 = all time)"),
+        ("limit" = Option<i64>, Query, description = "Max posts (default 10, max 50)"),
+    ),
+    responses(
+        (status = 200, description = "Top posts by views", body = serde_json::Value),
+        (status = 401, description = "Not authenticated", body = serde_json::Value),
+        (status = 403, description = "Admin access required", body = serde_json::Value),
+        (status = 404, description = "Project not found", body = serde_json::Value),
+    ),
+    security(("session" = [])),
+    tag = "admin",
+)]
+pub async fn project_analytics_top(
+    State(state): State<AppState>,
+    Path(slug): Path<String>,
+    axum::extract::Query(query): axum::extract::Query<AnalyticsQuery>,
+    CurrentUser(user): CurrentUser,
+) -> Result<impl IntoResponse, ApiError> {
+    ApiError::require_admin(&user)?;
+
+    let project =
+        state.store.get_project_by_slug(&slug).await?.ok_or_else(|| ApiError::not_found("Project not found"))?;
+
+    let days = query.days.unwrap_or(30).clamp(0, 365);
+    let limit = query.limit.unwrap_or(10).clamp(1, 50);
+    let top = state.store.analytics_top_posts(&project.id, days, limit).await?;
+
+    // Join post title + vote_count for analysis-ready output.
+    let mut rows: Vec<serde_json::Value> = Vec::with_capacity(top.len());
+    for (post_id, views) in top {
+        let title_vote = match state.store.get_post(&post_id, None).await? {
+            Some(detail) => (detail.post.title.clone(), detail.post.vote_count),
+            None => (String::from("(deleted)"), 0),
+        };
+        let conversion = if views > 0 { (title_vote.1 as f64 / views as f64 * 1000.0).round() / 10.0 } else { 0.0 };
+        rows.push(serde_json::json!({
+            "post_id": post_id,
+            "title": title_vote.0,
+            "views": views,
+            "vote_count": title_vote.1,
+            "vote_view_pct": conversion,
+        }));
+    }
+
+    Ok(Json(serde_json::json!({ "data": rows })))
+}
+
+/// Query params for the admin analytics endpoints.
+#[derive(Debug, serde::Deserialize, utoipa::IntoParams)]
+pub struct AnalyticsQuery {
+    /// Look-back window in days. `0` = all time.
+    pub days: Option<u32>,
+    /// Max rows for the top-posts endpoint.
+    pub limit: Option<i64>,
 }
