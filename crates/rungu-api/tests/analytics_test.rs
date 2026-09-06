@@ -36,6 +36,8 @@ async fn setup_app() -> (axum::Router, Store) {
         storage: std::sync::Arc::from(
             rungu_core::FsStorage::new(std::env::temp_dir().join("rungu-test-analytics")).unwrap(),
         ),
+        branding: rungu_api::meta::InstanceBranding::default(),
+        license: std::sync::Arc::new(rungu_api::meta::LicenseStatus::new()),
     };
     let app = axum::Router::new().merge(api_routes().with_state(state));
     (app, store)
