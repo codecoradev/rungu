@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { branding } from '$lib/branding.svelte';
     import { onMount } from 'svelte';
     import { api, ApiError } from '$lib/api/client';
     import type { Project, RoadmapResponse } from '$lib/api/types';
@@ -63,7 +64,7 @@
 </script>
 
 <svelte:head>
-    <title>{project ? `${project.name} · Roadmap` : 'Roadmap'} · Rungu</title>
+    <title>{(project ? `${project.name} · Roadmap` : 'Roadmap') + ' · ' + branding.value.brandName}</title>
 </svelte:head>
 
 <div class="mx-auto max-w-7xl px-4 py-8">

@@ -16,6 +16,25 @@ All configuration is done via environment variables.
 | `RUNGU_SECURE_COOKIE` | `true` | Set `false` for HTTP (no Secure flag on cookies). Accepts (case-insensitive): `true\|1\|yes\|on`, `false\|0\|no\|off`. Any other value exits with a fatal error — see [Security](#security). |
 | `RUST_LOG` | `rungu=info` | Log level (trace, debug, info, warn, error). Supports `tracing_subscriber`'s [`EnvFilter`](https://docs.rs/tracing-subscriber/latest/tracing_subscriber/filter/struct.EnvFilter.html) syntax. |
 
+## White-label Branding
+
+Present Rungu under your own brand. See [issue #185](https://github.com/codecoradev/rungu/issues/185).
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `RUNGU_INSTANCE_NAME` | `Rungu` | Brand name shown in the header, page titles, login page, and embed board. |
+| `RUNGU_LOGO_URL` | _(unset)_ | Logo shown next to the brand name in the SPA header. |
+| `RUNGU_FOOTER_TEXT` | _(unset)_ | Footer line shown **only** when the Powered-by badge is removed by a license. |
+| `RUNGU_LICENSE_KEY` | _(unset)_ | Polar license key. A valid key removes the "Powered by Rungu" badge. |
+| `RUNGU_LICENSE_ORG_ID` | _(unset)_ | Polar organization id the license belongs to (required with `RUNGU_LICENSE_KEY`). |
+
+Branding is instance-level and ENV-driven — no restart-free admin UI by design. The
+"Powered by Rungu" badge (SPA footer + embed board) is the OSS growth loop and is **not**
+removable via env; only a valid license hides it. Licensing: **$49 per major version**
+(minor + patch free forever) or **$70 lifetime**. The gate is intentionally soft: an
+invalid or expired license only makes the badge reappear — the board itself is never
+throttled or locked.
+
 ## Auth (Session)
 
 | Variable | Default | Description |

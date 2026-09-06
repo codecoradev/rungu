@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { branding } from '$lib/branding.svelte';
     import { page } from '$app/state';
     import CircleAlert from '@lucide/svelte/icons/circle-alert';
     import { Button } from '$lib/components/ui/button';
@@ -14,7 +15,7 @@
 </script>
 
 <svelte:head>
-    <title>{page.status} — Rungu</title>
+    <title>{page.status + ' — ' + branding.value.brandName}</title>
 </svelte:head>
 
 <Card.Root class="py-12 text-center">

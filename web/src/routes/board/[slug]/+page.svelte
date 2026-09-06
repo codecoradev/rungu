@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { branding } from '$lib/branding.svelte';
     import { onMount } from 'svelte';
     import { goto } from '$app/navigation';
     import { api, ApiError } from '$lib/api/client';
@@ -240,7 +241,7 @@
 </script>
 
 <svelte:head>
-    <title>{project?.name ?? 'Board'} — Rungu</title>
+    <title>{(project?.name ?? 'Board') + ' — ' + branding.value.brandName}</title>
 </svelte:head>
 
 {#if loading && !project}

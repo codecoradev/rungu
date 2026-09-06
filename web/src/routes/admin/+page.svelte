@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { branding } from '$lib/branding.svelte';
     import { onMount } from 'svelte';
     import { api, ApiError } from '$lib/api/client';
     import type { Project, CurrentUser, PostDetail, PostStatus, Webhook, WebhookDelivery, WebhookTestResult, ProjectStats } from '$lib/api/types';
@@ -301,7 +302,7 @@
 </script>
 
 <svelte:head>
-    <title>Admin — Rungu</title>
+    <title>{'Admin — ' + branding.value.brandName}</title>
 </svelte:head>
 
 {#if loading}
