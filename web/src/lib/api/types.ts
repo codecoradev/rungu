@@ -14,7 +14,6 @@ export interface User {
 
 export interface UserSummary {
     id: string;
-    email: string;
     name: string;
     avatar_url: string;
 }

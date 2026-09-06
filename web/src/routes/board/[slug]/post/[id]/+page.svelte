@@ -230,7 +230,7 @@
                 </div>
                 <h1 class="text-2xl leading-tight font-semibold tracking-tight">{post.title}</h1>
                 <div class="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
-                    <span>{post.creator.name || post.creator.email || 'User'}</span>
+                    <span>{post.creator.name || 'User'}</span>
                     <span>·</span>
                     <span>{timeAgo(post.created_at)}</span>
                 </div>
@@ -259,7 +259,7 @@
                     {#if parentComment}
                         <div class="mb-2 rounded-lg border border-border bg-muted/50 p-3">
                             <div class="flex items-center gap-2 text-xs text-muted-foreground">
-                                <span class="font-medium">{parentComment.creator?.name || parentComment.creator?.email || 'User'}</span>
+                                <span class="font-medium">{parentComment.creator?.name || 'User'}</span>
                                 <span>·</span>
                                 <span>{timeAgo(parentComment.created_at)}</span>
                             </div>

@@ -36,11 +36,11 @@
     }
 
     function avatarChar(c: Comment): string {
-        return (c.creator?.name || c.creator?.email || c.created_by)[0]?.toUpperCase() ?? '?';
+        return (c.creator?.name || c.created_by)[0]?.toUpperCase() ?? '?';
     }
 
     function displayName(c: Comment): string {
-        return c.creator?.name || c.creator?.email || 'User';
+        return c.creator?.name || 'User';
     }
 </script>
 
