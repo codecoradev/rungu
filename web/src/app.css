@@ -46,6 +46,45 @@
         --color-border: oklch(0.87 0.005 265);
         --color-input: oklch(0.87 0.005 265);
         --color-ring: oklch(0.45 0.15 250);
+
+        /*
+         * Board component tokens (#199) — the v0.5.0 board overhaul
+         * (#200 vote rail, #201 card list, #203 sort tabs) must consume
+         * these instead of scattered one-off values. Light defaults;
+         * overrides in `.dark` below. See docs/development/design-tokens.md.
+         */
+
+        /* Card-list row (#201): flat hairline list, ~4.5+ rows per viewport */
+        --board-row-min-height: 7rem; /* 112px */
+        --board-row-pad-y: 0.875rem; /* 14px */
+        --board-row-pad-x: 1rem; /* 16px */
+        --board-row-divider-color: var(--color-border);
+
+        /* Vote rail (#200): vertical chevron+count, full-height hit area.
+         * 2.75rem = 44px HIG minimum tap target. */
+        --vote-rail-width: 3.5rem; /* 56px */
+        --vote-target-min: 2.75rem; /* 44px */
+        --vote-count-size: 1.125rem; /* 18px semibold */
+        --vote-voted-bg: oklch(0.5 0.2 250 / 0.12);
+        --vote-voted-fg: var(--color-primary);
+        --vote-voted-border: oklch(0.5 0.2 250 / 0.35);
+        --vote-hover-bg: oklch(0.5 0.015 265 / 0.06);
+        --vote-rail-divider-color: var(--color-border);
+
+        /* Sort tabs (#203): segmented control with obvious selected state */
+        --sort-tab-height: 2.25rem; /* 36px desktop; mobile bumps to 44px */
+        --sort-tab-radius: 9999px;
+        --sort-tab-active-bg: var(--color-primary);
+        --sort-tab-active-fg: var(--color-primary-foreground);
+        --sort-tab-inactive-fg: var(--color-muted-foreground);
+        --sort-tab-inactive-hover-bg: oklch(0.5 0.015 265 / 0.06);
+
+        /* Type roles: named roles over the existing Tailwind text scale —
+         * no global scale overrides. */
+        --board-title-size: 1rem; /* 16px / 600 */
+        --board-body-size: 0.875rem; /* 14px */
+        --board-meta-size: 0.75rem; /* 12px */
+        --board-section-label-size: 0.75rem; /* 12px uppercase */
     }
 
     /* Dark mode — applied via .dark class on <html> */
@@ -80,6 +119,15 @@
         --color-border: oklch(0.35 0.015 265);
         --color-input: oklch(0.35 0.015 265);
         --color-ring: oklch(0.6 0.15 250);
+
+        /* Board component tokens (#199) — dark overrides */
+        --board-row-divider-color: var(--color-border);
+        --vote-voted-bg: oklch(0.55 0.2 250 / 0.16);
+        --vote-voted-fg: var(--color-primary);
+        --vote-voted-border: oklch(0.55 0.2 250 / 0.4);
+        --vote-hover-bg: oklch(0.7 0.015 265 / 0.08);
+        --vote-rail-divider-color: var(--color-border);
+        --sort-tab-inactive-hover-bg: oklch(0.7 0.015 265 / 0.08);
     }
 }
 
