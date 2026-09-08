@@ -217,11 +217,11 @@
         ← Back to board
     </Button>
 
-    <!-- Card.Header is a grid: data-slot="card-action" activates the built-in
-         `grid-cols-[1fr_auto]` layout so the vote rail docks on the right. -->
+    <!-- Card.Header is a grid; data-slot="card-action" activates the built-in
+         `grid-cols-[1fr_auto]` layout so the vote rail docks top-right (#feedback). -->
     <Card.Root class="mt-3">
         <Card.Header class="items-stretch gap-0">
-            <div class="min-w-0 pr-4">
+            <div class="min-w-0" data-slot="card-action">
                 <div class="mb-2 flex flex-wrap items-center gap-2">
                     <CategoryBadge category={post.category} />
                     {#if canEditStatus}
@@ -257,7 +257,7 @@
                     <span>{timeAgo(post.created_at)}</span>
                 </div>
             </div>
-            <div class="flex shrink-0 items-start border-l border-[var(--vote-rail-divider-color)] pl-4">
+            <div class="flex shrink-0 items-center border-l border-[var(--vote-rail-divider-color)] pl-4">
                 <VoteRail postId={post.id} voted={post.user_voted} count={post.vote_count} onvote={handleVote} />
             </div>
         </Card.Header>

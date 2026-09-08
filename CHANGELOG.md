@@ -2,6 +2,30 @@
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-09-08
+
+The board navigation release. Views get a real nav row, posting gets a
+dialog, mobile gets its own filter pattern, and the vote control sits where
+the eye expects it.
+
+### Added
+
+- **View tabs** (#218) — Feedback, Roadmap, and Changelog render as tabs
+  under the board title (active tab underlined), replacing sidebar nav
+  buttons. The sidebar is now content-only: categories and status counts.
+- **New Post dialog** (#218) — the primary action moved from the sidebar to
+  the board header and opens an accessible modal (Esc, backdrop click, and
+  close button all dismiss; bottom-sheet layout on mobile).
+- **Mobile filter chip sliders** (#219) — Category and Status render as
+  horizontal swipeable chip rows under the sticky toolbar instead of large
+  cards below the post list; the sidebar filter cards stay desktop-only.
+
+### Fixed
+
+- **Post detail vote rail placement** (#217) — the vote control docks
+  top-right beside the title with a vertical divider instead of wrapping
+  below the meta row, matching the board card layout.
+
 ## [0.5.0] - 2026-09-08
 
 The Board UI Overhaul. The public board was rebuilt around the patterns that
