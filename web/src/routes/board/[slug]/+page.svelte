@@ -50,6 +50,8 @@
     });
     let statusFilter = $state<PostStatus | ''>('');
     let categoryFilter = $state<PostCategory | ''>('');
+    // Sidebar / filter counts (#202): refreshed with every board load.
+    let counts = $state<{ by_status: Record<string, number>; by_category: Record<string, number> } | null>(null);
     let searchQuery = $state('');
     let showForm = $state(false);
     let authed = $state(false);
@@ -112,6 +114,8 @@
             posts = result.data;
             total = result.pagination.total;
             focusedPostIndex = -1;
+            // Counts load best-effort; their absence must never break the board.
+            api.getProjectCounts(slug).then((c) => (counts = c)).catch(() => {});
         } catch (e) {
             if (generation !== loadGeneration) return;
             error = e instanceof ApiError && e.status === 404 ? 'Project not found' : 'Failed to load board';
@@ -353,7 +357,7 @@
                                         : 'text-muted-foreground hover:bg-muted',
                                 )}
                             >
-                                {cat.label}
+                                {cat.label}{counts ? ` (${counts.by_category[cat.value] ?? 0})` : ''}
                             </button>
                         {/each}
                     </div>
@@ -371,7 +375,7 @@
                                         : 'text-muted-foreground hover:bg-muted',
                                 )}
                             >
-                                {st.label}
+                                {st.label}{counts ? ` (${counts.by_status[st.value] ?? 0})` : ''}
                             </button>
                         {/each}
                     </div>
@@ -523,13 +527,14 @@
                         <button
                             onclick={() => (categoryFilter = categoryFilter === cat.value ? '' : cat.value)}
                             class={cn(
-                                'rounded-md px-2 py-1 text-left text-sm transition-colors',
+                                'flex items-center justify-between gap-2 rounded-md px-2 py-1 text-left text-sm transition-colors',
                                 categoryFilter === cat.value
                                     ? 'bg-primary/10 font-medium text-primary'
                                     : 'text-muted-foreground hover:bg-muted',
                             )}
                         >
-                            {cat.label}
+                            <span>{cat.label}</span>
+                            <span class="text-xs tabular-nums text-muted-foreground">{counts?.by_category[cat.value] ?? 0}</span>
                         </button>
                     {/each}
                 </div>
@@ -542,13 +547,14 @@
                         <button
                             onclick={() => (statusFilter = statusFilter === st.value ? '' : st.value)}
                             class={cn(
-                                'rounded-md px-2 py-1 text-left text-sm capitalize transition-colors',
+                                'flex items-center justify-between gap-2 rounded-md px-2 py-1 text-left text-sm capitalize transition-colors',
                                 statusFilter === st.value
                                     ? 'bg-primary/10 font-medium text-primary'
                                     : 'text-muted-foreground hover:bg-muted',
                             )}
                         >
-                            {st.label}
+                            <span>{st.label}</span>
+                            <span class="text-xs tabular-nums text-muted-foreground">{counts?.by_status[st.value] ?? 0}</span>
                         </button>
                     {/each}
                 </div>
