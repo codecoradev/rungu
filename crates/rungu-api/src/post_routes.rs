@@ -488,6 +488,7 @@ pub(crate) fn parse_sort(s: Option<&str>) -> PostSort {
         Some("most_votes") => PostSort::MostVotes,
         Some("least_votes") => PostSort::LeastVotes,
         Some("recently_updated") => PostSort::RecentlyUpdated,
+        Some("trending") => PostSort::Trending,
         _ => PostSort::Newest,
     }
 }
@@ -522,6 +523,7 @@ mod tests {
         assert!(matches!(parse_sort(None), PostSort::Newest));
         assert!(matches!(parse_sort(Some("oldest")), PostSort::Oldest));
         assert!(matches!(parse_sort(Some("most_votes")), PostSort::MostVotes));
+        assert!(matches!(parse_sort(Some("trending")), PostSort::Trending));
         assert!(matches!(parse_sort(Some("unknown")), PostSort::Newest));
     }
 

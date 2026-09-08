@@ -419,6 +419,17 @@ impl Store {
             PostSort::MostVotes => "p.vote_count DESC, p.created_at DESC",
             PostSort::LeastVotes => "p.vote_count ASC, p.created_at DESC",
             PostSort::RecentlyUpdated => "p.updated_at DESC",
+            // Trending (#203): recent vote velocity from analytics events via a
+            // correlated scalar subquery (no aggregate-in-ORDER-BY, so it works
+            // without GROUP BY on both dialects). Posts without events score 0
+            // and fall back to total votes, then recency.
+            PostSort::Trending => {
+                if self.is_sqlite {
+                    "(SELECT COUNT(*) FROM analytics_events ae WHERE ae.post_id = p.id AND ae.event_type = 'vote' AND ae.created_at >= datetime('now', '-7 days')) DESC, p.vote_count DESC, p.created_at DESC"
+                } else {
+                    "(SELECT COUNT(*) FROM analytics_events ae WHERE ae.post_id = p.id AND ae.event_type = 'vote' AND ae.created_at >= NOW() - INTERVAL '7 days') DESC, p.vote_count DESC, p.created_at DESC"
+                }
+            }
         };
 
         // Search JOIN + WHERE fragment, emitted only when a search path is active.
