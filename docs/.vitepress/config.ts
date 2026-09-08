@@ -64,6 +64,7 @@ export default defineConfig({
         text: 'Development',
         items: [
           { text: 'Architecture', link: '/development/architecture' },
+          { text: 'Design Tokens', link: '/development/design-tokens' },
           { text: 'Contributing', link: '/development/contributing' },
           { text: 'Roadmap', link: '/development/roadmap' },
         ],

@@ -16,9 +16,37 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/projects", axum::routing::get(list_projects).post(create_project))
         .route("/projects/{slug}", axum::routing::get(get_project).patch(update_project).delete(delete_project))
+        .route("/projects/{slug}/counts", axum::routing::get(get_project_counts))
 }
 
 // ── Handlers ───────────────────────────────────────────────────────────
+
+/// Public per-project counts grouped by status and category (#202).
+/// Powers the board sidebar / mobile filter counts. No PII — aggregates only.
+#[utoipa::path(
+    get,
+    path = "/api/projects/{slug}/counts",
+    responses(
+        (status = 200, description = "Post counts by status and category", body = serde_json::Value),
+        (status = 404, description = "Project not found", body = serde_json::Value),
+    ),
+    tag = "projects",
+)]
+pub async fn get_project_counts(
+    State(state): State<AppState>,
+    Path(slug): Path<String>,
+) -> Result<impl IntoResponse, ApiError> {
+    let project =
+        state.store.get_project_by_slug(&slug).await?.ok_or_else(|| ApiError::not_found("Project not found"))?;
+    let stats = state.store.project_stats(&project.id).await?;
+    Ok(Json(serde_json::json!({
+        "data": {
+            "total": stats.total_posts,
+            "by_status": stats.by_status,
+            "by_category": stats.by_category,
+        }
+    })))
+}
 
 /// List all projects.
 #[utoipa::path(

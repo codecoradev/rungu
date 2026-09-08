@@ -35,7 +35,7 @@
     });
 </script>
 
-<Button variant="ghost" size="icon-sm" onclick={cycle} title={`Theme: ${theme}`} aria-label={`Switch theme (current: ${theme})`}>
+<Button variant="ghost" size="icon-sm" class="max-sm:size-11" onclick={cycle} title={`Theme: ${theme}`} aria-label={`Switch theme (current: ${theme})`}>
     {#if theme === 'light'}
         <Sun class="size-4" aria-hidden="true" />
     {:else if theme === 'dark'}

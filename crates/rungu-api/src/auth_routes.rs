@@ -361,13 +361,19 @@ pub async fn me(State(state): State<AppState>, headers: HeaderMap) -> Result<Jso
 // ── Helpers ─────────────────────────────────────────────────────────────
 
 /// Build a Set-Cookie value string.
-/// Uses SameSite=None for OAuth compatibility (cross-site redirect from provider).
+/// Uses SameSite=Lax for all cookies. The OAuth round-trip is a top-level
+/// cross-site redirect (provider -> /auth/:provider/callback), which Lax
+/// cookies still ride — while SameSite=None cookies are silently dropped by
+/// browsers with third-party-cookie restrictions (Safari ITP, Chrome
+/// strict/incognito). That drop is the cause of "Missing or invalid state
+/// cookie" login failures (same root cause as hompimpah #135); Lax also
+/// shrinks the CSRF surface of the session cookie (#163).
 /// `secure` controls whether the Secure flag is included (false for local HTTP).
 fn build_cookie(name: &str, value: &str, max_age_secs: i64, secure: bool) -> String {
-    // SameSite=None requires Secure in production. For local HTTP, omit both None and Secure
-    // so the cookie defaults to SameSite=Lax (browsers allow this on localhost redirects).
+    // For local HTTP, omit Secure so the cookie is not dropped on plain http
+    // (browsers allow Lax cookies on localhost redirects).
     if secure {
-        format!("{name}={value}; Path=/; HttpOnly; Secure; SameSite=None; Max-Age={max_age_secs}")
+        format!("{name}={value}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age={max_age_secs}")
     } else {
         format!("{name}={value}; Path=/; HttpOnly; SameSite=Lax; Max-Age={max_age_secs}")
     }
@@ -376,7 +382,7 @@ fn build_cookie(name: &str, value: &str, max_age_secs: i64, secure: bool) -> Str
 /// Build a Set-Cookie value that immediately expires the cookie.
 fn clear_cookie(name: &str, secure: bool) -> String {
     if secure {
-        format!("{name}=; Path=/; HttpOnly; Secure; SameSite=None; Max-Age=0")
+        format!("{name}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0")
     } else {
         format!("{name}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0")
     }
@@ -428,6 +434,8 @@ mod tests {
         assert!(c.contains("session=abc123"));
         assert!(c.contains("HttpOnly"));
         assert!(c.contains("Secure"));
+        assert!(c.contains("SameSite=Lax"));
+        assert!(!c.contains("SameSite=None"));
         assert!(c.contains("Max-Age=604800"));
     }
 
@@ -437,6 +445,8 @@ mod tests {
         let c = build_cookie("session", "abc123", 604800, false);
         assert!(c.contains("session=abc123"));
         assert!(c.contains("HttpOnly"));
+        assert!(c.contains("SameSite=Lax"));
+        assert!(!c.contains("SameSite=None"));
         assert!(!c.contains("Secure"));
     }
 

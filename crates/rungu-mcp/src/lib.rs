@@ -168,6 +168,7 @@ fn parse_sort(s: Option<&str>) -> PostSort {
         Some("most_votes") => PostSort::MostVotes,
         Some("least_votes") => PostSort::LeastVotes,
         Some("recently_updated") => PostSort::RecentlyUpdated,
+        Some("trending") => PostSort::Trending,
         _ => PostSort::Newest,
     }
 }
@@ -446,7 +447,8 @@ async fn get_trending(params: &Value, store: &Store) -> Result<Value, String> {
     let (posts, total) = store
         .list_posts(ListPostsParams {
             project_id: &project.id,
-            sort: PostSort::MostVotes,
+            // Real trending (#203): 7-day vote velocity, tie-broken by totals.
+            sort: PostSort::Trending,
             status: None,
             category: None,
             query: None,

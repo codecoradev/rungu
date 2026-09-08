@@ -129,6 +129,16 @@ fn category_to_str(c: PostCategory) -> &'static str {
 /// which the caller treats as "no MATCH".
 ///
 /// Example: `"dark mode"` → `"dark* mode*"`.
+/// Sanitize a single FTS5 token: keep alphanumerics/underscore/hyphen, drop
+/// FTS5-special characters. Returns None when nothing alphanumeric remains.
+fn sanitize_fts_token(tok: &str) -> Option<String> {
+    if !tok.chars().any(|c| c.is_alphanumeric()) {
+        return None;
+    }
+    let cleaned: String = tok.chars().filter(|c| c.is_alphanumeric() || *c == '_' || *c == '-').collect();
+    if cleaned.is_empty() { None } else { Some(cleaned) }
+}
+
 fn sanitize_fts_query(input: &str) -> String {
     let trimmed = input.trim();
     if trimmed.is_empty() {
@@ -136,17 +146,8 @@ fn sanitize_fts_query(input: &str) -> String {
     }
     trimmed
         .split_whitespace()
-        // Drop anything that's only punctuation — avoids feeding FTS5 lone
-        // operators that would either error or match nothing.
-        .filter(|tok| tok.chars().any(|c| c.is_alphanumeric()))
-        .map(|tok| {
-            // Strip any FTS5-special chars so the user can't inject query syntax.
-            // We keep alphanumerics, underscores, and hyphens (common in
-            // identifiers like "v0-1-2"); everything else is dropped per-token.
-            let cleaned: String = tok.chars().filter(|c| c.is_alphanumeric() || *c == '_' || *c == '-').collect();
-            if cleaned.is_empty() { cleaned } else { format!("{cleaned}*") }
-        })
-        .filter(|tok| !tok.is_empty())
+        .filter_map(sanitize_fts_token)
+        .map(|cleaned| format!("{cleaned}*"))
         .collect::<Vec<_>>()
         .join(" ")
 }
@@ -419,6 +420,17 @@ impl Store {
             PostSort::MostVotes => "p.vote_count DESC, p.created_at DESC",
             PostSort::LeastVotes => "p.vote_count ASC, p.created_at DESC",
             PostSort::RecentlyUpdated => "p.updated_at DESC",
+            // Trending (#203): recent vote velocity from analytics events via a
+            // correlated scalar subquery (no aggregate-in-ORDER-BY, so it works
+            // without GROUP BY on both dialects). Posts without events score 0
+            // and fall back to total votes, then recency.
+            PostSort::Trending => {
+                if self.is_sqlite {
+                    "(SELECT COUNT(*) FROM analytics_events ae WHERE ae.post_id = p.id AND ae.event_type = 'vote' AND ae.created_at >= datetime('now', '-7 days')) DESC, p.vote_count DESC, p.created_at DESC"
+                } else {
+                    "(SELECT COUNT(*) FROM analytics_events ae WHERE ae.post_id = p.id AND ae.event_type = 'vote' AND ae.created_at >= NOW() - INTERVAL '7 days') DESC, p.vote_count DESC, p.created_at DESC"
+                }
+            }
         };
 
         // Search JOIN + WHERE fragment, emitted only when a search path is active.
@@ -857,6 +869,176 @@ impl Store {
 
     /// Delete a comment.
     /// Delete a comment and decrement the post's comment_count in a transaction.
+    /// Find posts similar to the given post (same project, different id),
+    /// ranked by FTS on the post's title words, excluding itself (#206).
+    /// Best-effort dedup helper — a thin wrapper over `list_posts` search.
+    pub async fn find_similar_posts(&self, post_id: &str, limit: i64) -> Result<Vec<PostDetail>> {
+        let post = self.get_post(post_id, None).await?.ok_or_else(|| anyhow::anyhow!("Post not found"))?;
+
+        // Deliberately LIKE-based, not FTS5: sqlx's AnyDriver fails to prepare
+        // the FTS5 count query when the MATCH expression contains OR groups
+        // (reproduced live, #206). OR-of-prefix-tokens is the right semantic
+        // for dedup ("similar"), and LIKE covers both dialects identically.
+        // Use the 3 longest title tokens (≥4 chars) as OR-ed LIKE patterns —
+        // a single keyword misses short-title duplicates ("Dark mode please").
+        let mut results = Vec::new();
+        let mut tokens: Vec<String> = post
+            .post
+            .title
+            .split_whitespace()
+            .map(|t| t.trim_matches(|c: char| !c.is_alphanumeric()).to_string())
+            .filter(|t| t.chars().count() >= 4)
+            .collect();
+        tokens.sort_by_key(|t| std::cmp::Reverse(t.chars().count()));
+        tokens.truncate(3);
+        tokens.dedup();
+        if !tokens.is_empty() {
+            let like_clause = tokens
+                .iter()
+                .map(|_| "(p.title LIKE ? OR p.description LIKE ?)".to_string())
+                .collect::<Vec<_>>()
+                .join(" OR ");
+            let op = if self.is_sqlite { "LIKE" } else { "ILIKE" };
+            let like_clause = like_clause.replace("LIKE", op);
+            let sql = format!(
+                "SELECT p.*, u.id as user_id, u.name as user_name, u.avatar_url as user_avatar \
+                 FROM posts p \
+                 LEFT JOIN users u ON p.created_by = u.id \
+                 WHERE p.project_id = ? AND p.id != ? AND ({like_clause}) \
+                 ORDER BY p.vote_count DESC, p.created_at DESC LIMIT ?"
+            );
+            let mut q = sqlx::query(&sql).bind(&post.post.project_id).bind(post_id);
+            for t in &tokens {
+                let like = format!("%{t}%");
+                q = q.bind(like.clone()).bind(like);
+            }
+            let rows = q.bind(limit).fetch_all(&self.pool).await.context("Failed to find similar posts")?;
+            for row in rows {
+                let id: String = row.try_get("id")?;
+                let title: String = row.try_get("title")?;
+                let description: Option<String> = row.try_get("description")?;
+                let category = parse_category(&row.try_get::<String, _>("category")?);
+                let status = parse_status(&row.try_get::<String, _>("status")?);
+                let vote_count: i64 = row.try_get("vote_count")?;
+                let comment_count: i64 = row.try_get("comment_count")?;
+                let created_at: String = row.try_get("created_at")?;
+                let updated_at: String = row.try_get("updated_at")?;
+                let created_by: String = row.try_get("created_by")?;
+                let uid: Option<String> = row.try_get("user_id")?;
+                let uname: Option<String> = row.try_get("user_name")?;
+                let uavatar: Option<String> = row.try_get("user_avatar")?;
+                results.push(PostDetail {
+                    post: rungu_proto::Post {
+                        id,
+                        project_id: post.post.project_id.clone(),
+                        title,
+                        description: description.unwrap_or_default(),
+                        category,
+                        status,
+                        vote_count,
+                        comment_count,
+                        created_by,
+                        created_at: chrono::DateTime::parse_from_rfc3339(&created_at)
+                            .map(|t| t.with_timezone(&Utc))
+                            .unwrap_or_else(|_| Utc::now()),
+                        updated_at: chrono::DateTime::parse_from_rfc3339(&updated_at)
+                            .map(|t| t.with_timezone(&Utc))
+                            .unwrap_or_else(|_| Utc::now()),
+                    },
+                    creator: rungu_proto::UserSummary {
+                        id: uid.unwrap_or_default(),
+                        name: uname.unwrap_or_else(|| "User".to_string()),
+                        avatar_url: uavatar.unwrap_or_default(),
+                    },
+                    user_voted: false,
+                });
+            }
+        }
+        Ok(results)
+    }
+
+    /// Set (or clear, with `None`) the official team response comment on a post (#205).
+    /// Returns the previous value so callers can report changes accurately.
+    pub async fn set_official_response(&self, post_id: &str, comment_id: Option<&str>) -> Result<Option<String>> {
+        let previous: Option<String> =
+            sqlx::query_scalar("SELECT comment_id FROM post_official_response WHERE post_id = ?")
+                .bind(post_id)
+                .fetch_optional(&self.pool)
+                .await
+                .context("Failed to read official response")?
+                .flatten();
+
+        if let Some(cid) = comment_id {
+            // The comment must belong to the post — otherwise the pinned
+            // block could render a comment from an entirely different thread.
+            let belongs = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM comments WHERE id = ? AND post_id = ?")
+                .bind(cid)
+                .bind(post_id)
+                .fetch_one(&self.pool)
+                .await
+                .context("Failed to check comment")?;
+            if belongs == 0 {
+                anyhow::bail!("Comment does not belong to this post");
+            }
+        }
+
+        sqlx::query(
+            "INSERT INTO post_official_response (post_id, comment_id, updated_at) VALUES (?, ?, ?) \
+             ON CONFLICT (post_id) DO UPDATE SET comment_id = excluded.comment_id, updated_at = excluded.updated_at",
+        )
+        .bind(post_id)
+        .bind(comment_id)
+        .bind(Utc::now().to_rfc3339())
+        .execute(&self.pool)
+        .await
+        .context("Failed to set official response")?;
+        Ok(previous)
+    }
+
+    /// Fetch the official response comment (with author) for a post, if set (#205).
+    pub async fn get_official_response(&self, post_id: &str) -> Result<Option<CommentDetail>> {
+        let id: Option<String> = sqlx::query_scalar("SELECT comment_id FROM post_official_response WHERE post_id = ?")
+            .bind(post_id)
+            .fetch_optional(&self.pool)
+            .await
+            .context("Failed to read official response")?
+            .flatten();
+        match id {
+            Some(cid) => {
+                let comment = sqlx::query_as::<
+                    _,
+                    (String, Option<String>, String, String, String, Option<String>, Option<String>, Option<String>),
+                >(
+                    "SELECT c.id, c.parent_id, c.content, c.created_by, c.created_at, \
+                     u.id as user_id, u.name as user_name, u.avatar_url as user_avatar \
+                     FROM comments c LEFT JOIN users u ON c.created_by = u.id WHERE c.id = ?",
+                )
+                .bind(&cid)
+                .fetch_optional(&self.pool)
+                .await
+                .context("Failed to fetch official response")?;
+                Ok(comment.map(|(id, parent_id, content, created_by, created_at, uid, uname, uavatar)| CommentDetail {
+                    comment: rungu_proto::Comment {
+                        id,
+                        post_id: post_id.to_string(),
+                        parent_id,
+                        content,
+                        created_by,
+                        created_at: chrono::DateTime::parse_from_rfc3339(&created_at)
+                            .map(|t| t.with_timezone(&Utc))
+                            .unwrap_or_else(|_| Utc::now()),
+                    },
+                    creator: rungu_proto::UserSummary {
+                        id: uid.unwrap_or_default(),
+                        name: uname.unwrap_or_else(|| "User".to_string()),
+                        avatar_url: uavatar.unwrap_or_default(),
+                    },
+                }))
+            }
+            None => Ok(None),
+        }
+    }
+
     pub async fn delete_comment(&self, comment_id: &str) -> Result<()> {
         let mut tx = self.pool.begin().await.context("Failed to begin transaction")?;
 

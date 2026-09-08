@@ -7,7 +7,7 @@ use axum::{Json, Router};
 use rungu_auth::CurrentUser;
 use rungu_proto::{CreatePostBody, PostCategory, PostDetail, PostSort, PostStatus, UpdatePostBody};
 use serde::Deserialize;
-use utoipa::IntoParams;
+use utoipa::{IntoParams, ToSchema};
 
 use crate::AppState;
 use crate::error::ApiError;
@@ -37,6 +37,8 @@ pub fn router() -> Router<AppState> {
         .route("/projects/{slug}/roadmap", axum::routing::get(get_project_roadmap))
         .route("/projects/{slug}/changelog", axum::routing::get(get_project_changelog))
         .route("/posts/{id}", axum::routing::get(get_post).patch(update_post).delete(delete_post))
+        .route("/posts/{id}/official-response", axum::routing::get(get_official_response).put(set_official_response))
+        .route("/posts/{id}/similar", axum::routing::get(get_similar_posts))
 }
 
 // ── Handlers ───────────────────────────────────────────────────────────
@@ -480,7 +482,125 @@ pub async fn get_project_changelog(
     })))
 }
 
+// ── Official team response (#205) ──────────────────────────────────────
+
+/// Get the official team response for a post (public).
+#[utoipa::path(
+    get,
+    path = "/api/posts/{id}/official-response",
+    responses(
+        (status = 200, description = "Official response (or null)", body = serde_json::Value),
+        (status = 404, description = "Post not found", body = serde_json::Value),
+    ),
+    tag = "posts",
+)]
+pub async fn get_official_response(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<impl IntoResponse, ApiError> {
+    let post = state.store.get_post(&id, None).await?.ok_or_else(|| ApiError::not_found("Post not found"))?;
+    let response = state.store.get_official_response(&post.post.id).await?;
+    Ok(Json(serde_json::json!({ "data": response })))
+}
+
+/// Set or remove the official team response (admin only) (#205).
+/// Authz happens BEFORE body validation — response codes must not leak
+/// post existence to non-admins (#162 rule).
+#[utoipa::path(
+    put,
+    path = "/api/posts/{id}/official-response",
+    request_body = OfficialResponseBody,
+    responses(
+        (status = 200, description = "Official response updated", body = serde_json::Value),
+        (status = 400, description = "Validation error", body = serde_json::Value),
+        (status = 401, description = "Not authenticated", body = serde_json::Value),
+        (status = 403, description = "Admin access required", body = serde_json::Value),
+    ),
+    security(("session" = [])),
+    tag = "posts",
+)]
+pub async fn set_official_response(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    user: CurrentUser,
+    body: Result<Json<OfficialResponseBody>, axum::extract::rejection::JsonRejection>,
+) -> Result<impl IntoResponse, ApiError> {
+    // 1. Authn (extractor) + 2. authz — before any body parsing.
+    // `user.0` is the inner CurrentUserData (id/email/role as strings).
+    ApiError::require_admin(&user.0)?;
+
+    let post = state.store.get_post(&id, None).await?.ok_or_else(|| ApiError::not_found("Post not found"))?;
+
+    // 3. Body — last.
+    let body = match body {
+        Ok(Json(b)) => b,
+        Err(_) => return Err(ApiError::bad_request("Invalid request body")),
+    };
+    if let Some(cid) = body.comment_id.as_deref() {
+        if cid.trim().is_empty() {
+            return Err(ApiError::bad_request("comment_id cannot be empty"));
+        }
+    }
+
+    let previous = state
+        .store
+        .set_official_response(&post.post.id, body.comment_id.as_deref())
+        .await
+        .map_err(|e| ApiError::bad_request(format!("{e:#}")))?;
+
+    let response = state.store.get_official_response(&post.post.id).await?;
+
+    // Webhook: post.official_response_changed (fire-and-forget).
+    let project_id = post.post.project_id.clone();
+    crate::webhook::dispatch_event(
+        std::sync::Arc::new(state.store.clone()),
+        state.http_client.clone(),
+        project_id,
+        rungu_proto::WebhookEventType::OfficialResponseChanged,
+        serde_json::json!({
+            "event": "post.official_response_changed",
+            "post_id": post.post.id,
+            "comment_id": body.comment_id,
+            "previous_comment_id": previous,
+        }),
+    );
+
+    Ok(Json(serde_json::json!({
+        "data": {
+            "post_id": post.post.id,
+            "official_response": response,
+        }
+    })))
+}
+
+// ── Similar posts (#206) ───────────────────────────────────────────────
+
+/// Public list of similar posts (title-keyword match, max 3) for dedup UX.
+#[utoipa::path(
+    get,
+    path = "/api/posts/{id}/similar",
+    responses(
+        (status = 200, description = "Up to 3 similar posts", body = serde_json::Value),
+        (status = 404, description = "Post not found", body = serde_json::Value),
+    ),
+    tag = "posts",
+)]
+pub async fn get_similar_posts(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<impl IntoResponse, ApiError> {
+    let similar = state.store.find_similar_posts(&id, 3).await?;
+    Ok(Json(serde_json::json!({ "data": similar })))
+}
+
 // ── Parsing helpers ────────────────────────────────────────────────────
+
+/// Request body for setting the official team response (#205).
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct OfficialResponseBody {
+    /// Comment id to pin as the official response, or null to remove it.
+    pub comment_id: Option<String>,
+}
 
 pub(crate) fn parse_sort(s: Option<&str>) -> PostSort {
     match s {
@@ -488,6 +608,7 @@ pub(crate) fn parse_sort(s: Option<&str>) -> PostSort {
         Some("most_votes") => PostSort::MostVotes,
         Some("least_votes") => PostSort::LeastVotes,
         Some("recently_updated") => PostSort::RecentlyUpdated,
+        Some("trending") => PostSort::Trending,
         _ => PostSort::Newest,
     }
 }
@@ -522,6 +643,7 @@ mod tests {
         assert!(matches!(parse_sort(None), PostSort::Newest));
         assert!(matches!(parse_sort(Some("oldest")), PostSort::Oldest));
         assert!(matches!(parse_sort(Some("most_votes")), PostSort::MostVotes));
+        assert!(matches!(parse_sort(Some("trending")), PostSort::Trending));
         assert!(matches!(parse_sort(Some("unknown")), PostSort::Newest));
     }
 
