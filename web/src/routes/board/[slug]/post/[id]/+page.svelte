@@ -6,7 +6,7 @@
     import type { PostDetail, Comment, CurrentUser, PostStatus, PostCategory } from '$lib/api/types';
     import StatusBadge from '$lib/components/StatusBadge.svelte';
     import CategoryBadge from '$lib/components/CategoryBadge.svelte';
-    import VoteButton from '$lib/components/VoteButton.svelte';
+    import VoteRail from '$lib/components/VoteRail.svelte';
     import CommentThread from '$lib/components/CommentThread.svelte';
     import AttachmentGallery from '$lib/components/AttachmentGallery.svelte';
     import { Button } from '$lib/components/ui/button';
@@ -194,12 +194,11 @@
         ← Back to board
     </Button>
 
+    <!-- Card.Header is a grid: data-slot="card-action" activates the built-in
+         `grid-cols-[1fr_auto]` layout so the vote rail docks on the right. -->
     <Card.Root class="mt-3">
-        <Card.Header class="flex-row items-start gap-4">
-            <div class="shrink-0">
-                <VoteButton postId={post.id} voted={post.user_voted} count={post.vote_count} onvote={handleVote} />
-            </div>
-            <div class="min-w-0 flex-1">
+        <Card.Header class="items-stretch gap-0">
+            <div class="min-w-0 pr-4">
                 <div class="mb-2 flex flex-wrap items-center gap-2">
                     <CategoryBadge category={post.category} />
                     {#if canEditStatus}
@@ -234,6 +233,9 @@
                     <span>·</span>
                     <span>{timeAgo(post.created_at)}</span>
                 </div>
+            </div>
+            <div class="flex shrink-0 items-start border-l border-[var(--vote-rail-divider-color)] pl-4">
+                <VoteRail postId={post.id} voted={post.user_voted} count={post.vote_count} onvote={handleVote} />
             </div>
         </Card.Header>
         {#if post.description}

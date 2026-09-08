@@ -15,5 +15,9 @@ export default defineConfig({
         environment: 'jsdom',
         globals: true,
         setupFiles: ['src/test-setup.ts']
-    }
+    },
+    // Component tests (@testing-library/svelte) must resolve Svelte's browser
+    // build, not the server one — otherwise mount() fails with
+    // lifecycle_function_unavailable. Scoped to vitest runs only.
+    resolve: process.env.VITEST ? { conditions: ['browser'] } : undefined
 });
