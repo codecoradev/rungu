@@ -38,6 +38,7 @@ pub fn router() -> Router<AppState> {
         .route("/projects/{slug}/changelog", axum::routing::get(get_project_changelog))
         .route("/posts/{id}", axum::routing::get(get_post).patch(update_post).delete(delete_post))
         .route("/posts/{id}/official-response", axum::routing::get(get_official_response).put(set_official_response))
+        .route("/posts/{id}/similar", axum::routing::get(get_similar_posts))
 }
 
 // ── Handlers ───────────────────────────────────────────────────────────
@@ -570,6 +571,26 @@ pub async fn set_official_response(
             "official_response": response,
         }
     })))
+}
+
+// ── Similar posts (#206) ───────────────────────────────────────────────
+
+/// Public list of similar posts (title-keyword match, max 3) for dedup UX.
+#[utoipa::path(
+    get,
+    path = "/api/posts/{id}/similar",
+    responses(
+        (status = 200, description = "Up to 3 similar posts", body = serde_json::Value),
+        (status = 404, description = "Post not found", body = serde_json::Value),
+    ),
+    tag = "posts",
+)]
+pub async fn get_similar_posts(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<impl IntoResponse, ApiError> {
+    let similar = state.store.find_similar_posts(&id, 3).await?;
+    Ok(Json(serde_json::json!({ "data": similar })))
 }
 
 // ── Parsing helpers ────────────────────────────────────────────────────

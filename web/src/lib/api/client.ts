@@ -113,6 +113,9 @@ export const api = {
             { method: 'PUT', body: JSON.stringify({ comment_id: commentId }) },
         ).then((r) => r.data),
 
+    getSimilarPosts: (postId: string) =>
+        request<DataResponse<PostDetail[]>>(`/api/posts/${seg(postId)}/similar`).then((r) => r.data),
+
     createProject: (body: { name: string; slug?: string; description?: string }) =>
         request<DataResponse<Project>>('/api/projects', {
             method: 'POST',
