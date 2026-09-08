@@ -9,9 +9,12 @@
     let {
         slug,
         onsubmit,
+        showTitle = true,
     }: {
         slug: string;
         onsubmit: (data: { title: string; description: string; category: PostCategory }) => Promise<void>;
+        /** Hide the card title when the form is embedded in a dialog that already has one. */
+        showTitle?: boolean;
     } = $props();
 
     let title = $state('');
@@ -49,7 +52,7 @@
 </script>
 
 <Card.Root>
-    <Card.Header>
+    <Card.Header class={showTitle ? '' : 'hidden'}>
         <Card.Title class="text-base">New Post</Card.Title>
     </Card.Header>
     <Card.Content>
