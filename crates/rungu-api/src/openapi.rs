@@ -26,6 +26,8 @@ use utoipa::OpenApi;
         crate::post_routes::get_post,
         crate::post_routes::update_post,
         crate::post_routes::delete_post,
+        crate::post_routes::get_official_response,
+        crate::post_routes::set_official_response,
         crate::post_routes::get_project_roadmap,
         crate::post_routes::get_project_changelog,
         // Votes

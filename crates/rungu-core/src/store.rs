@@ -868,6 +868,88 @@ impl Store {
 
     /// Delete a comment.
     /// Delete a comment and decrement the post's comment_count in a transaction.
+    /// Set (or clear, with `None`) the official team response comment on a post (#205).
+    /// Returns the previous value so callers can report changes accurately.
+    pub async fn set_official_response(&self, post_id: &str, comment_id: Option<&str>) -> Result<Option<String>> {
+        let previous: Option<String> =
+            sqlx::query_scalar("SELECT comment_id FROM post_official_response WHERE post_id = ?")
+                .bind(post_id)
+                .fetch_optional(&self.pool)
+                .await
+                .context("Failed to read official response")?
+                .flatten();
+
+        if let Some(cid) = comment_id {
+            // The comment must belong to the post — otherwise the pinned
+            // block could render a comment from an entirely different thread.
+            let belongs = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM comments WHERE id = ? AND post_id = ?")
+                .bind(cid)
+                .bind(post_id)
+                .fetch_one(&self.pool)
+                .await
+                .context("Failed to check comment")?;
+            if belongs == 0 {
+                anyhow::bail!("Comment does not belong to this post");
+            }
+        }
+
+        sqlx::query(
+            "INSERT INTO post_official_response (post_id, comment_id, updated_at) VALUES (?, ?, ?) \
+             ON CONFLICT (post_id) DO UPDATE SET comment_id = excluded.comment_id, updated_at = excluded.updated_at",
+        )
+        .bind(post_id)
+        .bind(comment_id)
+        .bind(Utc::now().to_rfc3339())
+        .execute(&self.pool)
+        .await
+        .context("Failed to set official response")?;
+        Ok(previous)
+    }
+
+    /// Fetch the official response comment (with author) for a post, if set (#205).
+    pub async fn get_official_response(&self, post_id: &str) -> Result<Option<CommentDetail>> {
+        let id: Option<String> = sqlx::query_scalar("SELECT comment_id FROM post_official_response WHERE post_id = ?")
+            .bind(post_id)
+            .fetch_optional(&self.pool)
+            .await
+            .context("Failed to read official response")?
+            .flatten();
+        match id {
+            Some(cid) => {
+                let comment = sqlx::query_as::<
+                    _,
+                    (String, Option<String>, String, String, String, Option<String>, Option<String>, Option<String>),
+                >(
+                    "SELECT c.id, c.parent_id, c.content, c.created_by, c.created_at, \
+                     u.id as user_id, u.name as user_name, u.avatar_url as user_avatar \
+                     FROM comments c LEFT JOIN users u ON c.created_by = u.id WHERE c.id = ?",
+                )
+                .bind(&cid)
+                .fetch_optional(&self.pool)
+                .await
+                .context("Failed to fetch official response")?;
+                Ok(comment.map(|(id, parent_id, content, created_by, created_at, uid, uname, uavatar)| CommentDetail {
+                    comment: rungu_proto::Comment {
+                        id,
+                        post_id: post_id.to_string(),
+                        parent_id,
+                        content,
+                        created_by,
+                        created_at: chrono::DateTime::parse_from_rfc3339(&created_at)
+                            .map(|t| t.with_timezone(&Utc))
+                            .unwrap_or_else(|_| Utc::now()),
+                    },
+                    creator: rungu_proto::UserSummary {
+                        id: uid.unwrap_or_default(),
+                        name: uname.unwrap_or_else(|| "User".to_string()),
+                        avatar_url: uavatar.unwrap_or_default(),
+                    },
+                }))
+            }
+            None => Ok(None),
+        }
+    }
+
     pub async fn delete_comment(&self, comment_id: &str) -> Result<()> {
         let mut tx = self.pool.begin().await.context("Failed to begin transaction")?;
 

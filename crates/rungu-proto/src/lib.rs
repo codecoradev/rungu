@@ -416,6 +416,8 @@ pub enum WebhookEventType {
     PostCreated,
     PostStatusChanged,
     CommentCreated,
+    /// An admin set/changed/removed the official team response (#205).
+    OfficialResponseChanged,
 }
 
 impl WebhookEventType {
@@ -424,6 +426,7 @@ impl WebhookEventType {
             Self::PostCreated => "post.created",
             Self::PostStatusChanged => "post.status_changed",
             Self::CommentCreated => "comment.created",
+            Self::OfficialResponseChanged => "post.official_response_changed",
         }
     }
 }

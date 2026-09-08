@@ -1,5 +1,6 @@
 <script lang="ts">
     import type { Comment } from '$lib/api/types';
+    import type { Snippet } from 'svelte';
     import { timeAgo } from '$lib/utils';
     import { Button } from '$lib/components/ui/button';
 
@@ -8,11 +9,14 @@
         currentUserId,
         onreply,
         ondelete,
+        commentActions,
     }: {
         comments: Comment[];
         currentUserId?: string;
         onreply?: (parentId: string) => void;
         ondelete?: (id: string) => void;
+        /** Optional extra per-comment actions (e.g. admin "official response" pin, #205). */
+        commentActions?: Snippet<[Comment]>;
     } = $props();
 
     // Build parent → children map
@@ -64,11 +68,14 @@
                 <span class="text-muted-foreground">· {timeAgo(comment.created_at)}</span>
             </div>
             <p class="mt-1.5 whitespace-pre-wrap text-sm text-muted-foreground">{comment.content}</p>
-            <div class="mt-2 flex gap-2">
+            <div class="mt-2 flex flex-wrap gap-2">
                 {#if onreply}
                     <Button variant="ghost" size="xs" onclick={() => onreply(comment.id)}>
                         Reply
                     </Button>
+                {/if}
+                {#if commentActions}
+                    {@render commentActions(comment)}
                 {/if}
                 {#if ondelete && comment.created_by === currentUserId}
                     {#if confirmingDelete === comment.id}
