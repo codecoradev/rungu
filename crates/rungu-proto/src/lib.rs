@@ -231,6 +231,9 @@ pub enum PostSort {
     MostVotes,
     LeastVotes,
     RecentlyUpdated,
+    /// Vote velocity over the last 7 days (analytics `vote` events), tie-broken
+    /// by total votes (#203). Falls back to vote totals for posts without data.
+    Trending,
 }
 
 impl Default for PostSort {

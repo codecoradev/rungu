@@ -6,6 +6,7 @@
     import type { Project, PostDetail, PostStatus, PostCategory } from '$lib/api/types';
     import PostCard from '$lib/components/PostCard.svelte';
     import PostForm from '$lib/components/PostForm.svelte';
+    import SortTabs from '$lib/components/SortTabs.svelte';
     import { Button } from '$lib/components/ui/button';
     import { Input } from '$lib/components/ui/input';
     import * as Card from '$lib/components/ui/card';
@@ -31,6 +32,22 @@
     let error = $state('');
 
     let sort = $state('newest');
+    // URL is the source of truth for sort (#203): hydrate from ?sort= on boot
+    // and push changes back so reload/share preserves the state. Falls back to
+    // the default for unknown values (BE also clamps unknown → newest).
+    // (Keep this list in sync with `sortOptions` below; inlined here because
+    // this initializer runs before that const exists.)
+    {
+        const fromUrl = new URLSearchParams(window.location.search).get('sort');
+        if (fromUrl && ['newest', 'trending', 'most_votes', 'recently_updated'].includes(fromUrl)) sort = fromUrl;
+    }
+    $effect(() => {
+        if (!initialized) return;
+        const url = new URL(window.location.href);
+        if (sort === 'newest') url.searchParams.delete('sort');
+        else url.searchParams.set('sort', sort);
+        if (url.href !== window.location.href) history.replaceState(history.state, '', url.href);
+    });
     let statusFilter = $state<PostStatus | ''>('');
     let categoryFilter = $state<PostCategory | ''>('');
     let searchQuery = $state('');
@@ -49,6 +66,7 @@
 
     const sortOptions = [
         { value: 'newest', label: 'Newest' },
+        { value: 'trending', label: 'Trending' },
         { value: 'most_votes', label: 'Most Voted' },
         { value: 'recently_updated', label: 'Recently Updated' },
     ];
@@ -392,11 +410,7 @@
                         </span>
                     {/if}
                 </div>
-                <select bind:value={sort} class="max-w-[45%] shrink-0 rounded-md border border-input bg-background px-3 py-2 text-base sm:text-sm" aria-label="Sort posts">
-                    {#each sortOptions as opt (opt.value)}
-                        <option value={opt.value}>{opt.label}</option>
-                    {/each}
-                </select>
+                <SortTabs options={sortOptions} value={sort} onchange={(v) => (sort = v)} />
             </div>
 
             {#if statusFilter || categoryFilter}
