@@ -2,6 +2,7 @@
     import { branding } from '$lib/branding.svelte';
     import { onMount } from 'svelte';
     import CircleAlert from '@lucide/svelte/icons/circle-alert';
+    import ShieldCheck from '@lucide/svelte/icons/shield-check';
     import { api, ApiError } from '$lib/api/client';
     import type { PostDetail, Comment, CurrentUser, PostStatus, PostCategory } from '$lib/api/types';
     import StatusBadge from '$lib/components/StatusBadge.svelte';
@@ -52,6 +53,9 @@
     let commentText = $state('');
     let replyTo = $state<string | null>(null);
     let commentLoading = $state(false);
+    // Official team response (#205)
+    let official = $state<Comment | null>(null);
+    let officialBusy = $state(false);
 
     const statusOptions: PostStatus[] = ['open', 'planned', 'in_progress', 'done', 'declined'];
     const categoryOptions: PostCategory[] = ['feedback', 'bug', 'feature', 'question'];
@@ -64,10 +68,25 @@
         try {
             post = await api.getPost(postId);
             comments = await api.listComments(postId);
+            api.getOfficialResponse(postId).then((r) => (official = r)).catch(() => {});
         } catch (e) {
             error = e instanceof ApiError && e.status === 404 ? 'Post not found' : 'Failed to load post';
         } finally {
             loading = false;
+        }
+    }
+
+    async function setOfficialResponse(commentId: string | null) {
+        if (!post) return;
+        officialBusy = true;
+        try {
+            const res = await api.setOfficialResponse(post.id, commentId);
+            official = res.official_response;
+            toastSuccess(commentId ? 'Official response pinned ✓' : 'Official response removed ✓');
+        } catch {
+            toastError('Failed to update official response');
+        } finally {
+            officialBusy = false;
         }
     }
 
@@ -247,12 +266,46 @@
         {/if}
     </Card.Root>
 
+    <!-- Official team response (#205): pinned above the thread, distinct tint
+         + left accent border, role badge. -->
+    {#if official}
+        <section class="mt-4" aria-label="Official team response">
+            <div class="rounded-xl border border-primary/30 border-l-4 border-l-primary bg-primary/5 p-4">
+                <div class="mb-2 flex flex-wrap items-center gap-2">
+                    <span class="inline-flex items-center gap-1 rounded-full bg-primary px-2 py-0.5 text-xs font-medium text-primary-foreground">
+                        <ShieldCheck class="size-3.5" aria-hidden="true" /> Team
+                    </span>
+                    <span class="text-sm font-semibold text-foreground">{official.creator?.name || 'Team'}</span>
+                    <span class="text-xs text-muted-foreground">· {timeAgo(official.created_at)}</span>
+                    {#if isAdmin}
+                        <Button
+                            variant="ghost"
+                            size="xs"
+                            class="ml-auto"
+                            disabled={officialBusy}
+                            onclick={() => setOfficialResponse(null)}
+                        >
+                            Unpin response
+                        </Button>
+                    {/if}
+                </div>
+                <p class="whitespace-pre-wrap text-sm leading-relaxed text-foreground">{official.content}</p>
+            </div>
+        </section>
+    {/if}
+
     <section class="mt-4">
         <AttachmentGallery postId={post.id} canEdit={!!user && (user.id === post.created_by || user.role === 'admin')} />
     </section>
 
     <section class="mt-6">
         <h2 class="mb-4 text-sm font-semibold">Comments ({comments.length})</h2>
+
+        {#if isAdmin && !official}
+            <div class="mb-4 rounded-xl border border-dashed border-border p-3 text-sm text-muted-foreground">
+                No official response yet. Pin one of the comments below as the team's answer.
+            </div>
+        {/if}
 
         {#if user}
             <form onsubmit={handleComment} class="mb-6">
@@ -298,6 +351,20 @@
             currentUserId={user?.id}
             onreply={(parentId) => (replyTo = parentId)}
             ondelete={handleDeleteComment}
-        />
+        >
+            {#snippet commentActions(comment: Comment)}
+                {#if isAdmin && official?.id !== comment.id}
+                    <Button
+                        variant="ghost"
+                        size="xs"
+                        disabled={officialBusy}
+                        onclick={() => setOfficialResponse(comment.id)}
+                        title="Pin this comment as the official team response"
+                    >
+                        <ShieldCheck class="size-3.5" aria-hidden="true" /> Official response
+                    </Button>
+                {/if}
+            {/snippet}
+        </CommentThread>
     </section>
 {/if}

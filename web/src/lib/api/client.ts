@@ -104,6 +104,15 @@ export const api = {
             }>
         >(`/api/projects/${seg(slug)}/counts`).then((r) => r.data),
 
+    getOfficialResponse: (postId: string) =>
+        request<DataResponse<Comment | null>>(`/api/posts/${seg(postId)}/official-response`).then((r) => r.data),
+
+    setOfficialResponse: (postId: string, commentId: string | null) =>
+        request<DataResponse<{ post_id: string; official_response: Comment | null }>>(
+            `/api/posts/${seg(postId)}/official-response`,
+            { method: 'PUT', body: JSON.stringify({ comment_id: commentId }) },
+        ).then((r) => r.data),
+
     createProject: (body: { name: string; slug?: string; description?: string }) =>
         request<DataResponse<Project>>('/api/projects', {
             method: 'POST',
