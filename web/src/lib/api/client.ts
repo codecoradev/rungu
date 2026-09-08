@@ -95,6 +95,27 @@ export const api = {
     getProject: (slug: string) =>
         request<DataResponse<Project>>(`/api/projects/${seg(slug)}`).then((r) => r.data),
 
+    getProjectCounts: (slug: string) =>
+        request<
+            DataResponse<{
+                total: number;
+                by_status: Record<string, number>;
+                by_category: Record<string, number>;
+            }>
+        >(`/api/projects/${seg(slug)}/counts`).then((r) => r.data),
+
+    getOfficialResponse: (postId: string) =>
+        request<DataResponse<Comment | null>>(`/api/posts/${seg(postId)}/official-response`).then((r) => r.data),
+
+    setOfficialResponse: (postId: string, commentId: string | null) =>
+        request<DataResponse<{ post_id: string; official_response: Comment | null }>>(
+            `/api/posts/${seg(postId)}/official-response`,
+            { method: 'PUT', body: JSON.stringify({ comment_id: commentId }) },
+        ).then((r) => r.data),
+
+    getSimilarPosts: (postId: string) =>
+        request<DataResponse<PostDetail[]>>(`/api/posts/${seg(postId)}/similar`).then((r) => r.data),
+
     createProject: (body: { name: string; slug?: string; description?: string }) =>
         request<DataResponse<Project>>('/api/projects', {
             method: 'POST',

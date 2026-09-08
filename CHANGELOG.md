@@ -2,6 +2,47 @@
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-09-08
+
+The Board UI Overhaul. The public board was rebuilt around the patterns that
+make feedback boards work: votes you can actually hit, a list you can scan,
+answers from the team you can trust, and fewer duplicate posts.
+
+### Added
+
+- **Design token standard** (#199) — component-tier tokens in `app.css`
+  (light + dark) documented in `docs/development/design-tokens.md`; every
+  board component now consumes tokens instead of hardcoded values.
+- **Vertical vote rail** (#200) — a dedicated 56×44px vote control with a
+  voted state on every card and the post detail page, replacing the small
+  inline arrow that missed the 44px touch-target standard.
+- **Dense hairline card list** (#201) — the board renders roughly five rows
+  per desktop viewport with hairline dividers and hover states, so scanning
+  feedback no longer means endless scrolling.
+- **Sort tabs with trending** (#203) — Newest, Trending, Most Voted, and
+  Recently Updated as a proper tab bar with URL sync (`?sort=`). Trending
+  ranks by 7-day vote velocity from privacy-first analytics events, not just
+  raw totals. MCP `get_trending` uses the same ranking.
+- **Sidebar and filter counts** (#202) — public `GET /projects/{slug}/counts`
+  powers live status/category counts in the sidebar and mobile filters.
+- **Official team responses** (#205) — admins pin one comment as the post's
+  canonical team answer; it renders as a distinct block with a Team badge
+  above the thread, backed by a new idempotent `post_official_response`
+  table (SQLite + PostgreSQL migration 004) and a
+  `post.official_response_changed` webhook event.
+- **Inline similar posts** (#206) — post pages list up to 3 same-project
+  posts sharing the title's distinctive keywords, so visitors upvote an
+  existing request instead of filing a duplicate. LIKE-based matching that
+  works identically on SQLite and PostgreSQL.
+- **Mobile ergonomics pass** (#204) — every interactive element on the board
+  now meets the 44px touch-target minimum; zero horizontal overflow
+  verified at 390px and 320px across all pages.
+
+### Fixed
+
+- **Login blocked by cookie state** (#163) — SameSite=Lax on all cookies
+  fixes the "Missing or invalid state cookie" OAuth login failure.
+
 ## [0.4.0] - 2026-09-06
 
 The AI + branding release. Rungu now speaks to AI agents natively (26 MCP

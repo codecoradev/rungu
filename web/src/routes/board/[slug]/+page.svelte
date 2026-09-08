@@ -6,6 +6,7 @@
     import type { Project, PostDetail, PostStatus, PostCategory } from '$lib/api/types';
     import PostCard from '$lib/components/PostCard.svelte';
     import PostForm from '$lib/components/PostForm.svelte';
+    import SortTabs from '$lib/components/SortTabs.svelte';
     import { Button } from '$lib/components/ui/button';
     import { Input } from '$lib/components/ui/input';
     import * as Card from '$lib/components/ui/card';
@@ -31,8 +32,26 @@
     let error = $state('');
 
     let sort = $state('newest');
+    // URL is the source of truth for sort (#203): hydrate from ?sort= on boot
+    // and push changes back so reload/share preserves the state. Falls back to
+    // the default for unknown values (BE also clamps unknown → newest).
+    // (Keep this list in sync with `sortOptions` below; inlined here because
+    // this initializer runs before that const exists.)
+    {
+        const fromUrl = new URLSearchParams(window.location.search).get('sort');
+        if (fromUrl && ['newest', 'trending', 'most_votes', 'recently_updated'].includes(fromUrl)) sort = fromUrl;
+    }
+    $effect(() => {
+        if (!initialized) return;
+        const url = new URL(window.location.href);
+        if (sort === 'newest') url.searchParams.delete('sort');
+        else url.searchParams.set('sort', sort);
+        if (url.href !== window.location.href) history.replaceState(history.state, '', url.href);
+    });
     let statusFilter = $state<PostStatus | ''>('');
     let categoryFilter = $state<PostCategory | ''>('');
+    // Sidebar / filter counts (#202): refreshed with every board load.
+    let counts = $state<{ by_status: Record<string, number>; by_category: Record<string, number> } | null>(null);
     let searchQuery = $state('');
     let showForm = $state(false);
     let authed = $state(false);
@@ -49,6 +68,7 @@
 
     const sortOptions = [
         { value: 'newest', label: 'Newest' },
+        { value: 'trending', label: 'Trending' },
         { value: 'most_votes', label: 'Most Voted' },
         { value: 'recently_updated', label: 'Recently Updated' },
     ];
@@ -94,6 +114,8 @@
             posts = result.data;
             total = result.pagination.total;
             focusedPostIndex = -1;
+            // Counts load best-effort; their absence must never break the board.
+            api.getProjectCounts(slug).then((c) => (counts = c)).catch(() => {});
         } catch (e) {
             if (generation !== loadGeneration) return;
             error = e instanceof ApiError && e.status === 404 ? 'Project not found' : 'Failed to load board';
@@ -276,7 +298,7 @@
     </Card.Root>
 {:else if project}
     <div class="mb-6">
-        <Button variant="link" size="sm" href="/" class="px-0 text-muted-foreground">← All boards</Button>
+        <Button variant="link" size="sm" href="/" class="max-sm:h-11 px-0 text-muted-foreground">← All boards</Button>
         <h1 class="mt-2 text-2xl font-bold">{project.name}</h1>
         {#if project.description}
             <p class="mt-1 text-sm text-muted-foreground">{project.description}</p>
@@ -335,7 +357,7 @@
                                         : 'text-muted-foreground hover:bg-muted',
                                 )}
                             >
-                                {cat.label}
+                                {cat.label}{counts ? ` (${counts.by_category[cat.value] ?? 0})` : ''}
                             </button>
                         {/each}
                     </div>
@@ -353,7 +375,7 @@
                                         : 'text-muted-foreground hover:bg-muted',
                                 )}
                             >
-                                {st.label}
+                                {st.label}{counts ? ` (${counts.by_status[st.value] ?? 0})` : ''}
                             </button>
                         {/each}
                     </div>
@@ -371,16 +393,17 @@
         </div>
     {/if}
 
-    <div class="grid gap-6 lg:grid-cols-[1fr_280px]">
+    <div class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_280px]">
         <!-- Main -->
-        <div>
+        <div class="min-w-0">
             <div class="mb-4 flex flex-wrap items-center gap-2">
-                <div class="relative flex-1">
+                <div class="relative min-w-0 flex-1">
                     <Input
                         id="board-search"
                         bind:value={searchQuery}
                         type="search"
                         placeholder="Search..."
+                        class="max-sm:h-11"
                     />
                     {#if refetching && searchQuery}
                         <span
@@ -392,11 +415,7 @@
                         </span>
                     {/if}
                 </div>
-                <select bind:value={sort} class="rounded-md border border-input bg-background px-3 py-2 text-base sm:text-sm" aria-label="Sort posts">
-                    {#each sortOptions as opt (opt.value)}
-                        <option value={opt.value}>{opt.label}</option>
-                    {/each}
-                </select>
+                <SortTabs options={sortOptions} value={sort} onchange={(v) => (sort = v)} />
             </div>
 
             {#if statusFilter || categoryFilter}
@@ -414,15 +433,15 @@
                 </div>
             {/if}
 
-            <div class="space-y-3 transition-opacity duration-200 {refetching ? 'pointer-events-none opacity-40' : ''}">
+            <!-- Flat hairline list (#201): rows carry their own dividers, so
+                 the container only resets the last divider per page batch. -->
+            <div class="transition-opacity duration-200 {refetching ? 'pointer-events-none opacity-40' : ''}">
                 {#each posts as post, i (post.id)}
                     <div
                         data-post-index={i}
                         class={cn(
-                            'rounded-xl transition-all',
-                            focusedPostIndex === i
-                                ? 'ring-2 ring-primary ring-offset-2 ring-offset-background'
-                                : '',
+                            'rounded-lg transition-all',
+                            focusedPostIndex === i ? 'ring-2 ring-primary ring-inset' : '',
                         )}
                     >
                         <PostCard {post} {slug} />
@@ -476,18 +495,18 @@
         </div>
 
         <!-- Sidebar -->
-        <div class="space-y-4">
+        <div class="min-w-0 space-y-4">
             <div class="flex flex-col gap-2">
-                <Button variant="outline" class="w-full" href="/board/{slug}/roadmap">
+                <Button variant="outline" class="max-sm:h-11 w-full" href="/board/{slug}/roadmap">
                     Roadmap
                 </Button>
-                <Button variant="outline" class="w-full" href="/board/{slug}/changelog">
+                <Button variant="outline" class="max-sm:h-11 w-full" href="/board/{slug}/changelog">
                     Changelog
                 </Button>
             </div>
 
             {#if authed}
-                <Button class="w-full" onclick={() => (showForm = !showForm)}>
+                <Button class="max-sm:h-11 w-full" onclick={() => (showForm = !showForm)}>
                     {showForm ? 'Cancel' : '+ New Post'}
                 </Button>
 
@@ -509,13 +528,14 @@
                         <button
                             onclick={() => (categoryFilter = categoryFilter === cat.value ? '' : cat.value)}
                             class={cn(
-                                'rounded-md px-2 py-1 text-left text-sm transition-colors',
+                                'flex min-h-11 items-center justify-between gap-2 rounded-md px-2 py-1 text-left text-sm transition-colors',
                                 categoryFilter === cat.value
                                     ? 'bg-primary/10 font-medium text-primary'
                                     : 'text-muted-foreground hover:bg-muted',
                             )}
                         >
-                            {cat.label}
+                            <span>{cat.label}</span>
+                            <span class="text-xs tabular-nums text-muted-foreground">{counts?.by_category[cat.value] ?? 0}</span>
                         </button>
                     {/each}
                 </div>
@@ -528,13 +548,14 @@
                         <button
                             onclick={() => (statusFilter = statusFilter === st.value ? '' : st.value)}
                             class={cn(
-                                'rounded-md px-2 py-1 text-left text-sm capitalize transition-colors',
+                                'flex min-h-11 items-center justify-between gap-2 rounded-md px-2 py-1 text-left text-sm capitalize transition-colors',
                                 statusFilter === st.value
                                     ? 'bg-primary/10 font-medium text-primary'
                                     : 'text-muted-foreground hover:bg-muted',
                             )}
                         >
-                            {st.label}
+                            <span>{st.label}</span>
+                            <span class="text-xs tabular-nums text-muted-foreground">{counts?.by_status[st.value] ?? 0}</span>
                         </button>
                     {/each}
                 </div>

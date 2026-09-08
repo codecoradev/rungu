@@ -350,13 +350,14 @@
     {/if}
 
 
-    <!-- Tabs -->
-    <div class="mb-6 flex gap-1 border-b" role="tablist">
+    <!-- Tabs: horizontally scrollable on touch widths (row itself was the
+         source of a 36px page overflow at 390px); 44px min tap height. -->
+    <div class="mb-6 flex gap-1 overflow-x-auto border-b" role="tablist">
         {#each tabs as t (t.id)}
             <button
                 role="tab"
                 aria-selected={tab === t.id}
-                class="rounded-t-md px-4 py-2 text-sm font-medium transition-colors {tab === t.id
+                class="min-h-11 whitespace-nowrap rounded-t-md px-4 text-sm font-medium transition-colors {tab === t.id
                     ? 'border-b-2 border-primary text-foreground'
                     : 'text-muted-foreground hover:text-foreground'}"
                 onclick={() => {
@@ -392,18 +393,18 @@
                     <div class="grid gap-3 sm:grid-cols-2">
                         <div class="space-y-1.5">
                             <label for="new-project-name" class="text-sm font-medium">Project name</label>
-                            <Input id="new-project-name" bind:value={newName} placeholder="Project name" required oninput={() => { if (!newSlug) newSlug = slugify(newName); }} />
+                            <Input id="new-project-name" class="max-sm:h-11" bind:value={newName} placeholder="Project name" required oninput={() => { if (!newSlug) newSlug = slugify(newName); }} />
                         </div>
                         <div class="space-y-1.5">
                             <label for="new-project-slug" class="text-sm font-medium">Slug</label>
-                            <Input id="new-project-slug" bind:value={newSlug} placeholder="auto from name" />
+                            <Input id="new-project-slug" class="max-sm:h-11" bind:value={newSlug} placeholder="auto from name" />
                         </div>
                     </div>
                     <div class="space-y-1.5">
                         <label for="new-project-desc" class="text-sm font-medium">Description <span class="font-normal text-muted-foreground">(optional)</span></label>
                         <Textarea id="new-project-desc" bind:value={newDesc} placeholder="What is this board for?" rows={2} />
                     </div>
-                    <Button type="submit" disabled={creating || !newName.trim()}>
+                    <Button type="submit" class="max-sm:h-11" disabled={creating || !newName.trim()}>
                         {creating ? 'Creating...' : 'Create Project'}
                     </Button>
                 </form>

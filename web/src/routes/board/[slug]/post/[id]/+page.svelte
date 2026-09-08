@@ -2,11 +2,13 @@
     import { branding } from '$lib/branding.svelte';
     import { onMount } from 'svelte';
     import CircleAlert from '@lucide/svelte/icons/circle-alert';
+    import ShieldCheck from '@lucide/svelte/icons/shield-check';
+    import ChevronUp from '@lucide/svelte/icons/chevron-up';
     import { api, ApiError } from '$lib/api/client';
     import type { PostDetail, Comment, CurrentUser, PostStatus, PostCategory } from '$lib/api/types';
     import StatusBadge from '$lib/components/StatusBadge.svelte';
     import CategoryBadge from '$lib/components/CategoryBadge.svelte';
-    import VoteButton from '$lib/components/VoteButton.svelte';
+    import VoteRail from '$lib/components/VoteRail.svelte';
     import CommentThread from '$lib/components/CommentThread.svelte';
     import AttachmentGallery from '$lib/components/AttachmentGallery.svelte';
     import { Button } from '$lib/components/ui/button';
@@ -52,6 +54,11 @@
     let commentText = $state('');
     let replyTo = $state<string | null>(null);
     let commentLoading = $state(false);
+    // Official team response (#205)
+    let official = $state<Comment | null>(null);
+    let officialBusy = $state(false);
+    // Inline similar posts (#206): visible duplicate-prevention, max 3.
+    let similar = $state<PostDetail[]>([]);
 
     const statusOptions: PostStatus[] = ['open', 'planned', 'in_progress', 'done', 'declined'];
     const categoryOptions: PostCategory[] = ['feedback', 'bug', 'feature', 'question'];
@@ -64,10 +71,26 @@
         try {
             post = await api.getPost(postId);
             comments = await api.listComments(postId);
+            api.getOfficialResponse(postId).then((r) => (official = r)).catch(() => {});
+            api.getSimilarPosts(postId).then((r) => (similar = r)).catch(() => {});
         } catch (e) {
             error = e instanceof ApiError && e.status === 404 ? 'Post not found' : 'Failed to load post';
         } finally {
             loading = false;
+        }
+    }
+
+    async function setOfficialResponse(commentId: string | null) {
+        if (!post) return;
+        officialBusy = true;
+        try {
+            const res = await api.setOfficialResponse(post.id, commentId);
+            official = res.official_response;
+            toastSuccess(commentId ? 'Official response pinned ✓' : 'Official response removed ✓');
+        } catch {
+            toastError('Failed to update official response');
+        } finally {
+            officialBusy = false;
         }
     }
 
@@ -190,16 +213,15 @@
         </Card.Content>
     </Card.Root>
 {:else if post}
-    <Button variant="link" size="sm" href={`/board/${slug}`} class="px-0 text-muted-foreground">
+    <Button variant="link" size="sm" href={`/board/${slug}`} class="max-sm:h-11 px-0 text-muted-foreground">
         ← Back to board
     </Button>
 
+    <!-- Card.Header is a grid: data-slot="card-action" activates the built-in
+         `grid-cols-[1fr_auto]` layout so the vote rail docks on the right. -->
     <Card.Root class="mt-3">
-        <Card.Header class="flex-row items-start gap-4">
-            <div class="shrink-0">
-                <VoteButton postId={post.id} voted={post.user_voted} count={post.vote_count} onvote={handleVote} />
-            </div>
-            <div class="min-w-0 flex-1">
+        <Card.Header class="items-stretch gap-0">
+            <div class="min-w-0 pr-4">
                 <div class="mb-2 flex flex-wrap items-center gap-2">
                     <CategoryBadge category={post.category} />
                     {#if canEditStatus}
@@ -235,6 +257,9 @@
                     <span>{timeAgo(post.created_at)}</span>
                 </div>
             </div>
+            <div class="flex shrink-0 items-start border-l border-[var(--vote-rail-divider-color)] pl-4">
+                <VoteRail postId={post.id} voted={post.user_voted} count={post.vote_count} onvote={handleVote} />
+            </div>
         </Card.Header>
         {#if post.description}
             <Card.Content>
@@ -245,12 +270,71 @@
         {/if}
     </Card.Root>
 
+    <!-- Inline similar posts (#206): visible dedup between body and comments. -->
+    {#if similar.length > 0}
+        <section class="mt-4" aria-label="Similar posts">
+            <Card.Root class="p-4">
+                <h2 class="mb-2 text-sm font-semibold">Similar posts</h2>
+                <ul class="flex flex-col gap-1">
+                    {#each similar as s (s.id)}
+                        <li>
+                            <a
+                                href={`/board/${slug}/post/${s.id}`}
+                                class="flex min-h-11 items-center justify-between gap-3 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-muted"
+                            >
+                                <span class="min-w-0 truncate" title={s.title}>{s.title}</span>
+                                <span class="flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
+                                    <ChevronUp class="size-3.5" aria-hidden="true" />
+                                    {s.vote_count}
+                                </span>
+                            </a>
+                        </li>
+                    {/each}
+                </ul>
+            </Card.Root>
+        </section>
+    {/if}
+
+    <!-- Official team response (#205): pinned above the thread, distinct tint
+         + left accent border, role badge. -->
+    {#if official}
+        <section class="mt-4" aria-label="Official team response">
+            <div class="rounded-xl border border-primary/30 border-l-4 border-l-primary bg-primary/5 p-4">
+                <div class="mb-2 flex flex-wrap items-center gap-2">
+                    <span class="inline-flex items-center gap-1 rounded-full bg-primary px-2 py-0.5 text-xs font-medium text-primary-foreground">
+                        <ShieldCheck class="size-3.5" aria-hidden="true" /> Team
+                    </span>
+                    <span class="text-sm font-semibold text-foreground">{official.creator?.name || 'Team'}</span>
+                    <span class="text-xs text-muted-foreground">· {timeAgo(official.created_at)}</span>
+                    {#if isAdmin}
+                        <Button
+                            variant="ghost"
+                            size="xs"
+                            class="ml-auto"
+                            disabled={officialBusy}
+                            onclick={() => setOfficialResponse(null)}
+                        >
+                            Unpin response
+                        </Button>
+                    {/if}
+                </div>
+                <p class="whitespace-pre-wrap text-sm leading-relaxed text-foreground">{official.content}</p>
+            </div>
+        </section>
+    {/if}
+
     <section class="mt-4">
         <AttachmentGallery postId={post.id} canEdit={!!user && (user.id === post.created_by || user.role === 'admin')} />
     </section>
 
     <section class="mt-6">
         <h2 class="mb-4 text-sm font-semibold">Comments ({comments.length})</h2>
+
+        {#if isAdmin && !official}
+            <div class="mb-4 rounded-xl border border-dashed border-border p-3 text-sm text-muted-foreground">
+                No official response yet. Pin one of the comments below as the team's answer.
+            </div>
+        {/if}
 
         {#if user}
             <form onsubmit={handleComment} class="mb-6">
@@ -296,6 +380,20 @@
             currentUserId={user?.id}
             onreply={(parentId) => (replyTo = parentId)}
             ondelete={handleDeleteComment}
-        />
+        >
+            {#snippet commentActions(comment: Comment)}
+                {#if isAdmin && official?.id !== comment.id}
+                    <Button
+                        variant="ghost"
+                        size="xs"
+                        disabled={officialBusy}
+                        onclick={() => setOfficialResponse(comment.id)}
+                        title="Pin this comment as the official team response"
+                    >
+                        <ShieldCheck class="size-3.5" aria-hidden="true" /> Official response
+                    </Button>
+                {/if}
+            {/snippet}
+        </CommentThread>
     </section>
 {/if}
