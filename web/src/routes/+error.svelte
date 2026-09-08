@@ -25,6 +25,6 @@
         </div>
         <h1 class="text-lg font-semibold">{page.status}</h1>
         <p class="text-sm text-muted-foreground">{message}</p>
-        <Button variant="outline" size="sm" href="/" class="mt-2">← Back to all boards</Button>
+        <Button variant="outline" size="sm" href="/" class="max-sm:h-11 mt-2">← Back to all boards</Button>
     </Card.Content>
 </Card.Root>

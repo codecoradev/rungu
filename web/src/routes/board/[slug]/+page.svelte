@@ -298,7 +298,7 @@
     </Card.Root>
 {:else if project}
     <div class="mb-6">
-        <Button variant="link" size="sm" href="/" class="px-0 text-muted-foreground">← All boards</Button>
+        <Button variant="link" size="sm" href="/" class="max-sm:h-11 px-0 text-muted-foreground">← All boards</Button>
         <h1 class="mt-2 text-2xl font-bold">{project.name}</h1>
         {#if project.description}
             <p class="mt-1 text-sm text-muted-foreground">{project.description}</p>
@@ -403,6 +403,7 @@
                         bind:value={searchQuery}
                         type="search"
                         placeholder="Search..."
+                        class="max-sm:h-11"
                     />
                     {#if refetching && searchQuery}
                         <span
@@ -496,16 +497,16 @@
         <!-- Sidebar -->
         <div class="min-w-0 space-y-4">
             <div class="flex flex-col gap-2">
-                <Button variant="outline" class="w-full" href="/board/{slug}/roadmap">
+                <Button variant="outline" class="max-sm:h-11 w-full" href="/board/{slug}/roadmap">
                     Roadmap
                 </Button>
-                <Button variant="outline" class="w-full" href="/board/{slug}/changelog">
+                <Button variant="outline" class="max-sm:h-11 w-full" href="/board/{slug}/changelog">
                     Changelog
                 </Button>
             </div>
 
             {#if authed}
-                <Button class="w-full" onclick={() => (showForm = !showForm)}>
+                <Button class="max-sm:h-11 w-full" onclick={() => (showForm = !showForm)}>
                     {showForm ? 'Cancel' : '+ New Post'}
                 </Button>
 
@@ -527,7 +528,7 @@
                         <button
                             onclick={() => (categoryFilter = categoryFilter === cat.value ? '' : cat.value)}
                             class={cn(
-                                'flex items-center justify-between gap-2 rounded-md px-2 py-1 text-left text-sm transition-colors',
+                                'flex min-h-11 items-center justify-between gap-2 rounded-md px-2 py-1 text-left text-sm transition-colors',
                                 categoryFilter === cat.value
                                     ? 'bg-primary/10 font-medium text-primary'
                                     : 'text-muted-foreground hover:bg-muted',
@@ -547,7 +548,7 @@
                         <button
                             onclick={() => (statusFilter = statusFilter === st.value ? '' : st.value)}
                             class={cn(
-                                'flex items-center justify-between gap-2 rounded-md px-2 py-1 text-left text-sm capitalize transition-colors',
+                                'flex min-h-11 items-center justify-between gap-2 rounded-md px-2 py-1 text-left text-sm capitalize transition-colors',
                                 statusFilter === st.value
                                     ? 'bg-primary/10 font-medium text-primary'
                                     : 'text-muted-foreground hover:bg-muted',
