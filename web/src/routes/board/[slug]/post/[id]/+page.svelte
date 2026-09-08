@@ -190,7 +190,7 @@
         </Card.Content>
     </Card.Root>
 {:else if post}
-    <Button variant="link" size="sm" href={`/board/${slug}`} class="px-0 text-muted-foreground">
+    <Button variant="link" size="sm" href={`/board/${slug}`} class="max-sm:h-11 px-0 text-muted-foreground">
         ← Back to board
     </Button>
 

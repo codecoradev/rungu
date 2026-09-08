@@ -99,7 +99,7 @@
 <div class="mx-auto max-w-3xl px-4 py-8">
     <!-- Header -->
     <div class="mb-6">
-        <Button variant="link" size="sm" href="/board/{slug}" class="mb-1 px-0 text-muted-foreground">
+        <Button variant="link" size="sm" href="/board/{slug}" class="max-sm:h-11 mb-1 px-0 text-muted-foreground">
             ← Back to board
         </Button>
         <h1 class="text-2xl font-bold tracking-tight">
@@ -131,7 +131,7 @@
                 <p class="mt-1 text-sm text-muted-foreground">
                     Posts appear here once their status moves to <span class="font-medium">done</span>.
                 </p>
-                <Button variant="link" href="/board/{slug}">Browse the board</Button>
+                <Button variant="link" href="/board/{slug}" class="max-sm:h-11">Browse the board</Button>
             </Card.Content>
         </Card.Root>
     {:else}

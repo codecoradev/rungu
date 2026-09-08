@@ -71,7 +71,7 @@
     <!-- Header -->
     <div class="mb-6 flex items-center justify-between gap-4">
         <div>
-            <Button variant="link" size="sm" href="/board/{slug}" class="mb-1 px-0 text-muted-foreground">
+            <Button variant="link" size="sm" href="/board/{slug}" class="max-sm:h-11 mb-1 px-0 text-muted-foreground">
                 ← Back to board
             </Button>
             <h1 class="text-2xl font-bold tracking-tight">
@@ -99,7 +99,7 @@
         <Card.Root class="py-12 text-center">
             <Card.Content class="pt-6">
                 <p class="text-muted-foreground">{error}</p>
-                <Button variant="link" href="/">Go home</Button>
+                <Button variant="link" href="/" class="max-sm:h-11">Go home</Button>
             </Card.Content>
         </Card.Root>
     {:else if roadmap}

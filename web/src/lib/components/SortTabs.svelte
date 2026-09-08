@@ -17,7 +17,7 @@
     (--sort-tab-*). role="tablist"/"tab" with aria-selected; height bumps to
     the 44px touch minimum below sm.
 -->
-<div role="tablist" aria-label="Sort posts" class="flex items-center gap-1">
+<div role="tablist" aria-label="Sort posts" class="flex items-center gap-1 overflow-x-auto">
     {#each options as opt (opt.value)}
         <button
             type="button"
@@ -25,7 +25,7 @@
             aria-selected={value === opt.value}
             onclick={() => onchange(opt.value)}
             class={cn(
-                'flex min-h-[var(--vote-target-min)] items-center rounded-[var(--sort-tab-radius)] px-3 sm:min-h-[var(--sort-tab-height)]',
+                'flex min-h-[var(--vote-target-min)] shrink-0 items-center whitespace-nowrap rounded-[var(--sort-tab-radius)] px-3 sm:min-h-[var(--sort-tab-height)]',
                 'text-sm font-medium transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring',
                 value === opt.value
                     ? 'bg-[var(--sort-tab-active-bg)] text-[var(--sort-tab-active-fg)]'
