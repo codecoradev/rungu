@@ -13,7 +13,7 @@
     import { Skeleton } from '$lib/components/ui/skeleton';
     import { cn } from '$lib/utils';
     import { toastError } from '$lib/toast.svelte';
-    import { LoaderCircle } from '@lucide/svelte';
+    import { LoaderCircle, Plus, X } from '@lucide/svelte';
     import CircleAlert from '@lucide/svelte/icons/circle-alert';
 
     let { params } = $props();
@@ -54,6 +54,7 @@
     let counts = $state<{ by_status: Record<string, number>; by_category: Record<string, number> } | null>(null);
     let searchQuery = $state('');
     let showForm = $state(false);
+    let dialogEl: HTMLDivElement | null = $state(null);
     let authed = $state(false);
     // Mobile toolbar: filter panel visibility (see mobile toolbar markup).
     let showFilters = $state(false);
@@ -182,7 +183,7 @@
             }
             case 'c': {
                 if (!authed) return;
-                showForm = !showForm;
+                showForm = true;
                 break;
             }
             case 'j': {
@@ -280,6 +281,9 @@
     <title>{(project?.name ?? 'Board') + ' — ' + branding.value.brandName}</title>
 </svelte:head>
 
+<!-- Dialog Esc handling must be window-level: focus may sit inside inputs. -->
+<svelte:window onkeydown={(e) => { if (e.key === 'Escape' && showForm) showForm = false; }} />
+
 {#if loading && !project}
     <div class="space-y-4">
         {#each Array(3) as _}
@@ -297,26 +301,66 @@
         </Card.Content>
     </Card.Root>
 {:else if project}
-    <div class="mb-6">
+    <div class="mb-4">
         <Button variant="link" size="sm" href="/" class="max-sm:h-11 px-0 text-muted-foreground">← All boards</Button>
-        <h1 class="mt-2 text-2xl font-bold">{project.name}</h1>
-        {#if project.description}
-            <p class="mt-1 text-sm text-muted-foreground">{project.description}</p>
-        {/if}
+        <div class="mt-2 flex flex-wrap items-end justify-between gap-3">
+            <div>
+                <h1 class="text-2xl font-bold">{project.name}</h1>
+                {#if project.description}
+                    <p class="mt-1 text-sm text-muted-foreground">{project.description}</p>
+                {/if}
+            </div>
+            {#if authed}
+                <Button class="max-sm:h-11" onclick={() => (showForm = true)}>
+                    <Plus class="size-4" aria-hidden="true" /> New Post
+                </Button>
+            {/if}
+        </div>
     </div>
 
+    <!-- View tabs (Featurebase pattern): the board's three surfaces share one
+         nav row so the list context is explicit and the sidebar stays content-only. -->
+    <nav aria-label="Board views" class="mb-4 border-b">
+        <div class="flex gap-1 overflow-x-auto" role="tablist">
+            <a
+                href="/board/{slug}"
+                role="tab"
+                aria-selected="true"
+                class="whitespace-nowrap border-b-2 border-primary px-3 py-2 text-sm font-medium text-foreground max-sm:h-11 max-sm:inline-flex max-sm:items-center"
+            >
+                Feedback
+            </a>
+            <a
+                href="/board/{slug}/roadmap"
+                role="tab"
+                aria-selected="false"
+                class="whitespace-nowrap border-b-2 border-transparent px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground max-sm:h-11 max-sm:inline-flex max-sm:items-center"
+            >
+                Roadmap
+            </a>
+            <a
+                href="/board/{slug}/changelog"
+                role="tab"
+                aria-selected="false"
+                class="whitespace-nowrap border-b-2 border-transparent px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground max-sm:h-11 max-sm:inline-flex max-sm:items-center"
+            >
+                Changelog
+            </a>
+        </div>
+    </nav>
+
     <!-- Mobile action toolbar: sticky, replaces the desktop sidebar below lg.
-         Keep in sync with the sidebar actions (new post / roadmap / changelog /
-         filters). Tap targets >= 44px (mobile-ux HIG minimum). -->
+         Navigation lives in the view tabs; this row carries New Post + Filters
+         only. Tap targets >= 44px (mobile-ux HIG minimum). -->
     <div class="sticky top-14 z-20 -mx-4 mb-4 border-b bg-background/95 px-4 py-2 backdrop-blur supports-[backdrop-filter]:bg-background/80 lg:hidden">
         <div class="flex items-center gap-2 overflow-x-auto">
             {#if authed}
                 <Button
                     size="sm"
                     class="h-11 shrink-0"
-                    onclick={() => (showForm = !showForm)}
+                    onclick={() => (showForm = true)}
                 >
-                    {showForm ? '✕ Cancel' : '+ New Post'}
+                    <Plus class="size-4" aria-hidden="true" /> New Post
                 </Button>
             {:else}
                 <Button size="sm" class="h-11 shrink-0" href="/login">Login to post</Button>
@@ -332,29 +376,25 @@
                     ? ` (${(statusFilter ? 1 : 0) + (categoryFilter ? 1 : 0)})`
                     : ''} {showFilters ? '▴' : '▾'}
             </Button>
-            <Button variant="outline" size="sm" class="h-11 shrink-0" href="/board/{slug}/roadmap">
-                Roadmap
-            </Button>
-            <Button variant="outline" size="sm" class="h-11 shrink-0" href="/board/{slug}/changelog">
-                Changelog
-            </Button>
         </div>
 
         {#if showFilters}
-            <!-- Collapsible filter panel; same state as the desktop sidebar
-                 buttons, so both stay in sync. -->
-            <div class="mt-2 grid grid-cols-2 gap-3 border-t pt-2">
+            <!-- Collapsible filter panel: category + status as horizontal chip
+                 sliders (one row each, swipeable), same state as the desktop
+                 sidebar so both stay in sync. -->
+            <div class="mt-2 space-y-2 border-t pt-2">
                 <div>
                     <h3 class="mb-1 text-xs font-semibold uppercase text-muted-foreground">Category</h3>
-                    <div class="flex flex-wrap gap-1">
+                    <div class="flex gap-1 overflow-x-auto pb-1" role="group" aria-label="Filter by category">
                         {#each categoryOptions as cat (cat.value)}
                             <button
                                 onclick={() => (categoryFilter = categoryFilter === cat.value ? '' : cat.value)}
+                                aria-pressed={categoryFilter === cat.value}
                                 class={cn(
-                                    'min-h-11 rounded-md px-2 py-1 text-sm transition-colors',
+                                    'min-h-11 shrink-0 whitespace-nowrap rounded-full border px-3 py-1 text-sm transition-colors',
                                     categoryFilter === cat.value
-                                        ? 'bg-primary/10 font-medium text-primary'
-                                        : 'text-muted-foreground hover:bg-muted',
+                                        ? 'border-primary bg-primary/10 font-medium text-primary'
+                                        : 'border-input text-muted-foreground hover:bg-muted',
                                 )}
                             >
                                 {cat.label}{counts ? ` (${counts.by_category[cat.value] ?? 0})` : ''}
@@ -364,15 +404,16 @@
                 </div>
                 <div>
                     <h3 class="mb-1 text-xs font-semibold uppercase text-muted-foreground">Status</h3>
-                    <div class="flex flex-wrap gap-1">
+                    <div class="flex gap-1 overflow-x-auto pb-1" role="group" aria-label="Filter by status">
                         {#each statusOptions as st (st.value)}
                             <button
                                 onclick={() => (statusFilter = statusFilter === st.value ? '' : st.value)}
+                                aria-pressed={statusFilter === st.value}
                                 class={cn(
-                                    'min-h-11 rounded-md px-2 py-1 text-sm capitalize transition-colors',
+                                    'min-h-11 shrink-0 whitespace-nowrap rounded-full border px-3 py-1 text-sm capitalize transition-colors',
                                     statusFilter === st.value
-                                        ? 'bg-primary/10 font-medium text-primary'
-                                        : 'text-muted-foreground hover:bg-muted',
+                                        ? 'border-primary bg-primary/10 font-medium text-primary'
+                                        : 'border-input text-muted-foreground hover:bg-muted',
                                 )}
                             >
                                 {st.label}{counts ? ` (${counts.by_status[st.value] ?? 0})` : ''}
@@ -385,11 +426,30 @@
     </div>
 
     {#if showForm}
-        <!-- Post form rendered full-width above the list on mobile so it is
-             visible without scrolling past the toolbar. Hidden on desktop —
-             the sidebar renders its own instance. -->
-        <div class="mb-4 lg:hidden">
-            <PostForm {slug} onsubmit={handleCreatePost} />
+        <!-- Post form as modal dialog (#feedback): overlay + centered card,
+             Esc / backdrop click to dismiss. Mobile toolbar now just toggles it. -->
+        <div
+            class="fixed inset-0 z-50 flex items-end justify-center bg-background/80 p-0 backdrop-blur-sm sm:items-center sm:p-4"
+            role="presentation"
+            onclick={(e) => {
+                if (e.target === e.currentTarget) showForm = false;
+            }}
+        >
+            <div
+                bind:this={dialogEl}
+                role="dialog"
+                aria-modal="true"
+                aria-label="New post"
+                class="max-h-[92vh] w-full max-w-lg overflow-y-auto rounded-t-xl border bg-background p-4 shadow-lg sm:rounded-xl"
+            >
+                <div class="mb-3 flex items-center justify-between">
+                    <span class="text-base font-semibold">New Post</span>
+                    <Button variant="ghost" size="icon-sm" aria-label="Close" onclick={() => (showForm = false)}>
+                        <X class="size-4" aria-hidden="true" />
+                    </Button>
+                </div>
+                <PostForm {slug} onsubmit={handleCreatePost} showTitle={false} />
+            </div>
         </div>
     {/if}
 
@@ -495,25 +555,11 @@
         </div>
 
         <!-- Sidebar -->
-        <div class="min-w-0 space-y-4">
-            <div class="flex flex-col gap-2">
-                <Button variant="outline" class="max-sm:h-11 w-full" href="/board/{slug}/roadmap">
-                    Roadmap
-                </Button>
-                <Button variant="outline" class="max-sm:h-11 w-full" href="/board/{slug}/changelog">
-                    Changelog
-                </Button>
-            </div>
-
-            {#if authed}
-                <Button class="max-sm:h-11 w-full" onclick={() => (showForm = !showForm)}>
-                    {showForm ? 'Cancel' : '+ New Post'}
-                </Button>
-
-                {#if showForm}
-                    <PostForm {slug} onsubmit={handleCreatePost} />
-                {/if}
-            {:else}
+        <!-- Sidebar: desktop-only content rail (mobile filters live in the
+             sticky toolbar's chip sliders). Navigation lives in the view tabs;
+             posting opens the dialog. -->
+        <div class="hidden min-w-0 space-y-4 lg:block">
+            {#if !authed}
                 <Card.Root>
                     <Card.Content class="pt-6 text-center text-sm text-muted-foreground">
                         <a href="/login" class="font-medium text-primary hover:underline">Login</a> to post and vote
