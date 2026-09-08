@@ -3,6 +3,7 @@
     import { onMount } from 'svelte';
     import CircleAlert from '@lucide/svelte/icons/circle-alert';
     import ShieldCheck from '@lucide/svelte/icons/shield-check';
+    import ChevronUp from '@lucide/svelte/icons/chevron-up';
     import { api, ApiError } from '$lib/api/client';
     import type { PostDetail, Comment, CurrentUser, PostStatus, PostCategory } from '$lib/api/types';
     import StatusBadge from '$lib/components/StatusBadge.svelte';
@@ -56,6 +57,8 @@
     // Official team response (#205)
     let official = $state<Comment | null>(null);
     let officialBusy = $state(false);
+    // Inline similar posts (#206): visible duplicate-prevention, max 3.
+    let similar = $state<PostDetail[]>([]);
 
     const statusOptions: PostStatus[] = ['open', 'planned', 'in_progress', 'done', 'declined'];
     const categoryOptions: PostCategory[] = ['feedback', 'bug', 'feature', 'question'];
@@ -69,6 +72,7 @@
             post = await api.getPost(postId);
             comments = await api.listComments(postId);
             api.getOfficialResponse(postId).then((r) => (official = r)).catch(() => {});
+            api.getSimilarPosts(postId).then((r) => (similar = r)).catch(() => {});
         } catch (e) {
             error = e instanceof ApiError && e.status === 404 ? 'Post not found' : 'Failed to load post';
         } finally {
@@ -265,6 +269,31 @@
             </Card.Content>
         {/if}
     </Card.Root>
+
+    <!-- Inline similar posts (#206): visible dedup between body and comments. -->
+    {#if similar.length > 0}
+        <section class="mt-4" aria-label="Similar posts">
+            <Card.Root class="p-4">
+                <h2 class="mb-2 text-sm font-semibold">Similar posts</h2>
+                <ul class="flex flex-col gap-1">
+                    {#each similar as s (s.id)}
+                        <li>
+                            <a
+                                href={`/board/${slug}/post/${s.id}`}
+                                class="flex min-h-11 items-center justify-between gap-3 rounded-md px-2 py-1.5 text-sm transition-colors hover:bg-muted"
+                            >
+                                <span class="min-w-0 truncate" title={s.title}>{s.title}</span>
+                                <span class="flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
+                                    <ChevronUp class="size-3.5" aria-hidden="true" />
+                                    {s.vote_count}
+                                </span>
+                            </a>
+                        </li>
+                    {/each}
+                </ul>
+            </Card.Root>
+        </section>
+    {/if}
 
     <!-- Official team response (#205): pinned above the thread, distinct tint
          + left accent border, role badge. -->
