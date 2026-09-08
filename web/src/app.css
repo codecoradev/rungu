@@ -59,6 +59,7 @@
         --board-row-pad-y: 0.875rem; /* 14px */
         --board-row-pad-x: 1rem; /* 16px */
         --board-row-divider-color: var(--color-border);
+        --board-row-hover-bg: oklch(0.5 0.015 265 / 0.05);
 
         /* Vote rail (#200): vertical chevron+count, full-height hit area.
          * 2.75rem = 44px HIG minimum tap target. */
@@ -122,6 +123,7 @@
 
         /* Board component tokens (#199) — dark overrides */
         --board-row-divider-color: var(--color-border);
+        --board-row-hover-bg: oklch(0.7 0.015 265 / 0.07);
         --vote-voted-bg: oklch(0.55 0.2 250 / 0.16);
         --vote-voted-fg: var(--color-primary);
         --vote-voted-border: oklch(0.55 0.2 250 / 0.4);

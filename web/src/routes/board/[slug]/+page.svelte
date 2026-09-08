@@ -371,11 +371,11 @@
         </div>
     {/if}
 
-    <div class="grid gap-6 lg:grid-cols-[1fr_280px]">
+    <div class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_280px]">
         <!-- Main -->
-        <div>
+        <div class="min-w-0">
             <div class="mb-4 flex flex-wrap items-center gap-2">
-                <div class="relative flex-1">
+                <div class="relative min-w-0 flex-1">
                     <Input
                         id="board-search"
                         bind:value={searchQuery}
@@ -392,7 +392,7 @@
                         </span>
                     {/if}
                 </div>
-                <select bind:value={sort} class="rounded-md border border-input bg-background px-3 py-2 text-base sm:text-sm" aria-label="Sort posts">
+                <select bind:value={sort} class="max-w-[45%] shrink-0 rounded-md border border-input bg-background px-3 py-2 text-base sm:text-sm" aria-label="Sort posts">
                     {#each sortOptions as opt (opt.value)}
                         <option value={opt.value}>{opt.label}</option>
                     {/each}
@@ -414,15 +414,15 @@
                 </div>
             {/if}
 
-            <div class="space-y-3 transition-opacity duration-200 {refetching ? 'pointer-events-none opacity-40' : ''}">
+            <!-- Flat hairline list (#201): rows carry their own dividers, so
+                 the container only resets the last divider per page batch. -->
+            <div class="transition-opacity duration-200 {refetching ? 'pointer-events-none opacity-40' : ''}">
                 {#each posts as post, i (post.id)}
                     <div
                         data-post-index={i}
                         class={cn(
-                            'rounded-xl transition-all',
-                            focusedPostIndex === i
-                                ? 'ring-2 ring-primary ring-offset-2 ring-offset-background'
-                                : '',
+                            'rounded-lg transition-all',
+                            focusedPostIndex === i ? 'ring-2 ring-primary ring-inset' : '',
                         )}
                     >
                         <PostCard {post} {slug} />
@@ -476,7 +476,7 @@
         </div>
 
         <!-- Sidebar -->
-        <div class="space-y-4">
+        <div class="min-w-0 space-y-4">
             <div class="flex flex-col gap-2">
                 <Button variant="outline" class="w-full" href="/board/{slug}/roadmap">
                     Roadmap
