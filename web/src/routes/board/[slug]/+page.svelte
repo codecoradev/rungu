@@ -350,8 +350,8 @@
     </nav>
 
     <!-- Mobile action toolbar: sticky, replaces the desktop sidebar below lg.
-         Keep in sync with the sidebar actions (new post / roadmap / changelog /
-         filters). Tap targets >= 44px (mobile-ux HIG minimum). -->
+         Navigation lives in the view tabs; this row carries New Post + Filters
+         only. Tap targets >= 44px (mobile-ux HIG minimum). -->
     <div class="sticky top-14 z-20 -mx-4 mb-4 border-b bg-background/95 px-4 py-2 backdrop-blur supports-[backdrop-filter]:bg-background/80 lg:hidden">
         <div class="flex items-center gap-2 overflow-x-auto">
             {#if authed}
@@ -376,29 +376,25 @@
                     ? ` (${(statusFilter ? 1 : 0) + (categoryFilter ? 1 : 0)})`
                     : ''} {showFilters ? '▴' : '▾'}
             </Button>
-            <Button variant="outline" size="sm" class="h-11 shrink-0" href="/board/{slug}/roadmap">
-                Roadmap
-            </Button>
-            <Button variant="outline" size="sm" class="h-11 shrink-0" href="/board/{slug}/changelog">
-                Changelog
-            </Button>
         </div>
 
         {#if showFilters}
-            <!-- Collapsible filter panel; same state as the desktop sidebar
-                 buttons, so both stay in sync. -->
-            <div class="mt-2 grid grid-cols-2 gap-3 border-t pt-2">
+            <!-- Collapsible filter panel: category + status as horizontal chip
+                 sliders (one row each, swipeable), same state as the desktop
+                 sidebar so both stay in sync. -->
+            <div class="mt-2 space-y-2 border-t pt-2">
                 <div>
                     <h3 class="mb-1 text-xs font-semibold uppercase text-muted-foreground">Category</h3>
-                    <div class="flex flex-wrap gap-1">
+                    <div class="flex gap-1 overflow-x-auto pb-1" role="group" aria-label="Filter by category">
                         {#each categoryOptions as cat (cat.value)}
                             <button
                                 onclick={() => (categoryFilter = categoryFilter === cat.value ? '' : cat.value)}
+                                aria-pressed={categoryFilter === cat.value}
                                 class={cn(
-                                    'min-h-11 rounded-md px-2 py-1 text-sm transition-colors',
+                                    'min-h-11 shrink-0 whitespace-nowrap rounded-full border px-3 py-1 text-sm transition-colors',
                                     categoryFilter === cat.value
-                                        ? 'bg-primary/10 font-medium text-primary'
-                                        : 'text-muted-foreground hover:bg-muted',
+                                        ? 'border-primary bg-primary/10 font-medium text-primary'
+                                        : 'border-input text-muted-foreground hover:bg-muted',
                                 )}
                             >
                                 {cat.label}{counts ? ` (${counts.by_category[cat.value] ?? 0})` : ''}
@@ -408,15 +404,16 @@
                 </div>
                 <div>
                     <h3 class="mb-1 text-xs font-semibold uppercase text-muted-foreground">Status</h3>
-                    <div class="flex flex-wrap gap-1">
+                    <div class="flex gap-1 overflow-x-auto pb-1" role="group" aria-label="Filter by status">
                         {#each statusOptions as st (st.value)}
                             <button
                                 onclick={() => (statusFilter = statusFilter === st.value ? '' : st.value)}
+                                aria-pressed={statusFilter === st.value}
                                 class={cn(
-                                    'min-h-11 rounded-md px-2 py-1 text-sm capitalize transition-colors',
+                                    'min-h-11 shrink-0 whitespace-nowrap rounded-full border px-3 py-1 text-sm capitalize transition-colors',
                                     statusFilter === st.value
-                                        ? 'bg-primary/10 font-medium text-primary'
-                                        : 'text-muted-foreground hover:bg-muted',
+                                        ? 'border-primary bg-primary/10 font-medium text-primary'
+                                        : 'border-input text-muted-foreground hover:bg-muted',
                                 )}
                             >
                                 {st.label}{counts ? ` (${counts.by_status[st.value] ?? 0})` : ''}
@@ -558,9 +555,10 @@
         </div>
 
         <!-- Sidebar -->
-        <!-- Sidebar: content-only (navigation lives in the view tabs,
-             posting opens the dialog) so the rail reads as board data. -->
-        <div class="min-w-0 space-y-4">
+        <!-- Sidebar: desktop-only content rail (mobile filters live in the
+             sticky toolbar's chip sliders). Navigation lives in the view tabs;
+             posting opens the dialog. -->
+        <div class="hidden min-w-0 space-y-4 lg:block">
             {#if !authed}
                 <Card.Root>
                     <Card.Content class="pt-6 text-center text-sm text-muted-foreground">
