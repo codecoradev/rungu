@@ -95,6 +95,15 @@ export const api = {
     getProject: (slug: string) =>
         request<DataResponse<Project>>(`/api/projects/${seg(slug)}`).then((r) => r.data),
 
+    getProjectCounts: (slug: string) =>
+        request<
+            DataResponse<{
+                total: number;
+                by_status: Record<string, number>;
+                by_category: Record<string, number>;
+            }>
+        >(`/api/projects/${seg(slug)}/counts`).then((r) => r.data),
+
     createProject: (body: { name: string; slug?: string; description?: string }) =>
         request<DataResponse<Project>>('/api/projects', {
             method: 'POST',

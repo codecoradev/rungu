@@ -15,6 +15,7 @@ use utoipa::OpenApi;
     paths(
         // Projects
         crate::project_routes::list_projects,
+        crate::project_routes::get_project_counts,
         crate::project_routes::create_project,
         crate::project_routes::get_project,
         crate::project_routes::update_project,
