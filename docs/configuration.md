@@ -167,3 +167,19 @@ See [Auth Overview](/auth/overview) for the full identity model.
 **S3-compatible (MinIO, R2, AWS S3):** The `s3` driver is accepted but not yet implemented. It will be available in v0.3.
 
 See [Attachments](/features/attachments) for format support and security details.
+
+## Email Notifications
+
+Off by default. Setting `SMTP_HOST` and `SMTP_FROM` turns them on; leaving every SMTP variable empty keeps them off.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SMTP_HOST` | — | SMTP relay host. Required to enable notifications |
+| `SMTP_FROM` | — | Sender, e.g. `Rungu <feedback@example.com>`. Required with `SMTP_HOST` |
+| `SMTP_PORT` | `587` | Submission port. STARTTLS is used when the server offers it (implicit TLS on 465 is not supported) |
+| `SMTP_USER` / `SMTP_PASSWORD` | — | Credentials, set both or neither. Never sent unless the connection is upgraded to TLS |
+| `SMTP_DRIVER` | `smtp` | `log` renders emails to the server log instead of sending (dev/CI) |
+
+A partial configuration (for example `SMTP_HOST` without `SMTP_FROM`) exits at startup instead of silently disabling email. `APP_URL` must be the public URL: it builds the links inside emails. `rungu mcp` reads the same variables, so comments and status changes made by an AI agent notify people too.
+
+See [Email Notifications](/features/notifications) for who gets emailed and how unsubscribing works.

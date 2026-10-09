@@ -778,3 +778,85 @@ async fn test_webhook_test_requires_admin() {
         .unwrap();
     assert_eq!(res.status(), StatusCode::FORBIDDEN);
 }
+
+// ── Email notifications (#73) ──────────────────────────────────────────
+
+async fn send(app: &axum::Router, req: Request<Body>) -> (StatusCode, String) {
+    let res = app.clone().oneshot(req).await.unwrap();
+    let status = res.status();
+    let body = axum::body::to_bytes(res.into_body(), 65536).await.unwrap();
+    (status, String::from_utf8_lossy(&body).into_owned())
+}
+
+#[tokio::test]
+async fn test_notification_preferences_roundtrip() {
+    let (app, store) = setup_app().await;
+    let token = authed_user(&store, "test-secret").await;
+    let user = store.find_or_create_user("user@test.com", None, None, &[]).await.unwrap();
+    let get = || {
+        Request::builder()
+            .uri("/me/notifications/preferences")
+            .header("cookie", format!("session={token}"))
+            .body(Body::empty())
+            .unwrap()
+    };
+
+    let (status, body) = send(&app, get()).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(body.contains(r#""notificationsOptOut":false"#), "opted in by default: {body}");
+
+    let (status, _) = send(
+        &app,
+        Request::builder()
+            .method("POST")
+            .uri("/me/notifications/preferences")
+            .header("cookie", format!("session={token}"))
+            .header("content-type", "application/json")
+            .body(Body::from(r#"{"notificationsOptOut":true}"#))
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(store.notifications_opt_out(&user.id).await.unwrap());
+    assert!(send(&app, get()).await.1.contains(r#""notificationsOptOut":true"#));
+
+    let (status, _) =
+        send(&app, Request::builder().uri("/me/notifications/preferences").body(Body::empty()).unwrap()).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn test_unsubscribe_get_confirms_and_post_unsubscribes() {
+    let (app, store) = setup_app().await;
+    let user = store.find_or_create_user("unsub@test.com", Some("Unsub"), None, &[]).await.unwrap();
+    let token = rungu_api::email::unsubscribe_token(&user.id, "test-secret");
+    let uri = format!("/notifications/unsubscribe?token={token}");
+
+    // Link scanners prefetch with GET: it must only show a confirmation.
+    let (status, body) = send(&app, Request::builder().uri(&uri).body(Body::empty()).unwrap()).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(body.contains("<form method=\"post\""));
+    assert!(!store.notifications_opt_out(&user.id).await.unwrap(), "GET must not unsubscribe");
+
+    // RFC 8058 one-click POST (and the confirmation button) unsubscribe.
+    let one_click = || {
+        Request::builder()
+            .method("POST")
+            .uri(&uri)
+            .header("content-type", "application/x-www-form-urlencoded")
+            .body(Body::from("List-Unsubscribe=One-Click"))
+            .unwrap()
+    };
+    assert_eq!(send(&app, one_click()).await.0, StatusCode::OK);
+    assert!(store.notifications_opt_out(&user.id).await.unwrap());
+    assert_eq!(send(&app, one_click()).await.0, StatusCode::OK, "idempotent");
+
+    for bad in ["deadbeef", &format!("{}.00", user.id)] {
+        let req = Request::builder()
+            .method("POST")
+            .uri(format!("/notifications/unsubscribe?token={bad}"))
+            .body(Body::empty())
+            .unwrap();
+        assert_eq!(send(&app, req).await.0, StatusCode::BAD_REQUEST);
+    }
+}

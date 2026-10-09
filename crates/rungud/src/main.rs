@@ -146,7 +146,12 @@ async fn async_main(cli: Cli) -> Result<()> {
             // Same operations + subscribers as the HTTP server, so mutations
             // made by an agent fire webhooks and analytics too.
             let store = rungu_core::Store::new_with_kind(pool, is_sqlite);
-            let events = rungu_api::default_event_bus(&store, &reqwest::Client::new());
+            let events = rungu_api::default_event_bus(
+                &store,
+                &reqwest::Client::new(),
+                &config.auth,
+                rungu_api::email::EmailConfig::from_env(),
+            );
             // Storage is only needed to delete attachment files. Clients often
             // spawn `rungu mcp` from an unrelated working directory, so a
             // storage failure must not stop the tools from starting.

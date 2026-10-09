@@ -2,6 +2,25 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Email notifications** (#73) — post authors and commenters get an email
+  when the post receives a comment or changes status. The person who acted
+  is never emailed, and opted-out users are skipped. Off until
+  `SMTP_HOST` + `SMTP_FROM` are set (`SMTP_DRIVER=log` for dev/CI); a
+  partial SMTP config exits at startup. Delivered by an `EmailSink` on the
+  domain event bus, so REST and MCP changes both notify.
+- **Unsubscribe** — every email carries a signed link plus RFC 8058
+  one-click headers. The link opens a confirmation page and only the POST
+  unsubscribes, so link-scanning mail filters can't opt people out.
+  `GET`/`POST /api/me/notifications/preferences` reads and sets the choice.
+
+### Changed
+
+- **Re-saving a post's current status or category is a no-op** — no write,
+  no `post.status_changed` webhook, and no email. Previously it bumped
+  `updated_at` and fired the webhook with `old_status == new_status`.
+
 ### Fixed (accessibility)
 
 - **Status badges meet WCAG AA in light mode** — the text was 1.9:1

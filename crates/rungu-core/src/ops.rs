@@ -170,7 +170,10 @@ impl Operations {
             .map(|c| parse_category(c).ok_or_else(|| OpError::invalid("Invalid category")))
             .transpose()?;
 
-        if let Some(new_status) = status {
+        // Re-saving the current value is a no-op: no write (so `updated_at`
+        // and the changelog order don't move) and no event (so nobody is
+        // emailed "moved to Open" for a post that was already open).
+        if let Some(new_status) = status.filter(|s| *s != before.status) {
             self.store.update_post_status(post_id, new_status).await?;
             self.events.publish(DomainEvent::PostStatusChanged {
                 post: before.clone(),
@@ -179,7 +182,7 @@ impl Operations {
                 actor_id: actor.id.clone(),
             });
         }
-        if let Some(new_category) = category {
+        if let Some(new_category) = category.filter(|c| *c != before.category) {
             self.store.update_post_category(post_id, new_category).await?;
             self.events.publish(DomainEvent::PostCategoryChanged {
                 post: before.clone(),
