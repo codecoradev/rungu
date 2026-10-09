@@ -8,9 +8,11 @@ pub mod attachment_routes;
 pub mod auth_routes;
 pub mod background;
 pub mod comment_routes;
+pub mod email;
 pub mod error;
 pub mod mcp_http;
 pub mod meta;
+pub mod notification_routes;
 pub mod oauth;
 pub mod openapi;
 pub mod post_routes;
@@ -25,13 +27,23 @@ use axum::Router;
 use axum::extract::FromRef;
 use rungu_core::{EventBus, Operations, Storage, Store};
 
-/// The production event subscribers: webhooks and analytics counters.
-/// Shared by the HTTP server and the stdio MCP process.
-pub fn default_event_bus(store: &Store, http_client: &reqwest::Client) -> EventBus {
-    EventBus::new(vec![
+/// The production event subscribers: webhooks, analytics counters, and —
+/// when SMTP is configured — email notifications. Shared by the HTTP server
+/// and the stdio MCP process.
+pub fn default_event_bus(
+    store: &Store,
+    http_client: &reqwest::Client,
+    auth: &rungu_auth::AuthConfig,
+    email: email::EmailConfig,
+) -> EventBus {
+    let mut sinks: Vec<Arc<dyn rungu_core::EventSink>> = vec![
         Arc::new(webhook::WebhookSink::new(store.clone(), http_client.clone())),
         Arc::new(analytics::AnalyticsSink::new(store.clone())),
-    ])
+    ];
+    if let Some(sink) = email::EmailSink::new(store.clone(), email, &auth.app_url, &auth.app_secret) {
+        sinks.push(Arc::new(sink));
+    }
+    EventBus::new(sinks)
 }
 
 /// Shared application state for API handlers.
@@ -63,6 +75,7 @@ pub struct AppState {
 
 impl AppState {
     /// Build state with the production event subscribers wired into `ops`.
+    /// Email notifications start disabled; see [`AppState::with_email`].
     pub fn new(
         store: Store,
         config: rungu_auth::AuthConfig,
@@ -72,9 +85,16 @@ impl AppState {
         license: Arc<crate::meta::LicenseStatus>,
         agent_user_id: Arc<Option<String>>,
     ) -> Self {
-        let events = default_event_bus(&store, &http_client);
+        let events = default_event_bus(&store, &http_client, &config, email::EmailConfig::Disabled);
         let ops = Operations::new(store.clone(), storage.clone(), events);
         Self { store, ops, config, http_client, storage, branding, license, agent_user_id }
+    }
+
+    /// Subscribe email notifications (#73) with the given SMTP configuration.
+    pub fn with_email(mut self, email: email::EmailConfig) -> Self {
+        let events = default_event_bus(&self.store, &self.http_client, &self.config, email);
+        self.ops = Operations::new(self.store.clone(), self.storage.clone(), events);
+        self
     }
 }
 
@@ -106,5 +126,6 @@ pub fn api_routes() -> Router<AppState> {
         .merge(attachment_routes::router())
         .merge(webhook_routes::router())
         .merge(admin_routes::router())
+        .merge(notification_routes::router())
         .merge(crate::meta::meta_routes())
 }

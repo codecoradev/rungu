@@ -1857,6 +1857,7 @@ dependencies = [
  "anyhow",
  "axum",
  "axum-extra",
+ "base64",
  "chrono",
  "hmac",
  "reqwest",
@@ -1869,12 +1870,14 @@ dependencies = [
  "sha2",
  "tempfile",
  "tokio",
+ "tokio-rustls",
  "tower",
  "tracing",
  "url",
  "urlencoding",
  "utoipa",
  "uuid",
+ "webpki-roots 0.26.11",
 ]
 
 [[package]]

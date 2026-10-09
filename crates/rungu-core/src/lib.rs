@@ -86,6 +86,7 @@ pub async fn run_migrations(pool: &AnyPool, database_url: &str) -> Result<()> {
             include_str!("../migrations/sqlite/002_webhooks.sql"),
             include_str!("../migrations/sqlite/003_analytics.sql"),
             include_str!("../migrations/sqlite/004_official_response.sql"),
+            include_str!("../migrations/sqlite/005_notifications.sql"),
         ]
     } else {
         [
@@ -93,6 +94,7 @@ pub async fn run_migrations(pool: &AnyPool, database_url: &str) -> Result<()> {
             include_str!("../migrations/postgres/002_webhooks.sql"),
             include_str!("../migrations/postgres/003_analytics.sql"),
             include_str!("../migrations/postgres/004_official_response.sql"),
+            include_str!("../migrations/postgres/005_notifications.sql"),
         ]
     };
 

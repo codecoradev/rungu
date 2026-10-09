@@ -71,6 +71,8 @@ pub async fn serve(config: Config, pool: sqlx::AnyPool, is_sqlite: bool, listen:
         }
     }
 
+    let email = rungu_api::email::EmailConfig::from_env();
+    info!("Email notifications: {}", email.describe());
     let state = AppState::new(
         store,
         config.auth.clone(),
@@ -79,7 +81,8 @@ pub async fn serve(config: Config, pool: sqlx::AnyPool, is_sqlite: bool, listen:
         config.branding.clone(),
         license,
         agent_user_id,
-    );
+    )
+    .with_email(email);
 
     // CORS — secure by default.
     // If RUNGU_CORS_ORIGINS is empty, only allow the APP_URL origin.

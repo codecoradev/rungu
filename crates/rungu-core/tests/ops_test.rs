@@ -158,6 +158,17 @@ async fn update_post_publishes_one_event_per_changed_field() {
 }
 
 #[tokio::test]
+async fn update_post_with_unchanged_values_publishes_nothing() {
+    let f = Fixture::new().await;
+    let id = f.post("Export CSV").await;
+
+    let same = PostChanges { status: Some("open"), category: Some("feedback") };
+    let updated = f.ops.update_post(&f.owner, &id, same).await.unwrap();
+    assert_eq!(updated.post.status, PostStatus::Open);
+    assert_eq!(f.events.events().len(), 1, "only the PostCreated from setup");
+}
+
+#[tokio::test]
 async fn delete_post_removes_attachment_files() {
     let f = Fixture::new().await;
     let id = f.post("Has screenshot").await;
