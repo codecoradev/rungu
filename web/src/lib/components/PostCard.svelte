@@ -12,20 +12,33 @@
 <!--
     Flat hairline row (#201): no card chrome, border-b divider, token-driven
     density (--board-row-*) so the list fits ~5 rows per desktop viewport.
-    Focus ring draws inside the row to avoid double-divider artifacts.
+
+    Stretched link: the title link's ::after covers the whole row, so the row
+    stays clickable without nesting the vote button inside an <a> (invalid
+    HTML; screen readers announced it as part of the link). The rail sits
+    above the overlay (relative z-10). Focus ring draws inside the row.
 -->
-<a
-    href={`/board/${slug}/post/${post.id}`}
-    class="group flex min-h-[var(--board-row-min-height)] items-stretch gap-3 rounded-lg border-b border-[var(--board-row-divider-color)] px-[var(--board-row-pad-x)] py-[var(--board-row-pad-y)] outline-none transition-colors last:border-b-0 hover:bg-[var(--board-row-hover-bg)] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+<article
+    class="group relative flex min-h-[var(--board-row-min-height)] items-stretch gap-3 rounded-lg border-b border-[var(--board-row-divider-color)] px-[var(--board-row-pad-x)] py-[var(--board-row-pad-y)] transition-colors last:border-b-0 hover:bg-[var(--board-row-hover-bg)] has-[a:focus-visible]:ring-2 has-[a:focus-visible]:ring-inset has-[a:focus-visible]:ring-ring"
 >
     <div class="min-w-0 flex-1">
         <div class="mb-1 flex items-center gap-2">
             <CategoryBadge category={post.category} />
             <StatusBadge status={post.status} />
         </div>
-        <h3 class="truncate text-[length:var(--board-title-size)] font-semibold" title={post.title}>{post.title}</h3>
+        <h3 class="truncate text-[length:var(--board-title-size)] font-semibold">
+            <a
+                href={`/board/${slug}/post/${post.id}`}
+                title={post.title}
+                class="outline-none after:absolute after:inset-0 after:rounded-lg"
+            >
+                {post.title}
+            </a>
+        </h3>
         {#if post.description}
-            <p class="mt-1 line-clamp-2 text-[length:var(--board-body-size)] leading-snug text-muted-foreground" title={post.description}>{post.description}</p>
+            <p class="mt-1 line-clamp-2 text-[length:var(--board-body-size)] leading-snug text-muted-foreground">
+                {post.description}
+            </p>
         {/if}
         <div class="mt-1.5 flex items-center gap-3 text-[length:var(--board-meta-size)] text-muted-foreground">
             <span>{post.creator.name || 'User'}</span>
@@ -35,15 +48,12 @@
                 <span class="flex items-center gap-1 whitespace-nowrap">
                     <MessageSquare class="size-3.5" aria-hidden="true" />
                     {post.comment_count}
+                    <span class="sr-only">{post.comment_count === 1 ? 'comment' : 'comments'}</span>
                 </span>
             {/if}
         </div>
     </div>
-    <!-- svelte-ignore a11y_click_events_have_key_events,a11y_no_static_element_interactions -->
-    <div
-        class="flex shrink-0 items-center border-l border-[var(--vote-rail-divider-color)] pl-2"
-        onclick={(e) => e.preventDefault()}
-    >
-        <VoteRail postId={post.id} voted={post.user_voted} count={post.vote_count} />
+    <div class="relative z-10 flex shrink-0 items-center border-l border-[var(--vote-rail-divider-color)] pl-2">
+        <VoteRail postId={post.id} postTitle={post.title} voted={post.user_voted} count={post.vote_count} />
     </div>
-</a>
+</article>

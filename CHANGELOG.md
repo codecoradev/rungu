@@ -2,6 +2,24 @@
 
 ## [Unreleased]
 
+### Fixed (accessibility)
+
+- **Status badges meet WCAG AA in light mode** — the text was 1.9:1
+  (In Progress) to 3.7:1 (Planned); new `--color-status-*-fg` tokens bring
+  every badge to at least 4.6:1.
+- **Primary-colored text meets AA in dark mode** — links, active filters,
+  and the voted count were 3.7–4.2:1; the new `--color-primary-text` token
+  is at least 6:1.
+- **Board rows no longer nest the vote button inside a link** — rows use a
+  stretched title link, so the vote button is its own control in the tab
+  order and is no longer read as part of the link.
+- **The vote button names the post and its count** ("Upvote: Dark mode,
+  3 votes") and keeps that name when toggled; the state is `aria-pressed`.
+- **Reply is hidden for signed-out visitors** — it did nothing for them.
+  For signed-in users, Reply now moves focus to the comment box.
+- **Login links return you to where you were** — the board (including its
+  sort), post pages, and the header now pass `?redirect=`.
+
 ### Changed
 
 - **One domain operations module for REST and MCP** — every mutation
