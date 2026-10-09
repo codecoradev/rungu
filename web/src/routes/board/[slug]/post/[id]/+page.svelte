@@ -1,6 +1,6 @@
 <script lang="ts">
     import { branding } from '$lib/branding.svelte';
-    import { onMount } from 'svelte';
+    import { onMount, tick } from 'svelte';
     import CircleAlert from '@lucide/svelte/icons/circle-alert';
     import ShieldCheck from '@lucide/svelte/icons/shield-check';
     import ChevronUp from '@lucide/svelte/icons/chevron-up';
@@ -14,7 +14,8 @@
     import { Button } from '$lib/components/ui/button';
     import { Textarea } from '$lib/components/ui/textarea';
     import * as Card from '$lib/components/ui/card';
-    import { timeAgo } from '$lib/utils';
+    import { page } from '$app/state';
+    import { loginHref, timeAgo } from '$lib/utils';
     import { toastError, toastSuccess } from '$lib/toast.svelte';
 
     /**
@@ -121,6 +122,13 @@
         window.addEventListener('rungu:shortcut', handler);
         return () => window.removeEventListener('rungu:shortcut', handler);
     });
+
+    /** Reply targets a thread and moves focus to the composer above it. */
+    async function startReply(parentId: string) {
+        replyTo = parentId;
+        await tick();
+        document.getElementById('post-reply')?.focus();
+    }
 
     async function handleComment(e: Event) {
         e.preventDefault();
@@ -258,7 +266,7 @@
                 </div>
             </div>
             <div class="flex shrink-0 items-center border-l border-[var(--vote-rail-divider-color)] pl-4">
-                <VoteRail postId={post.id} voted={post.user_voted} count={post.vote_count} onvote={handleVote} />
+                <VoteRail postId={post.id} postTitle={post.title} voted={post.user_voted} count={post.vote_count} onvote={handleVote} />
             </div>
         </Card.Header>
         {#if post.description}
@@ -352,7 +360,7 @@
                     {/if}
                     <div class="mb-1 text-xs text-muted-foreground">
                         Replying to thread ·
-                        <button type="button" onclick={() => (replyTo = null)} class="text-primary">cancel</button>
+                        <button type="button" onclick={() => (replyTo = null)} class="text-primary-text">cancel</button>
                     </div>
                 {/if}
                 <Textarea
@@ -370,7 +378,7 @@
         {:else}
             <Card.Root class="mb-6">
                 <Card.Content class="pt-6 text-center text-sm text-muted-foreground">
-                    <a href="/login" class="font-medium text-primary hover:underline">Login</a> to join the discussion
+                    <a href={loginHref(page.url.pathname)} class="font-medium text-primary-text hover:underline">Login</a> to join the discussion
                 </Card.Content>
             </Card.Root>
         {/if}
@@ -378,7 +386,7 @@
         <CommentThread
             {comments}
             currentUserId={user?.id}
-            onreply={(parentId) => (replyTo = parentId)}
+            onreply={user ? startReply : undefined}
             ondelete={handleDeleteComment}
         >
             {#snippet commentActions(comment: Comment)}

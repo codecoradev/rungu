@@ -11,13 +11,15 @@
     import { Input } from '$lib/components/ui/input';
     import * as Card from '$lib/components/ui/card';
     import { Skeleton } from '$lib/components/ui/skeleton';
-    import { cn } from '$lib/utils';
+    import { page } from '$app/state';
+    import { cn, loginHref } from '$lib/utils';
     import { toastError } from '$lib/toast.svelte';
     import { LoaderCircle, Plus, X } from '@lucide/svelte';
     import CircleAlert from '@lucide/svelte/icons/circle-alert';
 
     let { params } = $props();
     let slug = $derived(params.slug);
+    const loginUrl = $derived(loginHref(page.url.pathname + page.url.search));
 
     let project = $state<Project | null>(null);
     let posts = $state<PostDetail[]>([]);
@@ -363,7 +365,7 @@
                     <Plus class="size-4" aria-hidden="true" /> New Post
                 </Button>
             {:else}
-                <Button size="sm" class="h-11 shrink-0" href="/login">Login to post</Button>
+                <Button size="sm" class="h-11 shrink-0" href={loginUrl}>Login to post</Button>
             {/if}
             <Button
                 variant="outline"
@@ -393,7 +395,7 @@
                                 class={cn(
                                     'min-h-11 shrink-0 whitespace-nowrap rounded-full border px-3 py-1 text-sm transition-colors',
                                     categoryFilter === cat.value
-                                        ? 'border-primary bg-primary/10 font-medium text-primary'
+                                        ? 'border-primary bg-primary/10 font-medium text-primary-text'
                                         : 'border-input text-muted-foreground hover:bg-muted',
                                 )}
                             >
@@ -412,7 +414,7 @@
                                 class={cn(
                                     'min-h-11 shrink-0 whitespace-nowrap rounded-full border px-3 py-1 text-sm capitalize transition-colors',
                                     statusFilter === st.value
-                                        ? 'border-primary bg-primary/10 font-medium text-primary'
+                                        ? 'border-primary bg-primary/10 font-medium text-primary-text'
                                         : 'border-input text-muted-foreground hover:bg-muted',
                                 )}
                             >
@@ -548,7 +550,7 @@
                         <p class="mt-1 text-sm text-muted-foreground">
                             This board is brand new. Sign in to be the first to post.
                         </p>
-                        <Button class="mt-4" href="/login">Login to post</Button>
+                        <Button class="mt-4" href={loginUrl}>Login to post</Button>
                     {/if}
                 </div>
             {/if}
@@ -562,7 +564,7 @@
             {#if !authed}
                 <Card.Root>
                     <Card.Content class="pt-6 text-center text-sm text-muted-foreground">
-                        <a href="/login" class="font-medium text-primary hover:underline">Login</a> to post and vote
+                        <a href={loginUrl} class="font-medium text-primary-text hover:underline">Login</a> to post and vote
                     </Card.Content>
                 </Card.Root>
             {/if}
@@ -576,7 +578,7 @@
                             class={cn(
                                 'flex min-h-11 items-center justify-between gap-2 rounded-md px-2 py-1 text-left text-sm transition-colors',
                                 categoryFilter === cat.value
-                                    ? 'bg-primary/10 font-medium text-primary'
+                                    ? 'bg-primary/10 font-medium text-primary-text'
                                     : 'text-muted-foreground hover:bg-muted',
                             )}
                         >
@@ -596,7 +598,7 @@
                             class={cn(
                                 'flex min-h-11 items-center justify-between gap-2 rounded-md px-2 py-1 text-left text-sm capitalize transition-colors',
                                 statusFilter === st.value
-                                    ? 'bg-primary/10 font-medium text-primary'
+                                    ? 'bg-primary/10 font-medium text-primary-text'
                                     : 'text-muted-foreground hover:bg-muted',
                             )}
                         >

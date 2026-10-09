@@ -102,3 +102,13 @@ export function sanitizeHref(href: string | undefined | null): string | undefine
     }
     return undefined;
 }
+
+/**
+ * Login URL that brings the user back to `returnTo` (path + query) after
+ * auth (#147). The login page validates `redirect` as a same-origin path;
+ * the home page and the login page itself need no round trip.
+ */
+export function loginHref(returnTo: string): string {
+    if (!returnTo || returnTo === '/' || returnTo.startsWith('/login')) return '/login';
+    return `/login?redirect=${encodeURIComponent(returnTo)}`;
+}

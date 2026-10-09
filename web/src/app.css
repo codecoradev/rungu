@@ -43,6 +43,15 @@
         --color-status-in-progress: oklch(0.77 0.19 70);
         --color-status-done: oklch(0.7 0.17 163);
         --color-status-declined: oklch(0.64 0.24 25);
+        /* Status text on its own /10 tint: the hues above are for dots and
+         * tints; as 12px text they fall to 1.9-3.7:1. These keep >= 4.6:1. */
+        --color-status-open-fg: oklch(0.52 0.16 260);
+        --color-status-planned-fg: oklch(0.53 0.16 293);
+        --color-status-in-progress-fg: oklch(0.54 0.16 70);
+        --color-status-done-fg: oklch(0.49 0.16 163);
+        --color-status-declined-fg: oklch(0.53 0.16 25);
+        /* Primary used as text (links, active filters, voted count). */
+        --color-primary-text: var(--color-primary);
         --color-border: oklch(0.87 0.005 265);
         --color-input: oklch(0.87 0.005 265);
         --color-ring: oklch(0.45 0.15 250);
@@ -67,7 +76,7 @@
         --vote-target-min: 2.75rem; /* 44px */
         --vote-count-size: 1.125rem; /* 18px semibold */
         --vote-voted-bg: oklch(0.5 0.2 250 / 0.12);
-        --vote-voted-fg: var(--color-primary);
+        --vote-voted-fg: var(--color-primary-text);
         --vote-voted-border: oklch(0.5 0.2 250 / 0.35);
         --vote-hover-bg: oklch(0.5 0.015 265 / 0.06);
         --vote-rail-divider-color: var(--color-border);
@@ -117,6 +126,15 @@
         --color-status-in-progress: oklch(0.83 0.19 84);
         --color-status-done: oklch(0.77 0.18 163);
         --color-status-declined: oklch(0.7 0.19 22);
+        /* Dark hues already clear 6:1 as text on their tints. */
+        --color-status-open-fg: var(--color-status-open);
+        --color-status-planned-fg: var(--color-status-planned);
+        --color-status-in-progress-fg: var(--color-status-in-progress);
+        --color-status-done-fg: var(--color-status-done);
+        --color-status-declined-fg: var(--color-status-declined);
+        /* --color-primary (0.55) is tuned for white button text; as text on
+         * the dark background it is only 4.2:1. This is >= 6:1 everywhere. */
+        --color-primary-text: oklch(0.7 0.15 250);
         --color-border: oklch(0.35 0.015 265);
         --color-input: oklch(0.35 0.015 265);
         --color-ring: oklch(0.6 0.15 250);
@@ -125,7 +143,7 @@
         --board-row-divider-color: var(--color-border);
         --board-row-hover-bg: oklch(0.7 0.015 265 / 0.07);
         --vote-voted-bg: oklch(0.55 0.2 250 / 0.16);
-        --vote-voted-fg: var(--color-primary);
+        --vote-voted-fg: var(--color-primary-text);
         --vote-voted-border: oklch(0.55 0.2 250 / 0.4);
         --vote-hover-bg: oklch(0.7 0.015 265 / 0.08);
         --vote-rail-divider-color: var(--color-border);
@@ -162,6 +180,12 @@
     --color-status-in-progress: var(--color-status-in-progress);
     --color-status-done: var(--color-status-done);
     --color-status-declined: var(--color-status-declined);
+    --color-status-open-fg: var(--color-status-open-fg);
+    --color-status-planned-fg: var(--color-status-planned-fg);
+    --color-status-in-progress-fg: var(--color-status-in-progress-fg);
+    --color-status-done-fg: var(--color-status-done-fg);
+    --color-status-declined-fg: var(--color-status-declined-fg);
+    --color-primary-text: var(--color-primary-text);
     --color-border: var(--color-border);
     --color-input: var(--color-input);
     --color-ring: var(--color-ring);
