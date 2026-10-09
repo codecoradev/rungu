@@ -6,6 +6,7 @@ pub mod admin_routes;
 pub mod analytics;
 pub mod attachment_routes;
 pub mod auth_routes;
+pub mod background;
 pub mod comment_routes;
 pub mod error;
 pub mod mcp_http;
@@ -18,14 +19,29 @@ pub mod vote_routes;
 pub mod webhook;
 pub mod webhook_routes;
 
+use std::sync::Arc;
+
 use axum::Router;
 use axum::extract::FromRef;
-use rungu_core::Store;
+use rungu_core::{EventBus, Operations, Storage, Store};
+
+/// The production event subscribers: webhooks and analytics counters.
+/// Shared by the HTTP server and the stdio MCP process.
+pub fn default_event_bus(store: &Store, http_client: &reqwest::Client) -> EventBus {
+    EventBus::new(vec![
+        Arc::new(webhook::WebhookSink::new(store.clone(), http_client.clone())),
+        Arc::new(analytics::AnalyticsSink::new(store.clone())),
+    ])
+}
 
 /// Shared application state for API handlers.
 #[derive(Clone)]
 pub struct AppState {
+    /// Read paths query the store directly; it shares its project cache
+    /// with `ops`.
     pub store: Store,
+    /// Every mutation goes through here (REST and `/mcp` alike).
+    pub ops: Operations,
     pub config: rungu_auth::AuthConfig,
     /// Reused HTTP client for outbound calls (OAuth token exchange, userinfo fetch).
     ///
@@ -43,6 +59,23 @@ pub struct AppState {
     /// Extractors forge the agent identity with this id so `created_by`
     /// FKs point at a real user row.
     pub agent_user_id: std::sync::Arc<Option<String>>,
+}
+
+impl AppState {
+    /// Build state with the production event subscribers wired into `ops`.
+    pub fn new(
+        store: Store,
+        config: rungu_auth::AuthConfig,
+        http_client: reqwest::Client,
+        storage: Arc<dyn Storage>,
+        branding: crate::meta::InstanceBranding,
+        license: Arc<crate::meta::LicenseStatus>,
+        agent_user_id: Arc<Option<String>>,
+    ) -> Self {
+        let events = default_event_bus(&store, &http_client);
+        let ops = Operations::new(store.clone(), storage.clone(), events);
+        Self { store, ops, config, http_client, storage, branding, license, agent_user_id }
+    }
 }
 
 impl FromRef<AppState> for rungu_auth::AuthConfig {

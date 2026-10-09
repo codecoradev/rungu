@@ -44,17 +44,21 @@ Shared types: `Post`, `Vote`, `Comment`, `User`, `Project`, enums, request/respo
 
 Database layer: connection pool (WAL mode), migrations, all SQLite queries. Depends only on `rungu-proto` and `sqlx`.
 
+Also home of the domain operations module (`ops::Operations`): every mutating use case (create/update/delete post, vote, comment, official response, attachment delete) lives there once — existence check → authorization → validation → write → storage cleanup → `DomainEvent`. REST and MCP are thin adapters over it, so both transports enforce identical rules.
+
+Side effects subscribe to the `EventBus` (`events.rs`) as `EventSink` adapters: `WebhookSink` and `AnalyticsSink` in `rungu-api`, wired by `rungu_api::default_event_bus()` for both the HTTP server and `rungu mcp`. A new side effect (e.g. email notifications) is one more sink, not a new call in every handler. Tests use `RecordingSink`.
+
 ### rungu-auth
 
 OAuth providers (Google, GitHub, Keycloak), JWT session issuance and validation, Axum middleware (`CurrentUser` extractor). ENV-driven configuration.
 
 ### rungu-api
 
-Axum route handlers. Orchestrates `rungu-core` calls with `rungu-auth` middleware. Maps HTTP requests to store operations.
+Axum route handlers. Mutations decode the request, call `state.ops`, and map `OpError` to an HTTP status; reads query `state.store` directly. Also hosts the webhook and analytics event sinks.
 
 ### rungu-mcp
 
-MCP server over stdio. 12 tools for AI agent integration. **No auth — local trusted subprocess only** (see [MCP trust boundary](../integrations/mcp.md#trust-boundary--security)). Calls `rungu-core` directly.
+MCP server over stdio. 12 tools for AI agent integration. **No auth — local trusted subprocess only** (see [MCP trust boundary](../integrations/mcp.md#trust-boundary--security)). Mutating tools call the shared `Operations` as the `mcp@rungu.local` admin actor; read tools query the store.
 
 ### rungud
 
@@ -78,7 +82,8 @@ Browser → /auth/google/login → redirect to Google
 ```
 Browser → POST /api/projects/:slug/posts (with session cookie)
 → rungu-api: validate auth via CurrentUser extractor
-→ rungu-core: store.create_post()
+→ rungu-core: ops.create_post() — validate, write, publish PostCreated
+→ EventBus → WebhookSink + AnalyticsSink (detached tasks)
 → Response: created post JSON
 ```
 

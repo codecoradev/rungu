@@ -245,26 +245,7 @@ pub async fn delete_attachment(
     Path(attachment_id): Path<String>,
     CurrentUser(user): CurrentUser,
 ) -> Result<StatusCode, ApiError> {
-    let (attachment, storage_path) = state
-        .store
-        .get_attachment(&attachment_id)
-        .await
-        .map_err(|_| ApiError::internal_default())?
-        .ok_or_else(|| ApiError::not_found("Attachment not found"))?;
-
-    // Only attachment creator or admin can delete
-    if attachment.created_by != user.id && user.role != UserRole::Admin {
-        return Err(ApiError::forbidden("Only the uploader or admin can delete attachments"));
-    }
-
-    // Delete file from storage
-    if let Err(e) = state.storage.delete(&storage_path).await {
-        tracing::warn!("Failed to delete attachment file {storage_path}: {e}");
-    }
-
-    // Delete DB record
-    state.store.delete_attachment(&attachment_id).await.map_err(|_| ApiError::internal_default())?;
-
+    state.ops.delete_attachment(&rungu_core::Actor::from(&user), &attachment_id).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 

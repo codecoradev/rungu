@@ -2,6 +2,39 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **One domain operations module for REST and MCP** — every mutation
+  (posts, votes, comments, official response, attachment delete) now runs
+  through `rungu_core::Operations`, and side effects (webhooks, analytics)
+  subscribe to a single event bus instead of being called from each
+  handler. Webhook payloads are unchanged.
+- **MCP tools now enforce the REST rules** — title trim and 200-char cap,
+  comment length and thread checks, strict categories (an unknown category
+  is an error, no longer silently `feedback`), and not-found errors for
+  missing posts and comments.
+
+### Fixed
+
+- **MCP mutations fire webhooks and analytics** — they previously skipped
+  both. `rungu mcp` waits up to 45s for in-flight deliveries when stdin
+  closes. Give it the server's `RUNGU_STORAGE_DIR` so attachment deletes
+  remove files; without a usable directory it logs a warning and starts
+  anyway.
+- **Attachment files are deleted with their post** — the cascade removed
+  only the rows, leaving files orphaned in storage. MCP `delete_attachment`
+  also now removes the file.
+- **MCP `get_stats`** counts every post (it capped at 1000).
+- **Stale project cache after `/mcp` changes** — `/mcp` now shares the
+  server's store and cache instead of building a new one per request.
+- **`rungu mcp` wrote logs to stdout**, corrupting the JSON-RPC stream.
+  Logs now go to stderr for every command, including `rungu serve` —
+  capture stderr if you were reading logs from stdout.
+- **A post update with a valid status and an invalid category** no longer
+  applies the status before rejecting the request.
+- **Official response with a database failure** returned 400; it now
+  returns 500.
+
 ## [0.6.0] - 2026-09-08
 
 The board navigation release. Views get a real nav row, posting gets a
