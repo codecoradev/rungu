@@ -80,10 +80,15 @@ fn main() -> Result<()> {
     // Init tracing (with Sentry bridge if active).
     let filter = tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| cli.log_level.clone().into());
     let registry = tracing_subscriber::registry().with(filter);
+    // Logs go to stderr: in `rungu mcp` stdout is the JSON-RPC stream, and
+    // any log line written there corrupts the protocol for the client.
     if sentry_active {
-        registry.with(sentry_tracing::layer()).with(tracing_subscriber::fmt::layer()).init();
+        registry
+            .with(sentry_tracing::layer())
+            .with(tracing_subscriber::fmt::layer().with_writer(std::io::stderr))
+            .init();
     } else {
-        registry.with(tracing_subscriber::fmt::layer()).init();
+        registry.with(tracing_subscriber::fmt::layer().with_writer(std::io::stderr)).init();
     }
 
     // Manual tokio runtime — required because sentry::init() must
@@ -138,7 +143,30 @@ async fn async_main(cli: Cli) -> Result<()> {
             println!("OK");
         }
         Some(Commands::Mcp) => {
-            rungu_mcp::run_server(pool, is_sqlite).await?;
+            // Same operations + subscribers as the HTTP server, so mutations
+            // made by an agent fire webhooks and analytics too.
+            let store = rungu_core::Store::new_with_kind(pool, is_sqlite);
+            let events = rungu_api::default_event_bus(&store, &reqwest::Client::new());
+            // Storage is only needed to delete attachment files. Clients often
+            // spawn `rungu mcp` from an unrelated working directory, so a
+            // storage failure must not stop the tools from starting.
+            let storage: std::sync::Arc<dyn rungu_core::Storage> = match rungu_core::create_storage() {
+                Ok(storage) => std::sync::Arc::from(storage),
+                Err(e) => {
+                    tracing::warn!(
+                        "Attachment storage unavailable ({e:#}); attachment files will not be deleted. \
+                         Set RUNGU_STORAGE_DIR to the server's upload directory."
+                    );
+                    std::sync::Arc::new(rungu_core::NoopStorage)
+                }
+            };
+            rungu_mcp::run_server(rungu_core::Operations::new(store, storage, events)).await?;
+            // stdin closed: let in-flight webhooks/analytics finish before the
+            // runtime is dropped (one delivery with retries stays under ~40s).
+            let pending = rungu_api::background::drain(std::time::Duration::from_secs(45)).await;
+            if pending > 0 {
+                tracing::warn!("{pending} webhook/analytics task(s) still running at exit were cancelled");
+            }
         }
         None => {
             server::serve(config, pool, is_sqlite, "0.0.0.0:3000").await?;

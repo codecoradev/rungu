@@ -48,12 +48,6 @@ impl ApiError {
         Self { status: StatusCode::PAYLOAD_TOO_LARGE, message: msg.into() }
     }
 
-    /// Check if the current user is the owner of a resource or an admin.
-    /// Returns 403 Forbidden if neither.
-    pub fn check_owner_or_admin(user: &CurrentUser, owner_id: &str, msg: &str) -> Result<(), Self> {
-        if user.id == owner_id || user.role == UserRole::Admin { Ok(()) } else { Err(Self::forbidden(msg)) }
-    }
-
     /// Require admin role. Returns 403 Forbidden if not admin.
     pub fn require_admin(user: &CurrentUser) -> Result<(), Self> {
         if user.role == UserRole::Admin { Ok(()) } else { Err(Self::forbidden("Admin access required")) }
@@ -65,6 +59,19 @@ impl From<anyhow::Error> for ApiError {
     fn from(e: anyhow::Error) -> Self {
         tracing::error!(error = %e, "API error");
         Self::internal("Internal server error")
+    }
+}
+
+/// Map a domain operation refusal onto its HTTP status.
+impl From<rungu_core::OpError> for ApiError {
+    fn from(e: rungu_core::OpError) -> Self {
+        use rungu_core::OpError;
+        match e {
+            OpError::NotFound(msg) => Self::not_found(msg),
+            OpError::Invalid(msg) => Self::bad_request(msg),
+            OpError::Forbidden(msg) => Self::forbidden(msg),
+            OpError::Internal(e) => e.into(),
+        }
     }
 }
 

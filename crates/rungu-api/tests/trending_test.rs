@@ -28,17 +28,17 @@ async fn setup_app() -> (axum::Router, Store) {
         github: None,
         keycloak: None,
     };
-    let state = AppState {
-        store: store.clone(),
+    let state = AppState::new(
+        store.clone(),
         config,
-        http_client: reqwest::Client::new(),
-        storage: std::sync::Arc::from(
+        reqwest::Client::new(),
+        std::sync::Arc::from(
             rungu_core::FsStorage::new(std::env::temp_dir().join("rungu-trending-test-uploads")).unwrap(),
         ),
-        branding: rungu_api::meta::InstanceBranding::default(),
-        license: std::sync::Arc::new(rungu_api::meta::LicenseStatus::new()),
-        agent_user_id: std::sync::Arc::new(None),
-    };
+        rungu_api::meta::InstanceBranding::default(),
+        std::sync::Arc::new(rungu_api::meta::LicenseStatus::new()),
+        std::sync::Arc::new(None),
+    );
     let app = axum::Router::new().merge(api_routes().with_state(state));
     (app, store)
 }

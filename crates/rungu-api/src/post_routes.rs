@@ -5,7 +5,9 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::{Json, Router};
 use rungu_auth::CurrentUser;
-use rungu_proto::{CreatePostBody, PostCategory, PostDetail, PostSort, PostStatus, UpdatePostBody};
+use rungu_core::Actor;
+use rungu_core::ops::{NewPost, PostChanges, parse_category, parse_sort, parse_status};
+use rungu_proto::{CreatePostBody, PostDetail, PostSort, PostStatus, UpdatePostBody};
 use serde::Deserialize;
 use utoipa::{IntoParams, ToSchema};
 
@@ -133,48 +135,15 @@ pub async fn create_post(
     CurrentUser(user): CurrentUser,
     Json(body): Json<CreatePostBody>,
 ) -> Result<(StatusCode, impl IntoResponse), ApiError> {
-    let project =
-        state.store.get_project_by_slug(&slug).await?.ok_or_else(|| ApiError::not_found("Project not found"))?;
-
-    let title = body.title.trim();
-    if title.is_empty() {
-        return Err(ApiError::bad_request("Title is required"));
-    }
-    if title.len() > 200 {
-        return Err(ApiError::bad_request("Title must be 200 characters or less"));
-    }
-
-    // Explicit but invalid category → 400 (consistent with the list filter).
-    // Absent category → default. Silent coercion hides client typos.
-    let category = match body.category.as_deref() {
-        None | Some("") => parse_category("feedback").unwrap_or_default(),
-        Some(s) => parse_category(s).ok_or_else(|| ApiError::bad_request("Invalid category"))?,
-    };
-
+    let description = body.description.unwrap_or_default();
     let post = state
-        .store
-        .create_post(&project.id, title, body.description.unwrap_or_default().as_str(), category, &user.id)
+        .ops
+        .create_post(
+            &Actor::from(&user),
+            &slug,
+            NewPost { title: &body.title, description: &description, category: body.category.as_deref() },
+        )
         .await?;
-
-    // Analytics: post created (#186).
-    crate::analytics::capture(&state.store, &project.id, Some(&post.id), "post_created");
-
-    // Fire webhook event: post.created
-    crate::webhook::dispatch_event(
-        std::sync::Arc::new(state.store.clone()),
-        state.http_client.clone(),
-        project.id.clone(),
-        rungu_proto::WebhookEventType::PostCreated,
-        serde_json::json!({
-            "event": "post.created",
-            "data": {
-                "id": &post.id,
-                "title": &post.title,
-                "project_id": &post.project_id,
-                "category": &post.category,
-            }
-        }),
-    );
 
     Ok((StatusCode::CREATED, Json(serde_json::json!({ "data": post }))))
 }
@@ -231,50 +200,9 @@ pub async fn update_post(
     CurrentUser(user): CurrentUser,
     Json(body): Json<UpdatePostBody>,
 ) -> Result<impl IntoResponse, ApiError> {
-    // Ownership check MUST run before body validation: otherwise the response
-    // differs for existing vs missing posts and leaks post existence to
-    // non-owners (see #162).
-    let existing = state.store.get_post(&id, None).await?.ok_or_else(|| ApiError::not_found("Post not found"))?;
-
-    ApiError::check_owner_or_admin(&user, &existing.post.created_by, "You can only update your own posts")?;
-
-    if !body.has_updates() {
-        return Err(ApiError::bad_request("No fields to update"));
-    }
-
-    if let Some(status_str) = &body.status {
-        let status = parse_status(status_str).ok_or_else(|| ApiError::bad_request("Invalid status"))?;
-        state.store.update_post_status(&id, status).await?;
-
-        // Fire webhook event: post.status_changed
-        crate::webhook::dispatch_event(
-            std::sync::Arc::new(state.store.clone()),
-            state.http_client.clone(),
-            existing.post.project_id.clone(),
-            rungu_proto::WebhookEventType::PostStatusChanged,
-            serde_json::json!({
-                "event": "post.status_changed",
-                "data": {
-                    "id": &existing.post.id,
-                    "title": &existing.post.title,
-                    "project_id": &existing.post.project_id,
-                    "old_status": &existing.post.status,
-                    "new_status": status_str,
-                }
-            }),
-        );
-    }
-
-    if let Some(category_str) = &body.category {
-        let category = parse_category(category_str).ok_or_else(|| ApiError::bad_request("Invalid category"))?;
-        state.store.update_post_category(&id, category).await?;
-    }
-
-    let updated = state
-        .store
-        .get_post(&id, Some(&user.id))
-        .await?
-        .ok_or_else(|| ApiError::internal("Post disappeared after update"))?;
+    // Ownership is checked before body validation inside `ops` (#162).
+    let changes = PostChanges { status: body.status.as_deref(), category: body.category.as_deref() };
+    let updated = state.ops.update_post(&Actor::from(&user), &id, changes).await?;
 
     Ok(Json(serde_json::json!({ "data": updated })))
 }
@@ -300,12 +228,7 @@ pub async fn delete_post(
     Path(id): Path<String>,
     CurrentUser(user): CurrentUser,
 ) -> Result<StatusCode, ApiError> {
-    let existing = state.store.get_post(&id, None).await?.ok_or_else(|| ApiError::not_found("Post not found"))?;
-
-    ApiError::check_owner_or_admin(&user, &existing.post.created_by, "You can only delete your own posts")?;
-
-    state.store.delete_post(&id).await?;
-
+    state.ops.delete_post(&Actor::from(&user), &id).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -525,50 +448,20 @@ pub async fn set_official_response(
     user: CurrentUser,
     body: Result<Json<OfficialResponseBody>, axum::extract::rejection::JsonRejection>,
 ) -> Result<impl IntoResponse, ApiError> {
-    // 1. Authn (extractor) + 2. authz — before any body parsing.
-    // `user.0` is the inner CurrentUserData (id/email/role as strings).
+    // 1. Authn (extractor) + 2. authz — before any body parsing, so the
+    // response never reveals post existence to non-admins (#162).
     ApiError::require_admin(&user.0)?;
 
-    let post = state.store.get_post(&id, None).await?.ok_or_else(|| ApiError::not_found("Post not found"))?;
-
     // 3. Body — last.
-    let body = match body {
-        Ok(Json(b)) => b,
-        Err(_) => return Err(ApiError::bad_request("Invalid request body")),
+    let Ok(Json(body)) = body else {
+        return Err(ApiError::bad_request("Invalid request body"));
     };
-    if let Some(cid) = body.comment_id.as_deref() {
-        if cid.trim().is_empty() {
-            return Err(ApiError::bad_request("comment_id cannot be empty"));
-        }
-    }
-
-    let previous = state
-        .store
-        .set_official_response(&post.post.id, body.comment_id.as_deref())
-        .await
-        .map_err(|e| ApiError::bad_request(format!("{e:#}")))?;
-
-    let response = state.store.get_official_response(&post.post.id).await?;
-
-    // Webhook: post.official_response_changed (fire-and-forget).
-    let project_id = post.post.project_id.clone();
-    crate::webhook::dispatch_event(
-        std::sync::Arc::new(state.store.clone()),
-        state.http_client.clone(),
-        project_id,
-        rungu_proto::WebhookEventType::OfficialResponseChanged,
-        serde_json::json!({
-            "event": "post.official_response_changed",
-            "post_id": post.post.id,
-            "comment_id": body.comment_id,
-            "previous_comment_id": previous,
-        }),
-    );
+    let outcome = state.ops.set_official_response(&Actor::from(&user.0), &id, body.comment_id.as_deref()).await?;
 
     Ok(Json(serde_json::json!({
         "data": {
-            "post_id": post.post.id,
-            "official_response": response,
+            "post_id": id,
+            "official_response": outcome.response,
         }
     })))
 }
@@ -593,7 +486,7 @@ pub async fn get_similar_posts(
     Ok(Json(serde_json::json!({ "data": similar })))
 }
 
-// ── Parsing helpers ────────────────────────────────────────────────────
+// ── Request bodies ─────────────────────────────────────────────────────
 
 /// Request body for setting the official team response (#205).
 #[derive(Debug, Deserialize, ToSchema)]
@@ -602,64 +495,9 @@ pub struct OfficialResponseBody {
     pub comment_id: Option<String>,
 }
 
-pub(crate) fn parse_sort(s: Option<&str>) -> PostSort {
-    match s {
-        Some("oldest") => PostSort::Oldest,
-        Some("most_votes") => PostSort::MostVotes,
-        Some("least_votes") => PostSort::LeastVotes,
-        Some("recently_updated") => PostSort::RecentlyUpdated,
-        Some("trending") => PostSort::Trending,
-        _ => PostSort::Newest,
-    }
-}
-
-pub(crate) fn parse_status(s: &str) -> Option<PostStatus> {
-    match s {
-        "open" => Some(PostStatus::Open),
-        "planned" => Some(PostStatus::Planned),
-        "in_progress" => Some(PostStatus::InProgress),
-        "done" => Some(PostStatus::Done),
-        "declined" => Some(PostStatus::Declined),
-        _ => None,
-    }
-}
-
-pub(crate) fn parse_category(s: &str) -> Option<PostCategory> {
-    match s {
-        "feedback" => Some(PostCategory::Feedback),
-        "bug" => Some(PostCategory::Bug),
-        "feature" => Some(PostCategory::Feature),
-        "question" => Some(PostCategory::Question),
-        _ => None,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_parse_sort() {
-        assert!(matches!(parse_sort(None), PostSort::Newest));
-        assert!(matches!(parse_sort(Some("oldest")), PostSort::Oldest));
-        assert!(matches!(parse_sort(Some("most_votes")), PostSort::MostVotes));
-        assert!(matches!(parse_sort(Some("trending")), PostSort::Trending));
-        assert!(matches!(parse_sort(Some("unknown")), PostSort::Newest));
-    }
-
-    #[test]
-    fn test_parse_status() {
-        assert!(matches!(parse_status("open"), Some(PostStatus::Open)));
-        assert!(matches!(parse_status("done"), Some(PostStatus::Done)));
-        assert!(parse_status("invalid").is_none());
-    }
-
-    #[test]
-    fn test_parse_category() {
-        assert!(matches!(parse_category("bug"), Some(PostCategory::Bug)));
-        assert!(matches!(parse_category("feature"), Some(PostCategory::Feature)));
-        assert!(parse_category("invalid").is_none());
-    }
 
     #[test]
     fn test_update_body_has_updates() {

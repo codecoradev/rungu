@@ -67,7 +67,7 @@ pub async fn list_all_posts(
 
     let status = match query.status.as_deref() {
         Some(s) => {
-            Some(crate::post_routes::parse_status(s).ok_or_else(|| ApiError::bad_request("Invalid status filter"))?)
+            Some(rungu_core::ops::parse_status(s).ok_or_else(|| ApiError::bad_request("Invalid status filter"))?)
         }
         None => None,
     };
