@@ -1846,7 +1846,7 @@ dependencies = [
 
 [[package]]
 name = "rungu_api"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -1876,7 +1876,7 @@ dependencies = [
 
 [[package]]
 name = "rungu_auth"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "anyhow",
  "axum",
@@ -1898,7 +1898,7 @@ dependencies = [
 
 [[package]]
 name = "rungu_core"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -1917,7 +1917,7 @@ dependencies = [
 
 [[package]]
 name = "rungu_mcp"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "anyhow",
  "rungu_core",
@@ -1932,7 +1932,7 @@ dependencies = [
 
 [[package]]
 name = "rungu_proto"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "chrono",
  "serde",
@@ -1942,7 +1942,7 @@ dependencies = [
 
 [[package]]
 name = "rungud"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "anyhow",
  "axum",
