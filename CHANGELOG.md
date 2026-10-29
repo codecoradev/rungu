@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.7.0] - 2026-10-29
 
 ### Added
 
@@ -21,11 +21,22 @@
   no `post.status_changed` webhook, and no email. Previously it bumped
   `updated_at` and fired the webhook with `old_status == new_status`.
 
+- **Dependency security refresh** — Bun pinned to 1.4.4 across CI and Docker,
+  `undici` bumped to 7.30.1 (clears 8 advisories, 4 high — dev/test chain),
+  and `utoipa` upgraded to 6 with `utoipa-swagger-ui` 10, which moves the
+  build-time `zip` to 9.1.3 and clears CVE-2026-115905 (strict Trivy scanning
+  restored, no ignores left).
+
 ### Fixed (accessibility)
 
 - **Status badges meet WCAG AA in light mode** — the text was 1.9:1
   (In Progress) to 3.7:1 (Planned); new `--color-status-*-fg` tokens bring
   every badge to at least 4.6:1.
+- **Muted text meets AA on muted surfaces** — post-detail meta text was
+  4.32:1 in light mode; the muted-foreground token is now 4.71:1 there.
+- **Board search input has an accessible name** (was placeholder-only).
+- **Board headings no longer skip levels** — post cards and filter groups
+  use `h2`, so screen-reader heading navigation runs H1 → H2.
 - **Primary-colored text meets AA in dark mode** — links, active filters,
   and the voted count were 3.7–4.2:1; the new `--color-primary-text` token
   is at least 6:1.
