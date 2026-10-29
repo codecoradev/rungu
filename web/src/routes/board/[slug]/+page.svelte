@@ -386,7 +386,7 @@
                  sidebar so both stay in sync. -->
             <div class="mt-2 space-y-2 border-t pt-2">
                 <div>
-                    <h3 class="mb-1 text-xs font-semibold uppercase text-muted-foreground">Category</h3>
+                    <h2 class="mb-1 text-xs font-semibold uppercase text-muted-foreground">Category</h2>
                     <div class="flex gap-1 overflow-x-auto pb-1" role="group" aria-label="Filter by category">
                         {#each categoryOptions as cat (cat.value)}
                             <button
@@ -405,7 +405,7 @@
                     </div>
                 </div>
                 <div>
-                    <h3 class="mb-1 text-xs font-semibold uppercase text-muted-foreground">Status</h3>
+                    <h2 class="mb-1 text-xs font-semibold uppercase text-muted-foreground">Status</h2>
                     <div class="flex gap-1 overflow-x-auto pb-1" role="group" aria-label="Filter by status">
                         {#each statusOptions as st (st.value)}
                             <button
@@ -465,6 +465,7 @@
                         bind:value={searchQuery}
                         type="search"
                         placeholder="Search..."
+                        aria-label="Search posts"
                         class="max-sm:h-11"
                     />
                     {#if refetching && searchQuery}

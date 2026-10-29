@@ -26,7 +26,7 @@
             <CategoryBadge category={post.category} />
             <StatusBadge status={post.status} />
         </div>
-        <h3 class="truncate text-[length:var(--board-title-size)] font-semibold">
+        <h2 class="truncate text-[length:var(--board-title-size)] font-semibold">
             <a
                 href={`/board/${slug}/post/${post.id}`}
                 title={post.title}
@@ -34,7 +34,7 @@
             >
                 {post.title}
             </a>
-        </h3>
+        </h2>
         {#if post.description}
             <p class="mt-1 line-clamp-2 text-[length:var(--board-body-size)] leading-snug text-muted-foreground">
                 {post.description}
