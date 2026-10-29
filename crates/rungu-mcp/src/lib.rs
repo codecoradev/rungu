@@ -15,7 +15,9 @@
 //! - There is **no row-level authorization** and **no user impersonation check**.
 //! - Mutating tools (`create_post`, `update_post_status`, `update_post_category`,
 //!   `delete_post`, `vote_post`, `add_comment`, `delete_comment`, `delete_attachment`)
-//!   execute as the built-in `mcp@rungu.local` system user.
+//!   execute as the built-in `mcp@rungu.local` system user with the admin
+//!   role, through the same [`Operations`] module as the REST API — so
+//!   validation, storage cleanup, webhooks, and analytics behave identically.
 //! - The HTTP API's OAuth/session/role model does **not** apply here.
 //!
 //! Never expose this server over the network, never share the database file
@@ -26,16 +28,16 @@
 use std::io::{BufRead, Write};
 
 use anyhow::Result;
-use rungu_core::Store;
+use rungu_core::ops::{NewPost, PostChanges, parse_category, parse_sort};
+use rungu_core::{Actor, OpError, Operations, Store};
 use rungu_proto::*;
 use serde_json::{Value, json};
-use sqlx::AnyPool;
 
 /// Maximum input line length (1 MB) to prevent unbounded memory usage.
 const MAX_INPUT_LEN: usize = 1_048_576;
 
 /// Process a single JSON-RPC message and return the response string.
-pub async fn handle_message(input: &str, pool: &AnyPool, is_sqlite: bool) -> String {
+pub async fn handle_message(input: &str, ops: &Operations) -> String {
     if input.len() > MAX_INPUT_LEN {
         return serde_json::to_string(&json!({
             "jsonrpc": "2.0",
@@ -64,13 +66,11 @@ pub async fn handle_message(input: &str, pool: &AnyPool, is_sqlite: bool) -> Str
     // JSON-RPC notifications (no "id") get NO response — replying corrupts
     // protocol-conformant client streams. Side effects still run.
     if id.is_none() {
-        let store = Store::new_with_kind(pool.clone(), is_sqlite);
-        let _ = handle_request(&method, &params, &store).await;
+        let _ = handle_request(&method, &params, ops).await;
         return String::new();
     }
 
-    let store = Store::new_with_kind(pool.clone(), is_sqlite);
-    let result = handle_request(&method, &params, &store).await;
+    let result = handle_request(&method, &params, ops).await;
 
     match result {
         Ok(val) => json!({ "jsonrpc": "2.0", "result": val, "id": id }).to_string(),
@@ -84,20 +84,21 @@ pub async fn handle_message(input: &str, pool: &AnyPool, is_sqlite: bool) -> Str
 }
 
 /// Route a method to its handler with parsed params.
-async fn handle_request(method: &str, params: &Value, store: &Store) -> Result<Value, String> {
+async fn handle_request(method: &str, params: &Value, ops: &Operations) -> Result<Value, String> {
+    let store = ops.store();
     match method {
         "list_projects" => list_projects(store).await,
         "get_project" => get_project(params, store).await,
         "list_posts" => list_posts(params, store).await,
         "get_post" => get_post(params, store).await,
-        "create_post" => create_post(params, store).await,
-        "update_post_status" => update_post_status(params, store).await,
-        "vote_post" => vote_post(params, store).await,
+        "create_post" => create_post(params, ops).await,
+        "update_post_status" => update_post_status(params, ops).await,
+        "vote_post" => vote_post(params, ops).await,
         "search_posts" => search_posts(params, store).await,
         "get_changelog" => get_changelog(params, store).await,
         "list_comments" => list_comments(params, store).await,
-        "add_comment" => add_comment(params, store).await,
-        "delete_comment" => delete_comment(params, store).await,
+        "add_comment" => add_comment(params, ops).await,
+        "delete_comment" => delete_comment(params, ops).await,
         "get_stats" => get_stats(params, store).await,
         "get_trending" => get_trending(params, store).await,
         "get_analytics" => get_analytics(params, store).await,
@@ -108,10 +109,10 @@ async fn handle_request(method: &str, params: &Value, store: &Store) -> Result<V
         "create_webhook" => create_webhook(params, store).await,
         "delete_webhook" => delete_webhook(params, store).await,
         "list_attachments" => list_attachments(params, store).await,
-        "delete_post" => delete_post(params, store).await,
-        "update_post_category" => update_post_category(params, store).await,
+        "delete_post" => delete_post(params, ops).await,
+        "update_post_category" => update_post_category(params, ops).await,
         "get_roadmap" => get_roadmap(params, store).await,
-        "delete_attachment" => delete_attachment(params, store).await,
+        "delete_attachment" => delete_attachment(params, ops).await,
         _ => Err(format!("Unknown method: {method}")),
     }
 }
@@ -131,55 +132,28 @@ fn get_optional_u64(params: &Value, key: &str) -> Option<u64> {
 }
 
 fn parse_status(s: &str) -> Result<PostStatus, String> {
-    match s {
-        "open" => Ok(PostStatus::Open),
-        "planned" => Ok(PostStatus::Planned),
-        "in_progress" => Ok(PostStatus::InProgress),
-        "done" => Ok(PostStatus::Done),
-        "declined" => Ok(PostStatus::Declined),
-        _ => Err(format!("Invalid status: {s}. Must be one of: open, planned, in_progress, done, declined")),
-    }
+    rungu_core::ops::parse_status(s)
+        .ok_or_else(|| format!("Invalid status: {s}. Must be one of: open, planned, in_progress, done, declined"))
 }
 
-fn parse_category(s: &str) -> PostCategory {
-    match s {
-        "bug" => PostCategory::Bug,
-        "feature" => PostCategory::Feature,
-        "question" => PostCategory::Question,
-        _ => PostCategory::Feedback,
-    }
+fn parse_category_filter(s: &str) -> Result<PostCategory, String> {
+    parse_category(s).ok_or_else(|| format!("Invalid category: {s}. Must be one of: feedback, bug, feature, question"))
 }
 
-/// Strict variant for update paths: an unknown category is a client error,
-/// not something to silently coerce to "feedback" (#190 scan).
-fn parse_category_strict(s: &str) -> Option<PostCategory> {
-    match s {
-        "bug" => Some(PostCategory::Bug),
-        "feature" => Some(PostCategory::Feature),
-        "question" => Some(PostCategory::Question),
-        "feedback" => Some(PostCategory::Feedback),
-        _ => None,
-    }
-}
-
-fn parse_sort(s: Option<&str>) -> PostSort {
-    match s {
-        Some("oldest") => PostSort::Oldest,
-        Some("most_votes") => PostSort::MostVotes,
-        Some("least_votes") => PostSort::LeastVotes,
-        Some("recently_updated") => PostSort::RecentlyUpdated,
-        Some("trending") => PostSort::Trending,
-        _ => PostSort::Newest,
-    }
+/// Operation refusals become the JSON-RPC error message verbatim.
+fn op_err(e: OpError) -> String {
+    e.to_string()
 }
 
 /// Get or create the MCP system user for operations that need a user_id.
-async fn get_mcp_user(store: &Store) -> Result<String, String> {
+///
+/// MCP runs as a trusted local admin (see the module docs).
+async fn mcp_actor(store: &Store) -> Result<Actor, String> {
     let user = store
         .find_or_create_user("mcp@rungu.local", Some("MCP Bot"), None, &[])
         .await
         .map_err(|e| format!("Failed to get/create MCP user: {e}"))?;
-    Ok(user.id)
+    Ok(Actor { id: user.id, role: UserRole::Admin })
 }
 
 // ── Tool implementations ───────────────────────────────────────────────
@@ -212,7 +186,7 @@ async fn list_posts(params: &Value, store: &Store) -> Result<Value, String> {
 
     let sort = parse_sort(get_optional_str(params, "sort"));
     let status = get_optional_str(params, "status").map(parse_status).transpose()?;
-    let category = get_optional_str(params, "category").map(parse_category);
+    let category = get_optional_str(params, "category").map(parse_category_filter).transpose()?;
     let query = get_optional_str(params, "q");
     let limit = get_optional_u64(params, "limit").unwrap_or(20).clamp(1, 100) as i64;
 
@@ -246,53 +220,32 @@ async fn get_post(params: &Value, store: &Store) -> Result<Value, String> {
 }
 
 /// Create a new post.
-async fn create_post(params: &Value, store: &Store) -> Result<Value, String> {
-    let slug = get_str(params, "slug")?;
-    let title = get_str(params, "title")?;
-    let description = get_optional_str(params, "description").unwrap_or("");
-    let category = get_optional_str(params, "category").map(parse_category).unwrap_or(PostCategory::Feedback);
-
-    let project = store
-        .get_project_by_slug(slug)
-        .await
-        .map_err(|e| format!("Failed to get project: {e}"))?
-        .ok_or_else(|| format!("Project not found: {slug}"))?;
-
-    let user_id = get_mcp_user(store).await?;
-
-    let post = store
-        .create_post(&project.id, title, description, category, &user_id)
-        .await
-        .map_err(|e| format!("Failed to create post: {e}"))?;
-
+async fn create_post(params: &Value, ops: &Operations) -> Result<Value, String> {
+    let input = NewPost {
+        title: get_str(params, "title")?,
+        description: get_optional_str(params, "description").unwrap_or(""),
+        category: get_optional_str(params, "category"),
+    };
+    let actor = mcp_actor(ops.store()).await?;
+    let post = ops.create_post(&actor, get_str(params, "slug")?, input).await.map_err(op_err)?;
     Ok(json!({ "data": post }))
 }
 
 /// Update a post's status.
-async fn update_post_status(params: &Value, store: &Store) -> Result<Value, String> {
+async fn update_post_status(params: &Value, ops: &Operations) -> Result<Value, String> {
     let id = get_str(params, "id")?;
     let status_str = get_str(params, "status")?;
-    let status = parse_status(status_str)?;
-
-    store.update_post_status(id, status).await.map_err(|e| format!("Failed to update post status: {e}"))?;
-
+    let actor = mcp_actor(ops.store()).await?;
+    ops.update_post(&actor, id, PostChanges { status: Some(status_str), category: None }).await.map_err(op_err)?;
     Ok(json!({ "updated": true, "id": id, "status": status_str }))
 }
 
 /// Toggle vote on a post.
-async fn vote_post(params: &Value, store: &Store) -> Result<Value, String> {
+async fn vote_post(params: &Value, ops: &Operations) -> Result<Value, String> {
     let id = get_str(params, "id")?;
-    let user_id = get_mcp_user(store).await?;
-
-    let voted = store.toggle_vote(&user_id, id).await.map_err(|e| format!("Failed to toggle vote: {e}"))?;
-
-    let post = store
-        .get_post(id, None)
-        .await
-        .map_err(|e| format!("Failed to get post after vote: {e}"))?
-        .ok_or("Post not found after vote")?;
-
-    Ok(json!({ "data": { "voted": voted, "vote_count": post.post.vote_count } }))
+    let actor = mcp_actor(ops.store()).await?;
+    let outcome = ops.toggle_vote(&actor, id).await.map_err(op_err)?;
+    Ok(json!({ "data": { "voted": outcome.voted, "vote_count": outcome.vote_count } }))
 }
 
 /// Search posts by query string.
@@ -365,17 +318,12 @@ async fn list_comments(params: &Value, store: &Store) -> Result<Value, String> {
 }
 
 /// Add a comment to a post.
-async fn add_comment(params: &Value, store: &Store) -> Result<Value, String> {
+async fn add_comment(params: &Value, ops: &Operations) -> Result<Value, String> {
     let post_id = get_str(params, "post_id")?;
     let content = get_str(params, "content")?;
     let parent_id = get_optional_str(params, "parent_id");
-    let user_id = get_mcp_user(store).await?;
-
-    let comment = store
-        .create_comment(post_id, content, parent_id, &user_id)
-        .await
-        .map_err(|e| format!("Failed to create comment: {e}"))?;
-
+    let actor = mcp_actor(ops.store()).await?;
+    let comment = ops.create_comment(&actor, post_id, content, parent_id).await.map_err(op_err)?;
     Ok(json!({ "data": comment }))
 }
 
@@ -388,48 +336,17 @@ async fn get_stats(params: &Value, store: &Store) -> Result<Value, String> {
         .map_err(|e| format!("Failed to get project: {e}"))?
         .ok_or_else(|| format!("Project not found: {slug}"))?;
 
-    // Fetch all posts (up to 1000 for stats)
-    let (posts, total) = store
-        .list_posts(ListPostsParams {
-            project_id: &project.id,
-            sort: PostSort::Newest,
-            status: None,
-            category: None,
-            query: None,
-            since: None,
-            user_id: None,
-            offset: 0,
-            limit: 1000,
-        })
-        .await
-        .map_err(|e| format!("Failed to fetch posts for stats: {e}"))?;
-
-    let mut open = 0u64;
-    let mut planned = 0u64;
-    let mut in_progress = 0u64;
-    let mut done = 0u64;
-    let mut declined = 0u64;
-
-    for p in &posts {
-        match p.post.status {
-            PostStatus::Open => open += 1,
-            PostStatus::Planned => planned += 1,
-            PostStatus::InProgress => in_progress += 1,
-            PostStatus::Done => done += 1,
-            PostStatus::Declined => declined += 1,
-        }
-    }
-
-    let total_votes: i64 = posts.iter().map(|p| p.post.vote_count).sum();
+    let stats = store.project_stats(&project.id).await.map_err(|e| format!("Failed to compute stats: {e}"))?;
+    let count = |status: &str| stats.by_status.get(status).copied().unwrap_or(0);
 
     Ok(json!({
-        "total_posts": total,
-        "open": open,
-        "planned": planned,
-        "in_progress": in_progress,
-        "done": done,
-        "declined": declined,
-        "total_votes": total_votes,
+        "total_posts": stats.total_posts,
+        "open": count("open"),
+        "planned": count("planned"),
+        "in_progress": count("in_progress"),
+        "done": count("done"),
+        "declined": count("declined"),
+        "total_votes": stats.total_votes,
     }))
 }
 
@@ -599,7 +516,7 @@ async fn delete_webhook(params: &Value, store: &Store) -> Result<Value, String> 
 }
 
 /// Run the MCP server, reading JSON-RPC from stdin and writing to stdout.
-pub async fn run_server(pool: AnyPool, is_sqlite: bool) -> Result<()> {
+pub async fn run_server(ops: Operations) -> Result<()> {
     let stdin = std::io::stdin();
     let stdout = std::io::stdout();
     let mut stdout = stdout.lock();
@@ -633,7 +550,7 @@ pub async fn run_server(pool: AnyPool, is_sqlite: bool) -> Result<()> {
             continue;
         }
 
-        let response = handle_message(&line, &pool, is_sqlite).await;
+        let response = handle_message(&line, &ops).await;
         if let Err(e) = writeln!(stdout, "{response}") {
             tracing::error!("Failed to write MCP response: {e}");
             break;
@@ -645,20 +562,19 @@ pub async fn run_server(pool: AnyPool, is_sqlite: bool) -> Result<()> {
 }
 
 /// Delete a post by ID.
-async fn delete_post(params: &Value, store: &Store) -> Result<Value, String> {
+async fn delete_post(params: &Value, ops: &Operations) -> Result<Value, String> {
     let id = get_str(params, "id")?;
-    store.delete_post(id).await.map_err(|e| format!("Failed to delete post: {e}"))?;
+    let actor = mcp_actor(ops.store()).await?;
+    ops.delete_post(&actor, id).await.map_err(op_err)?;
     Ok(json!({ "deleted": true, "id": id }))
 }
 
 /// Update a post's category.
-async fn update_post_category(params: &Value, store: &Store) -> Result<Value, String> {
+async fn update_post_category(params: &Value, ops: &Operations) -> Result<Value, String> {
     let id = get_str(params, "id")?;
     let category_str = get_str(params, "category")?;
-    let category = parse_category_strict(category_str).ok_or_else(|| format!("Unknown category: {category_str}"))?;
-
-    store.update_post_category(id, category).await.map_err(|e| format!("Failed to update post category: {e}"))?;
-
+    let actor = mcp_actor(ops.store()).await?;
+    ops.update_post(&actor, id, PostChanges { status: None, category: Some(category_str) }).await.map_err(op_err)?;
     Ok(json!({ "updated": true, "id": id, "category": category_str }))
 }
 
@@ -717,16 +633,18 @@ async fn fetch_roadmap_bucket(
 }
 
 /// Delete an attachment by ID.
-async fn delete_attachment(params: &Value, store: &Store) -> Result<Value, String> {
+async fn delete_attachment(params: &Value, ops: &Operations) -> Result<Value, String> {
     let attachment_id = get_str(params, "id")?;
-    store.delete_attachment(attachment_id).await.map_err(|e| format!("Failed to delete attachment: {e}"))?;
+    let actor = mcp_actor(ops.store()).await?;
+    ops.delete_attachment(&actor, attachment_id).await.map_err(op_err)?;
     Ok(json!({ "deleted": true, "id": attachment_id }))
 }
 
 /// Delete a comment by ID.
-async fn delete_comment(params: &Value, store: &Store) -> Result<Value, String> {
+async fn delete_comment(params: &Value, ops: &Operations) -> Result<Value, String> {
     let comment_id = get_str(params, "comment_id")?;
-    store.delete_comment(comment_id).await.map_err(|e| e.to_string())?;
+    let actor = mcp_actor(ops.store()).await?;
+    ops.delete_comment(&actor, comment_id).await.map_err(op_err)?;
     Ok(json!({ "deleted": true, "comment_id": comment_id }))
 }
 
@@ -748,22 +666,31 @@ async fn list_attachments(params: &Value, store: &Store) -> Result<Value, String
 mod tests {
     use super::*;
 
+    async fn test_ops() -> Operations {
+        let pool = rungu_core::open_pool("sqlite::memory:").await.unwrap();
+        rungu_core::run_migrations(&pool, "sqlite::memory:").await.unwrap();
+        let store = Store::new_with_kind(pool, true);
+        let storage = rungu_core::FsStorage::new(std::env::temp_dir().join("rungu-mcp-test-uploads")).unwrap();
+        Operations::new(store, std::sync::Arc::new(storage), rungu_core::EventBus::default())
+    }
+
+    async fn call(ops: &Operations, method: &str, params: Value) -> Value {
+        let input = json!({ "jsonrpc": "2.0", "method": method, "params": params, "id": 1 }).to_string();
+        serde_json::from_str(&handle_message(&input, ops).await).unwrap()
+    }
+
     #[tokio::test]
     async fn test_handle_message_invalid_json() {
-        sqlx::any::install_default_drivers();
-        let pool = sqlx::AnyPool::connect("sqlite::memory:").await.unwrap();
-        let response = handle_message("not json", &pool, true).await;
+        let ops = test_ops().await;
+        let response = handle_message("not json", &ops).await;
         let parsed: Value = serde_json::from_str(&response).unwrap();
         assert_eq!(parsed["error"]["code"], -32700);
     }
 
     #[tokio::test]
     async fn test_handle_message_unknown_method() {
-        sqlx::any::install_default_drivers();
-        let pool = sqlx::AnyPool::connect("sqlite::memory:").await.unwrap();
-        let input = r#"{"jsonrpc":"2.0","method":"nonexistent","id":1}"#;
-        let response = handle_message(input, &pool, true).await;
-        let parsed: Value = serde_json::from_str(&response).unwrap();
+        let ops = test_ops().await;
+        let parsed = call(&ops, "nonexistent", json!({})).await;
         // Unknown methods are -32601 (Method not found) per JSON-RPC 2.0 (#190 scan).
         assert_eq!(parsed["error"]["code"], -32601);
         assert!(parsed["error"]["message"].as_str().unwrap().contains("Unknown method"));
@@ -771,40 +698,66 @@ mod tests {
 
     #[tokio::test]
     async fn test_handle_message_too_large() {
-        sqlx::any::install_default_drivers();
-        let pool = sqlx::AnyPool::connect("sqlite::memory:").await.unwrap();
+        let ops = test_ops().await;
         let huge = "x".repeat(MAX_INPUT_LEN + 1);
-        let response = handle_message(&huge, &pool, true).await;
+        let response = handle_message(&huge, &ops).await;
         let parsed: Value = serde_json::from_str(&response).unwrap();
         assert_eq!(parsed["error"]["code"], -32600);
     }
 
+    /// MCP shares the REST validation rules via `Operations`.
     #[tokio::test]
-    async fn test_parse_status_valid() {
-        assert!(parse_status("open").is_ok());
-        assert!(parse_status("planned").is_ok());
-        assert!(parse_status("in_progress").is_ok());
-        assert!(parse_status("done").is_ok());
-        assert!(parse_status("declined").is_ok());
+    async fn test_create_post_applies_shared_validation() {
+        let ops = test_ops().await;
+        ops.store().create_project("Acme", "acme", "").await.unwrap();
+
+        let blank = call(&ops, "create_post", json!({ "slug": "acme", "title": "   " })).await;
+        assert_eq!(blank["error"]["message"], "Title is required");
+
+        let long = call(&ops, "create_post", json!({ "slug": "acme", "title": "x".repeat(201) })).await;
+        assert_eq!(long["error"]["message"], "Title must be 200 characters or less");
+
+        let bad_category =
+            call(&ops, "create_post", json!({ "slug": "acme", "title": "Dark mode", "category": "nope" })).await;
+        assert_eq!(bad_category["error"]["message"], "Invalid category");
+
+        let ok = call(&ops, "create_post", json!({ "slug": "acme", "title": "  Dark mode  " })).await;
+        assert_eq!(ok["result"]["data"]["title"], "Dark mode");
     }
 
     #[tokio::test]
-    async fn test_parse_status_invalid() {
+    async fn test_mutations_on_missing_rows_are_not_found() {
+        let ops = test_ops().await;
+        let vote = call(&ops, "vote_post", json!({ "id": "missing" })).await;
+        assert_eq!(vote["error"]["message"], "Post not found");
+        let status = call(&ops, "update_post_status", json!({ "id": "missing", "status": "done" })).await;
+        assert_eq!(status["error"]["message"], "Post not found");
+        let comment = call(&ops, "delete_comment", json!({ "comment_id": "missing" })).await;
+        assert_eq!(comment["error"]["message"], "Comment not found");
+    }
+
+    #[tokio::test]
+    async fn test_get_stats_counts_every_post() {
+        let ops = test_ops().await;
+        ops.store().create_project("Acme", "acme", "").await.unwrap();
+        for i in 0..3 {
+            call(&ops, "create_post", json!({ "slug": "acme", "title": format!("Post {i}") })).await;
+        }
+        let stats = call(&ops, "get_stats", json!({ "slug": "acme" })).await;
+        assert_eq!(stats["result"]["total_posts"], 3);
+        assert_eq!(stats["result"]["open"], 3);
+        assert_eq!(stats["result"]["done"], 0);
+    }
+
+    #[test]
+    fn test_parse_status() {
+        assert!(parse_status("in_progress").is_ok());
         assert!(parse_status("invalid").is_err());
     }
 
-    #[tokio::test]
-    async fn test_parse_category() {
-        assert!(matches!(parse_category("bug"), PostCategory::Bug));
-        assert!(matches!(parse_category("feature"), PostCategory::Feature));
-        assert!(matches!(parse_category("question"), PostCategory::Question));
-        assert!(matches!(parse_category("unknown"), PostCategory::Feedback));
-    }
-
-    #[tokio::test]
-    async fn test_parse_sort() {
-        assert!(matches!(parse_sort(None), PostSort::Newest));
-        assert!(matches!(parse_sort(Some("oldest")), PostSort::Oldest));
-        assert!(matches!(parse_sort(Some("most_votes")), PostSort::MostVotes));
+    #[test]
+    fn test_parse_category_filter_is_strict() {
+        assert!(matches!(parse_category_filter("bug"), Ok(PostCategory::Bug)));
+        assert!(parse_category_filter("unknown").is_err());
     }
 }

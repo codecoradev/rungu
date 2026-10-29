@@ -1,6 +1,87 @@
 # Changelog
 
-## [Unreleased]
+## [0.7.0] - 2026-10-29
+
+### Added
+
+- **Email notifications** (#73) — post authors and commenters get an email
+  when the post receives a comment or changes status. The person who acted
+  is never emailed, and opted-out users are skipped. Off until
+  `SMTP_HOST` + `SMTP_FROM` are set (`SMTP_DRIVER=log` for dev/CI); a
+  partial SMTP config exits at startup. Delivered by an `EmailSink` on the
+  domain event bus, so REST and MCP changes both notify.
+- **Unsubscribe** — every email carries a signed link plus RFC 8058
+  one-click headers. The link opens a confirmation page and only the POST
+  unsubscribes, so link-scanning mail filters can't opt people out.
+  `GET`/`POST /api/me/notifications/preferences` reads and sets the choice.
+
+### Changed
+
+- **Re-saving a post's current status or category is a no-op** — no write,
+  no `post.status_changed` webhook, and no email. Previously it bumped
+  `updated_at` and fired the webhook with `old_status == new_status`.
+
+- **Dependency security refresh** — Bun pinned to 1.4.4 across CI and Docker,
+  `undici` bumped to 7.30.1 (clears 8 advisories, 4 high — dev/test chain),
+  and `utoipa` upgraded to 6 with `utoipa-swagger-ui` 10, which moves the
+  build-time `zip` to 9.1.3 and clears CVE-2026-115905 (strict Trivy scanning
+  restored, no ignores left).
+
+### Fixed (accessibility)
+
+- **Status badges meet WCAG AA in light mode** — the text was 1.9:1
+  (In Progress) to 3.7:1 (Planned); new `--color-status-*-fg` tokens bring
+  every badge to at least 4.6:1.
+- **Muted text meets AA on muted surfaces** — post-detail meta text was
+  4.32:1 in light mode; the muted-foreground token is now 4.71:1 there.
+- **Board search input has an accessible name** (was placeholder-only).
+- **Board headings no longer skip levels** — post cards and filter groups
+  use `h2`, so screen-reader heading navigation runs H1 → H2.
+- **Primary-colored text meets AA in dark mode** — links, active filters,
+  and the voted count were 3.7–4.2:1; the new `--color-primary-text` token
+  is at least 6:1.
+- **Board rows no longer nest the vote button inside a link** — rows use a
+  stretched title link, so the vote button is its own control in the tab
+  order and is no longer read as part of the link.
+- **The vote button names the post and its count** ("Upvote: Dark mode,
+  3 votes") and keeps that name when toggled; the state is `aria-pressed`.
+- **Reply is hidden for signed-out visitors** — it did nothing for them.
+  For signed-in users, Reply now moves focus to the comment box.
+- **Login links return you to where you were** — the board (including its
+  sort), post pages, and the header now pass `?redirect=`.
+
+### Changed
+
+- **One domain operations module for REST and MCP** — every mutation
+  (posts, votes, comments, official response, attachment delete) now runs
+  through `rungu_core::Operations`, and side effects (webhooks, analytics)
+  subscribe to a single event bus instead of being called from each
+  handler. Webhook payloads are unchanged.
+- **MCP tools now enforce the REST rules** — title trim and 200-char cap,
+  comment length and thread checks, strict categories (an unknown category
+  is an error, no longer silently `feedback`), and not-found errors for
+  missing posts and comments.
+
+### Fixed
+
+- **MCP mutations fire webhooks and analytics** — they previously skipped
+  both. `rungu mcp` waits up to 45s for in-flight deliveries when stdin
+  closes. Give it the server's `RUNGU_STORAGE_DIR` so attachment deletes
+  remove files; without a usable directory it logs a warning and starts
+  anyway.
+- **Attachment files are deleted with their post** — the cascade removed
+  only the rows, leaving files orphaned in storage. MCP `delete_attachment`
+  also now removes the file.
+- **MCP `get_stats`** counts every post (it capped at 1000).
+- **Stale project cache after `/mcp` changes** — `/mcp` now shares the
+  server's store and cache instead of building a new one per request.
+- **`rungu mcp` wrote logs to stdout**, corrupting the JSON-RPC stream.
+  Logs now go to stderr for every command, including `rungu serve` —
+  capture stderr if you were reading logs from stdout.
+- **A post update with a valid status and an invalid category** no longer
+  applies the status before rejecting the request.
+- **Official response with a database failure** returned 400; it now
+  returns 500.
 
 ## [0.6.0] - 2026-09-08
 

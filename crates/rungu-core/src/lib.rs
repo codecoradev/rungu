@@ -6,11 +6,17 @@
 use anyhow::{Context, Result};
 use sqlx::AnyPool;
 
+pub mod events;
+pub mod ops;
 pub mod storage;
 pub mod store;
 
+pub use events::{DomainEvent, EventBus, EventSink, RecordingSink};
+pub use ops::{Actor, OpError, OpResult, Operations};
 pub use rungu_proto::ListAllPostsParams;
-pub use storage::{ALLOWED_MIME_TYPES, FsStorage, MAX_UPLOAD_SIZE, Storage, create_storage, storage_key, verify_image};
+pub use storage::{
+    ALLOWED_MIME_TYPES, FsStorage, MAX_UPLOAD_SIZE, NoopStorage, Storage, create_storage, storage_key, verify_image,
+};
 pub use store::Store;
 
 /// Open a database connection pool.
@@ -80,6 +86,7 @@ pub async fn run_migrations(pool: &AnyPool, database_url: &str) -> Result<()> {
             include_str!("../migrations/sqlite/002_webhooks.sql"),
             include_str!("../migrations/sqlite/003_analytics.sql"),
             include_str!("../migrations/sqlite/004_official_response.sql"),
+            include_str!("../migrations/sqlite/005_notifications.sql"),
         ]
     } else {
         [
@@ -87,6 +94,7 @@ pub async fn run_migrations(pool: &AnyPool, database_url: &str) -> Result<()> {
             include_str!("../migrations/postgres/002_webhooks.sql"),
             include_str!("../migrations/postgres/003_analytics.sql"),
             include_str!("../migrations/postgres/004_official_response.sql"),
+            include_str!("../migrations/postgres/005_notifications.sql"),
         ]
     };
 

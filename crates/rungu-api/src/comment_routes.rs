@@ -5,6 +5,7 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::{Json, Router};
 use rungu_auth::CurrentUser;
+use rungu_core::Actor;
 use rungu_proto::CreateCommentBody;
 
 use crate::AppState;
@@ -68,48 +69,8 @@ pub async fn create_comment(
     CurrentUser(user): CurrentUser,
     Json(body): Json<CreateCommentBody>,
 ) -> Result<(StatusCode, impl IntoResponse), ApiError> {
-    let content = body.content.trim();
-    if content.is_empty() {
-        return Err(ApiError::bad_request("Comment content is required"));
-    }
-    if content.len() > 4000 {
-        return Err(ApiError::bad_request("Comment must be 4000 characters or less"));
-    }
-
-    let _post = state.store.get_post(&post_id, None).await?.ok_or_else(|| ApiError::not_found("Post not found"))?;
-
-    if let Some(ref parent_id) = body.parent_id {
-        let parent = state
-            .store
-            .get_comment(parent_id)
-            .await?
-            .ok_or_else(|| ApiError::bad_request("Parent comment not found"))?;
-        if parent.post_id != post_id {
-            return Err(ApiError::bad_request("Parent comment does not belong to this post"));
-        }
-    }
-
-    let comment = state.store.create_comment(&post_id, content, body.parent_id.as_deref(), &user.id).await?;
-
-    // Analytics: comment created (#186).
-    crate::analytics::capture(&state.store, &_post.post.project_id, Some(&post_id), "comment");
-
-    // Fire webhook event: comment.created
-    crate::webhook::dispatch_event(
-        std::sync::Arc::new(state.store.clone()),
-        state.http_client.clone(),
-        _post.post.project_id.clone(),
-        rungu_proto::WebhookEventType::CommentCreated,
-        serde_json::json!({
-            "event": "comment.created",
-            "data": {
-                "id": &comment.comment.id,
-                "post_id": &post_id,
-                "post_title": &_post.post.title,
-                "project_id": &_post.post.project_id,
-            }
-        }),
-    );
+    let comment =
+        state.ops.create_comment(&Actor::from(&user), &post_id, &body.content, body.parent_id.as_deref()).await?;
 
     Ok((StatusCode::CREATED, Json(serde_json::json!({ "data": comment }))))
 }
@@ -135,13 +96,7 @@ pub async fn delete_comment(
     Path(comment_id): Path<String>,
     CurrentUser(user): CurrentUser,
 ) -> Result<StatusCode, ApiError> {
-    let existing =
-        state.store.get_comment(&comment_id).await?.ok_or_else(|| ApiError::not_found("Comment not found"))?;
-
-    ApiError::check_owner_or_admin(&user, &existing.created_by, "You can only delete your own comments")?;
-
-    state.store.delete_comment(&comment_id).await?;
-
+    state.ops.delete_comment(&Actor::from(&user), &comment_id).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 

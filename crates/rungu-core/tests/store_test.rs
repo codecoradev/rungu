@@ -553,3 +553,48 @@ async fn test_project_cache_invalidated_on_update_and_delete() {
     store.delete_project(&project.id).await.unwrap();
     assert!(store.get_project_by_slug("slug-a").await.unwrap().is_none());
 }
+
+// ── Email notification recipients (#73) ─────────────────────────────────
+
+#[tokio::test]
+async fn test_notification_recipients_and_opt_out() {
+    let store = setup().await;
+    let project = store.create_project("App", "app", "").await.unwrap();
+    let author = store.find_or_create_user("author@x.test", None, None, &[]).await.unwrap();
+    let alice = store.find_or_create_user("alice@x.test", None, None, &[]).await.unwrap();
+    let bob = store.find_or_create_user("bob@x.test", None, None, &[]).await.unwrap();
+    let post = store.create_post(&project.id, "Post", "", PostCategory::Feedback, &author.id).await.unwrap();
+    store.create_comment(&post.id, "one", None, &alice.id).await.unwrap();
+    store.create_comment(&post.id, "two", None, &alice.id).await.unwrap();
+    store.create_comment(&post.id, "three", None, &bob.id).await.unwrap();
+
+    let ids = |r: Vec<rungu_core::store::NotifyUser>| {
+        let mut v: Vec<String> = r.into_iter().map(|u| u.email).collect();
+        v.sort();
+        v
+    };
+
+    // Author + distinct commenters, minus whoever acted.
+    assert_eq!(ids(store.notification_recipients(&post.id, &bob.id).await.unwrap()), ["alice@x.test", "author@x.test"]);
+
+    assert!(store.set_notifications_opt_out(&alice.id, true).await.unwrap());
+    assert!(store.set_notifications_opt_out(&alice.id, true).await.unwrap(), "idempotent");
+    assert_eq!(ids(store.notification_recipients(&post.id, &bob.id).await.unwrap()), ["author@x.test"]);
+
+    // Synthetic bot users (MCP, API-key agent) never receive mail.
+    let bot = store.find_or_create_user("mcp@rungu.local", Some("MCP Bot"), None, &[]).await.unwrap();
+    store.create_comment(&post.id, "from an agent", None, &bot.id).await.unwrap();
+    assert_eq!(ids(store.notification_recipients(&post.id, &bob.id).await.unwrap()), ["author@x.test"]);
+
+    store.set_notifications_opt_out(&alice.id, false).await.unwrap();
+    assert!(!store.notifications_opt_out(&alice.id).await.unwrap());
+    assert!(!store.set_notifications_opt_out("missing", true).await.unwrap());
+}
+
+/// The runner executes every migration on every boot (#73 regression guard).
+#[tokio::test]
+async fn test_migrations_are_rerunnable() {
+    let pool = open_pool("sqlite::memory:").await.unwrap();
+    run_migrations(&pool, "sqlite::memory:").await.unwrap();
+    run_migrations(&pool, "sqlite::memory:").await.unwrap();
+}

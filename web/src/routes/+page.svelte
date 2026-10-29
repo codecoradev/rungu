@@ -58,7 +58,7 @@
                             {/if}
                         </Card.Header>
                         <Card.Footer>
-                            <span class="text-xs font-medium text-primary">View board →</span>
+                            <span class="text-xs font-medium text-primary-text">View board →</span>
                         </Card.Footer>
                     </Card.Root>
                 </a>

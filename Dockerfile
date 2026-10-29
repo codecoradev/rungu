@@ -1,5 +1,5 @@
 # ── Stage 1: Build frontend ────────────────────────────────────────────
-FROM oven/bun:1.3.14-slim AS frontend
+FROM oven/bun:1.4.4-slim AS frontend
 WORKDIR /app/web
 COPY web/package.json web/bun.lock ./
 RUN bun install --frozen-lockfile

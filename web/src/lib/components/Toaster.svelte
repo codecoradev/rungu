@@ -23,7 +23,7 @@
                     ></span>
                     <span>{t.message}</span>
                     {#if t.action}
-                        <a href={t.action.href} class="font-medium text-primary hover:underline">
+                        <a href={t.action.href} class="font-medium text-primary-text hover:underline">
                             {t.action.label}
                         </a>
                     {/if}

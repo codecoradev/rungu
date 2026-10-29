@@ -15,8 +15,9 @@ use axum::response::IntoResponse;
 use axum::routing::post;
 use rungu_mcp::handle_message;
 
-/// POST /mcp — one JSON-RPC request per HTTP call (stateless; each request
-/// opens its own pool-backed Store, mirroring the stdio loop).
+/// POST /mcp — one JSON-RPC request per HTTP call (stateless). Runs on the
+/// server's shared `Operations`, so it shares the project cache and event
+/// subscribers with the REST API.
 pub async fn mcp_http(
     State(state): State<crate::AppState>,
     headers: HeaderMap,
@@ -61,7 +62,7 @@ pub async fn mcp_http(
             .into_response();
     };
 
-    let response = handle_message(input, &state.store.pool_for_mcp(), state.store.is_sqlite()).await;
+    let response = handle_message(input, &state.ops).await;
     (StatusCode::OK, [(axum::http::header::CONTENT_TYPE, "application/json")], response).into_response()
 }
 

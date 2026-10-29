@@ -10,7 +10,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.6.0"
+version = "0.7.0"
 edition = "2024"
 license = "Apache-2.0"
 repository = "https://github.com/codecoradev/rungu"
@@ -45,6 +45,12 @@ tower-http = { version = "0.6", features = ["cors", "trace"] }
 
 # HTTP client
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+
+# TLS for the built-in minimal SMTP client (#73). All already in the tree
+# via reqwest — no new transitive dependencies.
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
+webpki-roots = "0.26"
+base64 = "0.22"
 
 # Auth / JWT
 jsonwebtoken = "9"
@@ -95,8 +101,8 @@ moka = { version = "0.12", features = ["future"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 
 # OpenAPI / Swagger
-utoipa = { version = "5", features = ["axum_extras", "chrono"] }
-utoipa-swagger-ui = { version = "9", features = ["axum"] }
+utoipa = { version = "6", features = ["axum_extras", "chrono"] }
+utoipa-swagger-ui = { version = "10", features = ["axum"] }
 
 # Internal crates
 rungu_proto = { path = "crates/rungu-proto" }
