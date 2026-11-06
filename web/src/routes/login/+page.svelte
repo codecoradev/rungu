@@ -3,7 +3,7 @@
     import { onMount } from 'svelte';
     import { goto } from '$app/navigation';
     import { page } from '$app/state';
-    import { api } from '$lib/api/client';
+    import { session } from '$lib/session.svelte';
     import AuthProviderButtons from '$lib/components/AuthProviderButtons.svelte';
     import * as Card from '$lib/components/ui/card';
     import { Skeleton } from '$lib/components/ui/skeleton';
@@ -26,10 +26,10 @@
             : '/';
 
     onMount(async () => {
-        try {
-            await api.getCurrentUser();
+        await session.ready();
+        if (session.signedIn) {
             goto(redirectTo);
-        } catch {
+        } else {
             checking = false;
         }
     });

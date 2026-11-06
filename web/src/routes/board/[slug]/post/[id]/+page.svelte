@@ -5,7 +5,8 @@
     import ShieldCheck from '@lucide/svelte/icons/shield-check';
     import ChevronUp from '@lucide/svelte/icons/chevron-up';
     import { api, ApiError } from '$lib/api/client';
-    import type { PostDetail, Comment, CurrentUser, PostStatus, PostCategory } from '$lib/api/types';
+    import { session } from '$lib/session.svelte';
+    import type { PostDetail, Comment, PostStatus, PostCategory } from '$lib/api/types';
     import StatusBadge from '$lib/components/StatusBadge.svelte';
     import CategoryBadge from '$lib/components/CategoryBadge.svelte';
     import VoteRail from '$lib/components/VoteRail.svelte';
@@ -46,7 +47,7 @@
 
     let post = $state<PostDetail | null>(null);
     let comments = $state<Comment[]>([]);
-    let user = $state<CurrentUser | null>(null);
+    const user = $derived(session.user);
     let loading = $state(true);
     // Blocking load error (renders the whole error page)
     let error = $state('');
@@ -96,11 +97,7 @@
     }
 
     onMount(async () => {
-        try {
-            user = await api.getCurrentUser();
-        } catch {
-            user = null;
-        }
+        await session.ready();
         await loadData();
     });
 

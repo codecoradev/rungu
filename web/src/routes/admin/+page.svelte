@@ -3,7 +3,8 @@
     import type { AnalyticsSummary, AnalyticsTopRow } from '$lib/api/types';
     import { onMount } from 'svelte';
     import { api, ApiError } from '$lib/api/client';
-    import type { Project, CurrentUser, PostDetail, PostStatus, Webhook, WebhookDelivery, WebhookTestResult, ProjectStats } from '$lib/api/types';
+    import { session } from '$lib/session.svelte';
+    import type { Project, PostDetail, PostStatus, Webhook, WebhookDelivery, WebhookTestResult, ProjectStats } from '$lib/api/types';
     import { Button } from '$lib/components/ui/button';
     import { Input } from '$lib/components/ui/input';
     import { Textarea } from '$lib/components/ui/textarea';
@@ -15,7 +16,6 @@
     import { AlertDialog } from 'bits-ui';
 
     let projects = $state<Project[]>([]);
-    let user = $state<CurrentUser | null>(null);
     let loading = $state(true);
     let error = $state('');
 
@@ -59,7 +59,7 @@
     let testResult = $state<Record<string, { state: 'loading' } | { state: 'done'; result: WebhookTestResult }>>({});
     let deliveries = $state<Record<string, WebhookDelivery[]>>({});
 
-    const isAdmin = $derived(user?.role === 'admin');
+    const isAdmin = $derived(session.isAdmin);
 
     // Success feedback toast (#153) — auto-dismiss, never overlaps the error banner
     function notify(msg: string) {
@@ -69,9 +69,12 @@
     async function loadData() {
         loading = true;
         try {
-            const currentUser = await api.getCurrentUser();
-            user = currentUser;
-            if (currentUser.role !== 'admin') {
+            await session.ready();
+            if (session.status === 'unknown') {
+                error = 'Could not check your session. Try again in a moment.';
+                return;
+            }
+            if (!session.isAdmin) {
                 error = 'Admin access required';
                 return;
             }

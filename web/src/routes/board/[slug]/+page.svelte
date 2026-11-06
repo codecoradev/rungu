@@ -3,6 +3,7 @@
     import { onMount } from 'svelte';
     import { goto } from '$app/navigation';
     import { api, ApiError } from '$lib/api/client';
+    import { session } from '$lib/session.svelte';
     import type { Project, PostDetail, PostStatus, PostCategory } from '$lib/api/types';
     import PostCard from '$lib/components/PostCard.svelte';
     import PostForm from '$lib/components/PostForm.svelte';
@@ -58,7 +59,7 @@
     let counts = $state<{ by_status: Record<string, number>; by_category: Record<string, number> } | null>(null);
     let searchQuery = $state('');
     let showForm = $state(false);
-    let authed = $state(false);
+    const authed = $derived(session.signedIn);
     // Mobile toolbar: filter panel visibility (see mobile toolbar markup).
     let showFilters = $state(false);
     // Set true once the initial onMount load finishes; gates the filter $effect
@@ -153,12 +154,7 @@
     }
 
     onMount(async () => {
-        try {
-            await api.getCurrentUser();
-            authed = true;
-        } catch {
-            authed = false;
-        }
+        await session.ready();
         await loadBoard();
         initialized = true;
     });
