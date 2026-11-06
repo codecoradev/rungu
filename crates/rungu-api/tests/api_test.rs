@@ -957,7 +957,8 @@ async fn rest_json(app: axum::Router, uri: &str) -> serde_json::Value {
 
 async fn mcp_json(ops: &rungu_core::Operations, method: &str, params: serde_json::Value) -> serde_json::Value {
     let input = serde_json::json!({ "jsonrpc": "2.0", "method": method, "params": params, "id": 1 }).to_string();
-    let out: serde_json::Value = serde_json::from_str(&rungu_mcp::handle_message(&input, ops).await).unwrap();
+    let admin = rungu_mcp::local_admin_actor(ops.store()).await.unwrap();
+    let out: serde_json::Value = serde_json::from_str(&rungu_mcp::handle_message(&input, ops, &admin).await).unwrap();
     out["result"].clone()
 }
 
