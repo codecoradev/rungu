@@ -98,9 +98,22 @@ Both transports run the same 26 tools through the same dispatcher. The transport
 
 stdio uses stdin/stdout: only JSON-RPC is written to stdout and logs go to stderr. HTTP is stateless, one JSON-RPC request per call; see [Configuration](../configuration.md) for the client config.
 
+### Protocol
+
+Rungu answers both MCP eras, on both transports:
+
+- **Stateless `2026-07-28`**: no `initialize`, no session. A client opens with `server/discover`, then calls `tools/list` and `tools/call`. Every request carries `params._meta["io.modelcontextprotocol/protocolVersion"]`; results carry `resultType: "complete"` and the server identity in `_meta`. Over HTTP the `MCP-Protocol-Version`, `Mcp-Method` and (for `tools/call`) `Mcp-Name` headers are required and must match the body, otherwise the call is refused with HTTP 400 and code `-32020`. An unknown `MCP-Protocol-Version` is HTTP 400 with `-32022` and the supported list in `error.data.supported`.
+- **Legacy `2024-11-05` to `2025-11-25`**: `initialize` → `notifications/initialized` → `tools/list` / `tools/call`.
+
+`tools/call` takes `{name, arguments}`. A success returns the tool's JSON as `content` text and as `structuredContent`. A refusal the model can act on (invalid arguments, not found, forbidden, conflict) comes back as a result with `isError: true`, so the model can read it and retry; an unknown tool or a server fault is a JSON-RPC error. Server faults are logged in full and reported only as `Internal error`.
+
+Batch (array) requests are refused with `-32600`. A message without an `id` is a notification and runs nothing. The older bare-method form (`{"method": "list_posts"}`) still works as an extension and returns the JSON-RPC errors described below.
+
+Over HTTP, notifications get `202` with no body, and `GET`/`DELETE` on `/mcp` get `405` (no server-initiated streams, no sessions).
+
 ## Errors
 
-A failed call returns a JSON-RPC error. The code says why, and `error.data.kind` repeats it as a string:
+A failed bare-method call returns a JSON-RPC error. The code says why, and `error.data.kind` repeats it as a string:
 
 | Code | `kind` | Meaning |
 |---|---|---|

@@ -1,5 +1,11 @@
 //! MCP over HTTP (#189) — remote AI access to the same 26 tools as stdio.
 //!
+//! Speaks both MCP eras (see `rungu_mcp`): the stateless `2026-07-28`
+//! revision, whose `Mcp-Method` / `Mcp-Name` / `MCP-Protocol-Version` headers
+//! are checked against the body (HTTP 400 on mismatch), and the legacy
+//! `initialize` handshake. Notifications are answered `202`; `GET`/`DELETE`
+//! are `405` (no server-initiated streams, no sessions).
+//!
 //! `POST /mcp` with `Authorization: Bearer <RUNGU_API_KEY>` carries a JSON-RPC
 //! request; the response is the JSON-RPC result. This is the stateless subset
 //! of the MCP Streamable HTTP transport that mainstream clients configure as
@@ -75,7 +81,31 @@ pub async fn mcp_http(
             .into_response();
     };
 
+    // Header checks need the body's method, so parse once here; a body that
+    // isn't JSON falls through to the dispatcher's own parse error.
+    if let Ok(message) = serde_json::from_str::<serde_json::Value>(input) {
+        if message.is_array() {
+            let response = handle_message(input, &state.ops, &api_key_actor(&state)).await;
+            return (StatusCode::BAD_REQUEST, [(axum::http::header::CONTENT_TYPE, "application/json")], response)
+                .into_response();
+        }
+        let header = |name: &str| headers.get(name).and_then(|v| v.to_str().ok());
+        if let Err(e) = rungu_mcp::validate_headers(
+            header("mcp-protocol-version"),
+            header("mcp-method"),
+            header("mcp-name"),
+            &message,
+        ) {
+            tracing::warn!("Rejected /mcp request headers: {e:?}");
+            return (StatusCode::BAD_REQUEST, Json(e.to_json(message.get("id").cloned()))).into_response();
+        }
+    }
+
     let response = handle_message(input, &state.ops, &api_key_actor(&state)).await;
+    // A notification has no reply: acknowledge it with 202 and no body.
+    if response.is_empty() {
+        return StatusCode::ACCEPTED.into_response();
+    }
     (StatusCode::OK, [(axum::http::header::CONTENT_TYPE, "application/json")], response).into_response()
 }
 
