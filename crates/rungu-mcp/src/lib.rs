@@ -31,7 +31,10 @@
 //! `-32602` invalid params, `-32003` forbidden, `-32004` not found, `-32009`
 //! conflict, `-32601` unknown method, `-32603` internal.
 
+mod protocol;
 mod tools;
+
+pub use protocol::{Era, HeaderError, LEGACY_VERSIONS, MODERN_VERSION, era_of, supported_versions, validate_headers};
 
 pub use tools::{Access, Effect, Kind, Param, REST_ONLY, RestRoute, TOOLS, Tool, find, tools_list};
 
@@ -97,12 +100,42 @@ pub async fn handle_message(input: &str, ops: &Operations, actor: &Actor) -> Str
 /// that isn't declared there can't be called; `tools/list` is generated from
 /// the same table.
 async fn handle_request(method: &str, params: &Value, ops: &Operations, actor: &Actor) -> Result<Value, McpError> {
-    if method == "tools/list" {
-        return Ok(tools_list());
+    let era = protocol::era_of(params);
+    let modern = |result: Value| if era == Era::Modern { protocol::frame_modern(result) } else { result };
+    match method {
+        "server/discover" => Ok(protocol::discover()),
+        "initialize" => Ok(protocol::initialize(params)),
+        // Removed from the stateless protocol; legacy clients still use it.
+        "ping" if era == Era::Legacy => Ok(json!({})),
+        "tools/list" => {
+            let list = tools_list();
+            Ok(if era == Era::Modern { protocol::frame_modern(protocol::with_tools_cache(list)) } else { list })
+        }
+        "tools/call" => call_tool(params, ops, actor).await.map(modern),
+        // Bare tool names predate standard framing and stay as an extension.
+        _ => match find(method) {
+            Some(tool) => tool.call(params, ops, actor).await,
+            None => Err(McpError::method_not_found(format!("Unknown method: {method}"))),
+        },
     }
-    match find(method) {
-        Some(tool) => tool.call(params, ops, actor).await,
-        None => Err(McpError::method_not_found(format!("Unknown method: {method}"))),
+}
+
+/// `tools/call`: run the named tool. Refusals the model can act on (bad
+/// arguments, not found, forbidden, conflict) come back as an `isError`
+/// result, as the spec asks; an unknown tool or an internal fault is a
+/// JSON-RPC error.
+async fn call_tool(params: &Value, ops: &Operations, actor: &Actor) -> Result<Value, McpError> {
+    let name = get_str(params, "name")?;
+    let tool = find(name).ok_or_else(|| McpError::invalid_params(format!("Unknown tool: {name}")))?;
+    let no_arguments = json!({});
+    let arguments = params.get("arguments").unwrap_or(&no_arguments);
+    if !arguments.is_object() {
+        return Err(McpError::invalid_params("`arguments` must be an object"));
+    }
+    match tool.call(arguments, ops, actor).await {
+        Ok(value) => Ok(protocol::tool_result(&value)),
+        Err(e) if e.code == McpError::INTERNAL => Err(e),
+        Err(e) => Ok(protocol::tool_failure(e.kind, &e.message)),
     }
 }
 
@@ -184,6 +217,13 @@ impl McpError {
         Self { code, kind, message: message.into() }
     }
 
+    /// Faults are logged in full but reported generically: the detail can
+    /// name database internals a remote client has no business seeing.
+    fn internal(detail: impl std::fmt::Display) -> Self {
+        tracing::error!("MCP internal error: {detail}");
+        Self::new(Self::INTERNAL, "internal", "Internal error")
+    }
+
     fn invalid_params(message: impl Into<String>) -> Self {
         Self::new(Self::INVALID_PARAMS, "invalid_params", message)
     }
@@ -214,7 +254,7 @@ impl From<OpError> for McpError {
             OpError::NotFound(_) => Self::not_found(message),
             OpError::Forbidden(_) => Self::new(Self::FORBIDDEN, "forbidden", message),
             OpError::Conflict(_) => Self::new(Self::CONFLICT, "conflict", message),
-            OpError::Internal(_) => Self::new(Self::INTERNAL, "internal", message),
+            OpError::Internal(_) => Self::internal(message),
         }
     }
 }
@@ -222,7 +262,7 @@ impl From<OpError> for McpError {
 /// Handler failures that carry only a message are internal errors.
 impl From<String> for McpError {
     fn from(message: String) -> Self {
-        Self::new(Self::INTERNAL, "internal", message)
+        Self::internal(message)
     }
 }
 
@@ -513,6 +553,9 @@ pub async fn run_server(ops: Operations) -> Result<()> {
         }
 
         let response = handle_message(&line, &ops, &actor).await;
+        if response.is_empty() {
+            continue; // notification: no reply, not even a blank line
+        }
         if let Err(e) = writeln!(stdout, "{response}") {
             tracing::error!("Failed to write MCP response: {e}");
             break;
@@ -817,5 +860,99 @@ mod tests {
         assert_eq!(stats["result"]["total_posts"], 3);
         assert_eq!(stats["result"]["open"], 3);
         assert_eq!(stats["result"]["done"], 0);
+    }
+
+    fn modern_meta() -> Value {
+        json!({ "io.modelcontextprotocol/protocolVersion": MODERN_VERSION, "io.modelcontextprotocol/clientCapabilities": {} })
+    }
+
+    #[tokio::test]
+    async fn server_discover_names_the_supported_versions() {
+        let ops = test_ops().await;
+        let r = call(&ops, "server/discover", json!({ "_meta": modern_meta() })).await;
+        assert_eq!(r["result"]["supportedVersions"][0], MODERN_VERSION);
+        assert_eq!(r["result"]["resultType"], "complete");
+        assert_eq!(r["result"]["cacheScope"], "public");
+        assert!(r["result"]["capabilities"]["tools"].is_object());
+        assert_eq!(r["result"]["serverInfo"]["name"], "rungu");
+    }
+
+    #[tokio::test]
+    async fn legacy_handshake_still_works() {
+        let ops = test_ops().await;
+        let init = call(&ops, "initialize", json!({ "protocolVersion": "2025-06-18", "capabilities": {} })).await;
+        assert_eq!(init["result"]["protocolVersion"], "2025-06-18");
+        assert!(init["result"]["capabilities"]["tools"].is_object());
+        assert!(call(&ops, "ping", json!({})).await["result"].is_object());
+        // No framing fields leak into legacy results.
+        let list = call(&ops, "tools/list", json!({})).await;
+        assert!(list["result"].get("resultType").is_none() && list["result"].get("ttlMs").is_none());
+        assert_eq!(list["result"]["tools"].as_array().unwrap().len(), TOOLS.len());
+    }
+
+    #[tokio::test]
+    async fn modern_results_are_framed() {
+        let ops = test_ops().await;
+        let list = call(&ops, "tools/list", json!({ "_meta": modern_meta() })).await;
+        assert_eq!(list["result"]["resultType"], "complete");
+        assert_eq!(list["result"]["cacheScope"], "private");
+        assert!(list["result"]["ttlMs"].as_u64().unwrap() > 0);
+        assert_eq!(list["result"]["_meta"]["io.modelcontextprotocol/serverInfo"]["name"], "rungu");
+
+        // `ping` was removed from the stateless protocol.
+        let ping = call(&ops, "ping", json!({ "_meta": modern_meta() })).await;
+        assert_eq!(ping["error"]["code"], McpError::METHOD_NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn tools_call_runs_a_tool_and_wraps_the_result() {
+        let ops = test_ops().await;
+        call(&ops, "create_project", json!({ "name": "Board" })).await;
+
+        let r =
+            call(&ops, "tools/call", json!({ "name": "list_projects", "arguments": {}, "_meta": modern_meta() })).await;
+        assert_eq!(r["result"]["isError"], false);
+        assert_eq!(r["result"]["resultType"], "complete");
+        assert_eq!(r["result"]["structuredContent"]["data"][0]["slug"], "board");
+        let text = r["result"]["content"][0]["text"].as_str().unwrap();
+        assert_eq!(serde_json::from_str::<Value>(text).unwrap(), r["result"]["structuredContent"]);
+
+        // `arguments` may be omitted for tools without parameters.
+        let bare = call(&ops, "tools/call", json!({ "name": "list_projects" })).await;
+        assert_eq!(bare["result"]["isError"], false);
+        assert!(bare["result"].get("resultType").is_none(), "legacy call, legacy result");
+    }
+
+    #[tokio::test]
+    async fn tools_call_reports_refusals_to_the_model_and_protocol_faults_to_the_client() {
+        let ops = test_ops().await;
+
+        let missing = call(&ops, "tools/call", json!({ "name": "get_project", "arguments": { "slug": "nope" } })).await;
+        assert_eq!(missing["result"]["isError"], true);
+        assert_eq!(missing["result"]["structuredContent"]["error"]["kind"], "not_found");
+
+        let no_arg = call(&ops, "tools/call", json!({ "name": "get_project", "arguments": {} })).await;
+        assert_eq!(no_arg["result"]["structuredContent"]["error"]["kind"], "invalid_params");
+
+        let member = Actor { id: "someone".into(), role: UserRole::Member };
+        let denied =
+            call_as(&ops, &member, "tools/call", json!({ "name": "create_project", "arguments": { "name": "X" } }))
+                .await;
+        assert_eq!(denied["result"]["structuredContent"]["error"]["kind"], "forbidden");
+
+        let unknown = call(&ops, "tools/call", json!({ "name": "no_such_tool" })).await;
+        assert_eq!(unknown["error"]["code"], McpError::INVALID_PARAMS);
+        let no_name = call(&ops, "tools/call", json!({})).await;
+        assert_eq!(no_name["error"]["code"], McpError::INVALID_PARAMS);
+        let bad_args = call(&ops, "tools/call", json!({ "name": "list_projects", "arguments": [] })).await;
+        assert_eq!(bad_args["error"]["code"], McpError::INVALID_PARAMS);
+    }
+
+    #[test]
+    fn internal_errors_do_not_leak_their_detail() {
+        let e: McpError = OpError::Internal(anyhow::anyhow!("no such table: secrets")).into();
+        assert_eq!((e.code, e.message.as_str()), (McpError::INTERNAL, "Internal error"));
+        let e: McpError = String::from("Failed to list projects: sqlite said no").into();
+        assert_eq!(e.message, "Internal error");
     }
 }

@@ -4,6 +4,13 @@
 
 ### Added
 
+- **Standard MCP framing** (#253). `/mcp` and `rungu mcp` now speak the
+  protocol clients expect: `server/discover`, `tools/call`, the legacy
+  `initialize` handshake and the stateless `2026-07-28` revision
+  (`resultType`, `_meta` server info, `ttlMs` / `cacheScope`). Over HTTP,
+  `Mcp-Method` / `Mcp-Name` / `MCP-Protocol-Version` are checked against the
+  body (400 with `-32020` / `-32022`), notifications get `202`, and
+  `GET`/`DELETE` get `405`. Bare tool-name methods keep working.
 - **MCP `tools/list`** (#249) returns every tool with its description,
   parameter schema and `readOnlyHint` / `destructiveHint` / `openWorldHint`
   annotations, generated from the tool catalog.
@@ -92,6 +99,8 @@
 
 ### Fixed
 
+- MCP no longer returns raw internal error text (database messages) to
+  clients; faults are logged and reported as `Internal error` (#253).
 - **MCP admin-only tools refuse non-admin actors** (#249). `list_webhooks`,
   `get_stats`, `get_analytics` and `get_top_posts` are admin-only on REST
   but read the store without checking who was calling, so any actor could
