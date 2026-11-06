@@ -209,6 +209,55 @@ describe('paging', () => {
         expect(listPosts).toHaveBeenLastCalledWith('demo', expect.objectContaining({ category: 'bug', page: 1 }));
     });
 
+    it('after a reload "show more" continues from page 2, not from where it was', async () => {
+        const listPosts = vi
+            .fn()
+            .mockResolvedValueOnce(pageOf(many(0, 2), 8))
+            .mockResolvedValueOnce(pageOf(many(2, 2), 8))
+            .mockResolvedValueOnce(pageOf(many(4, 2), 8)) // page 3
+            .mockResolvedValueOnce(pageOf(many(100, 2), 8)) // reload, page 1
+            .mockResolvedValueOnce(pageOf(many(102, 2), 8)); // the next "show more"
+        const board = createBoardState(fakeApi({ listPosts }));
+        await board.load('demo');
+        await board.loadMore('demo');
+        await board.loadMore('demo');
+        board.toggleStatus('open');
+        await board.load('demo');
+        await board.loadMore('demo');
+        expect(listPosts).toHaveBeenLastCalledWith('demo', expect.objectContaining({ status: 'open', page: 2 }));
+    });
+
+    it('"show more" is ignored while the board is reloading', async () => {
+        const slowReload = deferred<ReturnType<typeof pageOf>>();
+        const listPosts = vi.fn().mockResolvedValueOnce(pageOf(many(0, 2), 6)).mockReturnValueOnce(slowReload.promise);
+        const board = createBoardState(fakeApi({ listPosts }));
+        await board.load('demo');
+        const reload = board.load('demo'); // a filter changed: the reload is in flight
+        await vi.waitFor(() => expect(listPosts).toHaveBeenCalledTimes(2)); // it has reached the server
+        await board.loadMore('demo'); // clicked while the list is dimmed
+        expect(listPosts).toHaveBeenCalledTimes(2); // no extra request
+        slowReload.resolve(pageOf(many(10, 2), 6));
+        await reload;
+        expect(board.posts.map((p) => p.id)).toEqual(['p10', 'p11']);
+    });
+
+    it('stops offering "show more" when a page brings nothing new', async () => {
+        const listPosts = vi
+            .fn()
+            .mockResolvedValueOnce(pageOf(many(0, 2), 5)) // total claims 5, only 2 are real
+            .mockResolvedValueOnce(pageOf([post('p0'), post('p1')], 5)) // all duplicates
+            .mockResolvedValueOnce(pageOf(many(0, 2), 5)); // the reload
+        const board = createBoardState(fakeApi({ listPosts }));
+        await board.load('demo');
+        expect(board.hasMore).toBe(true);
+        await board.loadMore('demo');
+        expect(board.hasMore).toBe(false);
+        await board.loadMore('demo');
+        expect(listPosts).toHaveBeenCalledTimes(2); // not asked again
+        await board.load('demo'); // a reload starts fresh
+        expect(board.hasMore).toBe(true);
+    });
+
     it('a "show more" answer that lands after a reload is dropped', async () => {
         const slowMore = deferred<ReturnType<typeof pageOf>>();
         const listPosts = vi
@@ -311,13 +360,28 @@ describe('actions', () => {
         expect(failing.posts[0].user_voted).toBe(false);
     });
 
-    it('creating a post reloads the board', async () => {
-        const api = fakeApi();
+    it('creating a post refreshes the board without making the caller wait for it', async () => {
+        const slowReload = deferred<ReturnType<typeof pageOf>>();
+        const listPosts = vi.fn().mockResolvedValueOnce(pageOf([post('a')])).mockReturnValueOnce(slowReload.promise);
+        const api = fakeApi({ listPosts });
         const board = createBoardState(api);
         await board.load('demo');
-        await board.createPost('demo', { title: 'T', description: '', category: 'bug' });
+
+        await board.createPost('demo', { title: 'T', description: '', category: 'bug' }); // resolves at once
         expect(api.createPost).toHaveBeenCalledWith('demo', { title: 'T', description: '', category: 'bug' });
-        expect(api.listPosts).toHaveBeenCalledTimes(2);
+        await vi.waitFor(() => expect(listPosts).toHaveBeenCalledTimes(2)); // the refresh started
+        expect(board.refetching).toBe(true); // …and is still running
+
+        slowReload.resolve(pageOf([post('new'), post('a')]));
+        await vi.waitFor(() => expect(board.posts.map((p) => p.id)).toEqual(['new', 'a']));
+    });
+
+    it('a failed create leaves the board alone and tells the caller', async () => {
+        const api = fakeApi({ createPost: vi.fn().mockRejectedValue(new Error('nope')) });
+        const board = createBoardState(api);
+        await board.load('demo');
+        await expect(board.createPost('demo', { title: 'T', description: '', category: 'bug' })).rejects.toThrow('nope');
+        expect(api.listPosts).toHaveBeenCalledTimes(1);
     });
 
     it('filters toggle, clear and report whether any are active', () => {

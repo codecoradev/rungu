@@ -69,6 +69,9 @@ export function createBoardState(api: BoardApi, options: BoardOptions = {}) {
     let posts = $state<PostDetail[]>([]);
     let total = $state(0);
     let page = $state(1);
+    // True once a "show more" brought nothing new (every post on it was already
+    // shown), so the button goes away instead of asking for the same end forever.
+    let exhausted = $state(false);
     let loading = $state(true);
     // True while re-fetching with posts already on screen (filter/search
     // refill): gates the dimming overlay so the first load still shows skeletons. #148
@@ -110,6 +113,7 @@ export function createBoardState(api: BoardApi, options: BoardOptions = {}) {
             posts = result.data;
             total = result.pagination.total;
             page = 1;
+            exhausted = false;
             focusedIndex = -1;
             // Counts are best-effort: their absence (or lateness) never breaks the board.
             api.getProjectCounts(slug)
@@ -130,16 +134,20 @@ export function createBoardState(api: BoardApi, options: BoardOptions = {}) {
 
     /** Append the next page, skipping posts already shown. */
     async function loadMore(slug: string): Promise<void> {
-        if (posts.length >= total) return;
+        // Not while the board is being (re)loaded: the answer would land on
+        // top of a page-1 list and skip the pages in between.
+        if (loading || refetching || posts.length >= total || exhausted) return;
         const mine = generation;
         const next = page + 1;
         try {
             const result = await api.listPosts(slug, { ...query(), page: next });
             if (mine !== generation) return; // filters changed while this was in flight
             const seen = new Set(posts.map((p) => p.id));
-            posts = [...posts, ...result.data.filter((p) => !seen.has(p.id))];
+            const fresh = result.data.filter((p) => !seen.has(p.id));
+            posts = [...posts, ...fresh];
             total = result.pagination.total;
             page = next;
+            if (fresh.length === 0) exhausted = true;
         } catch {
             if (mine === generation) options.onLoadMoreError?.();
         }
@@ -172,7 +180,9 @@ export function createBoardState(api: BoardApi, options: BoardOptions = {}) {
         data: { title: string; description: string; category: PostCategory },
     ): Promise<void> {
         await api.createPost(slug, data);
-        await load(slug);
+        // Refresh in the background: the caller can close its form now instead
+        // of keeping it open for the whole reload.
+        void load(slug);
     }
 
     return {
@@ -223,6 +233,10 @@ export function createBoardState(api: BoardApi, options: BoardOptions = {}) {
         },
         get focusedIndex() {
             return focusedIndex;
+        },
+        /** Whether "show more" has anything left to fetch. */
+        get hasMore() {
+            return posts.length < total && !exhausted;
         },
         get hasFilters() {
             return Boolean(searchQuery || statusFilter || categoryFilter);

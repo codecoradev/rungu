@@ -92,8 +92,12 @@
 
     onMount(async () => {
         await session.ready();
+        // The key the load is issued for — not whatever the slug/filters have
+        // become by the time it lands (a navigation mid-load must still reload).
+        const key = loadKey();
         await board.load(slug);
-        loadedKey = loadKey();
+        // A failed first load leaves the key empty so the effect retries once.
+        loadedKey = board.error ? '' : key;
         initialized = true;
     });
 
@@ -399,15 +403,15 @@
                 {/each}
             </div>
 
-            {#if posts.length > 0 && total > posts.length}
+            {#if posts.length > 0 && board.hasMore}
                 <div class="mt-4 text-center">
                     <p class="mb-2 text-xs text-muted-foreground" aria-live="polite">
                         Showing {posts.length} of {total} posts
                     </p>
                     <Button variant="outline" size="sm" onclick={() => board.loadMore(slug)}>Show more</Button>
                 </div>
-            {:else if posts.length > 0 && total === posts.length && total > PAGE_SIZE}
-                <p class="mt-4 text-center text-xs text-muted-foreground">Showing all {total} posts</p>
+            {:else if posts.length > 0 && !board.hasMore && total > PAGE_SIZE}
+                <p class="mt-4 text-center text-xs text-muted-foreground">Showing all {posts.length} posts</p>
             {/if}
 
             {#if posts.length === 0}
