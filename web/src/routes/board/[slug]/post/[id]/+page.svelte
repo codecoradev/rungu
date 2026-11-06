@@ -1,12 +1,13 @@
 <script lang="ts">
     import { branding } from '$lib/branding.svelte';
-    import { onMount, tick } from 'svelte';
+    import { onMount, tick, untrack } from 'svelte';
     import CircleAlert from '@lucide/svelte/icons/circle-alert';
     import ShieldCheck from '@lucide/svelte/icons/shield-check';
     import ChevronUp from '@lucide/svelte/icons/chevron-up';
-    import { api, ApiError } from '$lib/api/client';
+    import { api } from '$lib/api/client';
     import { session } from '$lib/session.svelte';
-    import type { PostDetail, Comment, PostStatus, PostCategory } from '$lib/api/types';
+    import { createPostState } from '$lib/post/state.svelte';
+    import type { Comment, PostStatus, PostCategory } from '$lib/api/types';
     import StatusBadge from '$lib/components/StatusBadge.svelte';
     import CategoryBadge from '$lib/components/CategoryBadge.svelte';
     import VoteRail from '$lib/components/VoteRail.svelte';
@@ -19,86 +20,46 @@
     import { loginHref, timeAgo } from '$lib/utils';
     import { toastError, toastSuccess } from '$lib/toast.svelte';
 
-    /**
-     * Collect the id of `rootId` plus every comment whose `parent_id` chain leads
-     * back to `rootId`. Used after a delete to prune orphaned replies locally.
-     * The server is the source of truth; this keeps the client consistent until
-     * the next refetch.
-     */
-    function collectDescendants(list: Comment[], rootId: string): Set<string> {
-        const ids = new Set<string>([rootId]);
-        // Iterate to fixed point — handles arbitrary nesting depth.
-        let added = true;
-        while (added) {
-            added = false;
-            for (const c of list) {
-                if (c.parent_id && ids.has(c.parent_id) && !ids.has(c.id)) {
-                    ids.add(c.id);
-                    added = true;
-                }
-            }
-        }
-        return ids;
-    }
-
     let { params } = $props();
     let slug = $derived(params.slug);
     let postId = $derived(params.id);
 
-    let post = $state<PostDetail | null>(null);
-    let comments = $state<Comment[]>([]);
-    const user = $derived(session.user);
-    let loading = $state(true);
-    // Blocking load error (renders the whole error page)
-    let error = $state('');
-    // Transient per-action errors go through the global toaster (#144)
+    // Everything the page does with data (loading, comments, moderation, the
+    // official response) lives in the state module; this page renders it and
+    // forwards events. Transient per-action errors go through the toaster (#144).
+    const detail = createPostState(api, {
+        user: () => session.user,
+        notify: { success: toastSuccess, error: toastError },
+    });
 
-    let commentText = $state('');
-    let replyTo = $state<string | null>(null);
-    let commentLoading = $state(false);
-    // Official team response (#205)
-    let official = $state<Comment | null>(null);
-    let officialBusy = $state(false);
-    // Inline similar posts (#206): visible duplicate-prevention, max 3.
-    let similar = $state<PostDetail[]>([]);
+    const user = $derived(session.user);
+    const post = $derived(detail.post);
+    const comments = $derived(detail.comments);
+    const official = $derived(detail.official);
+    const similar = $derived(detail.similar);
+    const loading = $derived(detail.loading);
+    const error = $derived(detail.error);
+    const replyTo = $derived(detail.replyTo);
+    const commentLoading = $derived(detail.commentLoading);
+    const officialBusy = $derived(detail.officialBusy);
+    const isAdmin = $derived(detail.isAdmin);
+    const canEditStatus = $derived(detail.canModerate);
 
     const statusOptions: PostStatus[] = ['open', 'planned', 'in_progress', 'done', 'declined'];
     const categoryOptions: PostCategory[] = ['feedback', 'bug', 'feature', 'question'];
-    const isAdmin = $derived(user?.role === 'admin');
-    const isAuthor = $derived(user?.id === post?.created_by);
-    const canEditStatus = $derived(isAdmin || isAuthor);
 
-    async function loadData() {
-        loading = true;
-        try {
-            post = await api.getPost(postId);
-            comments = await api.listComments(postId);
-            api.getOfficialResponse(postId).then((r) => (official = r)).catch(() => {});
-            api.getSimilarPosts(postId).then((r) => (similar = r)).catch(() => {});
-        } catch (e) {
-            error = e instanceof ApiError && e.status === 404 ? 'Post not found' : 'Failed to load post';
-        } finally {
-            loading = false;
-        }
-    }
-
-    async function setOfficialResponse(commentId: string | null) {
-        if (!post) return;
-        officialBusy = true;
-        try {
-            const res = await api.setOfficialResponse(post.id, commentId);
-            official = res.official_response;
-            toastSuccess(commentId ? 'Official response pinned ✓' : 'Official response removed ✓');
-        } catch {
-            toastError('Failed to update official response');
-        } finally {
-            officialBusy = false;
-        }
-    }
-
+    // Load once the session is known, and again whenever the id changes: a
+    // "Similar posts" link goes to another post on this same route, which reuses
+    // this component instead of mounting it again.
+    let ready = $state(false);
     onMount(async () => {
         await session.ready();
-        await loadData();
+        ready = true;
+    });
+    $effect(() => {
+        if (!ready) return;
+        const id = postId;
+        untrack(() => void detail.load(id));
     });
 
     /**
@@ -125,75 +86,27 @@
 
     /** Reply targets a thread and moves focus to the composer above it. */
     async function startReply(parentId: string) {
-        replyTo = parentId;
+        detail.startReply(parentId);
         await tick();
         document.getElementById('post-reply')?.focus();
     }
 
-    async function handleComment(e: Event) {
+    function handleComment(e: Event) {
         e.preventDefault();
-        if (!commentText.trim()) return;
-        commentLoading = true;
-        try {
-            const newComment = await api.createComment(postId, {
-                content: commentText.trim(),
-                parent_id: replyTo ?? undefined,
-            });
-            comments = [...comments, newComment];
-            commentText = '';
-            replyTo = null;
-        } catch {
-            toastError('Failed to post comment');
-        } finally {
-            commentLoading = false;
-        }
-    }
-
-    async function handleDeleteComment(id: string) {
-        try {
-            await api.deleteComment(id);
-            // Remove the comment AND all of its descendants. The server likely
-            // cascades the delete (or should), but the client must reflect it
-            // — otherwise replies become invisible while still counted in length.
-            const toRemove = collectDescendants(comments, id);
-            comments = comments.filter((c) => !toRemove.has(c.id));
-        } catch {
-            toastError('Failed to delete comment');
-        }
+        void detail.submitComment();
     }
 
     async function handleStatusChange(e: Event) {
         const target = e.currentTarget as HTMLSelectElement;
-        const status = target.value as PostStatus;
-        if (!post) return;
-        try {
-            post = await api.updatePostStatus(post.id, status);
-            toastSuccess(`Status updated: ${status.replace('_', ' ')} ✓`);
-        } catch {
-            // Reset the select so it reflects the persisted post, not the failed choice
-            target.value = post.status;
-            toastError('Failed to update status');
-        }
+        const saved = await detail.changeStatus(target.value as PostStatus);
+        // Reset the select so it reflects the persisted post, not the failed choice
+        if (!saved && detail.post) target.value = detail.post.status;
     }
 
     async function handleCategoryChange(e: Event) {
         const target = e.currentTarget as HTMLSelectElement;
-        const category = target.value as PostCategory;
-        if (!post) return;
-        try {
-            post = await api.updatePostCategory(post.id, category);
-            toastSuccess(`Category updated: ${category} ✓`);
-        } catch {
-            target.value = post.category;
-            toastError('Failed to update category');
-        }
-    }
-
-    function handleVote(voted: boolean, count: number) {
-        if (post) {
-            post.user_voted = voted;
-            post.vote_count = count;
-        }
+        const saved = await detail.changeCategory(target.value as PostCategory);
+        if (!saved && detail.post) target.value = detail.post.category;
     }
 </script>
 
@@ -270,7 +183,7 @@
                 </div>
             </div>
             <div class="flex shrink-0 items-center border-l border-[var(--vote-rail-divider-color)] pl-4">
-                <VoteRail postId={post.id} postTitle={post.title} voted={post.user_voted} count={post.vote_count} onvote={handleVote} />
+                <VoteRail postId={post.id} postTitle={post.title} voted={post.user_voted} count={post.vote_count} onvote={detail.applyVote} />
             </div>
         </Card.Header>
         {#if post.description}
@@ -285,7 +198,7 @@
     <!-- Attachments belong to the post body, so they sit directly under it
          (they used to float between the team response and the comments). -->
     <section class="mt-4" aria-label="Attachments">
-        <AttachmentGallery postId={post.id} canEdit={!!user && (user.id === post.created_by || user.role === 'admin')} />
+        <AttachmentGallery postId={post.id} canEdit={detail.canModerate} />
     </section>
 
     <!-- Inline similar posts (#206): visible dedup between body and comments. -->
@@ -330,7 +243,7 @@
                             size="xs"
                             class="ml-auto"
                             disabled={officialBusy}
-                            onclick={() => setOfficialResponse(null)}
+                            onclick={() => detail.setOfficialResponse(null)}
                         >
                             Unpin response
                         </Button>
@@ -366,17 +279,17 @@
                     {/if}
                     <div class="mb-1 text-xs text-muted-foreground">
                         Replying to thread ·
-                        <button type="button" onclick={() => (replyTo = null)} class="text-primary-text">cancel</button>
+                        <button type="button" onclick={() => detail.cancelReply()} class="text-primary-text">cancel</button>
                     </div>
                 {/if}
                 <Textarea
                     id="post-reply"
-                    bind:value={commentText}
+                    bind:value={detail.commentText}
                     placeholder={replyTo ? 'Write a reply...' : 'Share your thoughts...'}
                     rows={3}
                 />
                 <div class="mt-2 flex justify-end">
-                    <Button type="submit" disabled={!commentText.trim() || commentLoading}>
+                    <Button type="submit" disabled={!detail.commentText.trim() || commentLoading}>
                         {commentLoading ? 'Posting...' : 'Comment'}
                     </Button>
                 </div>
@@ -394,7 +307,7 @@
             currentUserId={user?.id}
             pinnedId={official?.id}
             onreply={user ? startReply : undefined}
-            ondelete={handleDeleteComment}
+            ondelete={(id) => detail.deleteComment(id)}
         >
             {#snippet commentActions(comment: Comment)}
                 {#if isAdmin && official?.id !== comment.id}
@@ -402,7 +315,7 @@
                         variant="ghost"
                         size="xs"
                         disabled={officialBusy}
-                        onclick={() => setOfficialResponse(comment.id)}
+                        onclick={() => detail.setOfficialResponse(comment.id)}
                         title="Pin this comment as the official team response"
                     >
                         <ShieldCheck class="size-3.5" aria-hidden="true" /> Official response
