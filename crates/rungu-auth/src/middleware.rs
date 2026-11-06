@@ -33,6 +33,19 @@ pub const SESSION_COOKIE: &str = "session";
 /// Email of the synthetic admin user behind `RUNGU_API_KEY` machine access.
 pub const AGENT_USER_EMAIL: &str = "agent@rungu.local";
 
+/// The built-in `mcp@rungu.local` identity `rungu mcp` (stdio) runs as.
+pub const MCP_USER_EMAIL: &str = "mcp@rungu.local";
+
+/// Whether `email` names one of the built-in synthetic identities (the API-key
+/// agent and the stdio MCP user, both admins). No outside identity provider may
+/// log in as these: whatever an issuer says about this address, a person must
+/// never get a session for it. Compares after trimming and lower-casing, the way
+/// `find_or_create_user` normalises.
+pub fn is_reserved_email(email: &str) -> bool {
+    let email = email.trim().to_lowercase();
+    email == AGENT_USER_EMAIL || email == MCP_USER_EMAIL
+}
+
 /// Display name of the synthetic admin user.
 pub const AGENT_USER_NAME: &str = "ai-agent";
 

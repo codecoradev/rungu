@@ -124,6 +124,13 @@
 
 ### Fixed
 
+- The post-login `redirect` rejects any control character: a tab was stripped
+  by browsers' URL parsers, so `/<TAB>/evil.example` became the
+  protocol-relative `//evil.example` (an open redirect after login, all
+  providers) (#267).
+- No login provider can sign in as the built-in `agent@rungu.local` or
+  `mcp@rungu.local` admin identities: the web login now refuses them, as the
+  `/mcp` OAuth path already did (#267).
 - MCP tools reject arguments whose type contradicts the schema (a string for
   an integer, a negative page) instead of silently using the default (#253).
 - MCP no longer returns raw internal error text (database messages) to

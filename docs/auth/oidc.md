@@ -24,13 +24,14 @@ OIDC_NAME=CodeCora ID                                # optional: the button labe
 
 Rungu reads the authorization, token and userinfo endpoints from `{OIDC_ISSUER}/.well-known/openid-configuration`. The issuer URL must be `https://` (loopback excepted for local development), and the document must name that same issuer.
 
-If `OIDC_ISSUER` is set, `OIDC_CLIENT_ID` and `OIDC_CLIENT_SECRET` are required, otherwise Rungu refuses to start. The endpoints are discovered on first use and refreshed hourly, so an issuer that is down when Rungu boots does not stop Rungu; the OIDC button answers 502 until the issuer is back.
+If `OIDC_ISSUER` is set, `OIDC_CLIENT_ID` and `OIDC_CLIENT_SECRET` are required, otherwise Rungu refuses to start. The endpoints are discovered on first use and refreshed hourly, so an issuer that is down when Rungu boots does not stop Rungu; the OIDC button answers 502 until the issuer is back. After the first success, a refresh that fails keeps serving the last good document, and a failed fetch is not retried for 15 seconds, so a down issuer is not hammered. A burst of logins makes one discovery request.
 
 ## How a login is decided
 
 - The flow is the authorization-code flow with `state` and **PKCE (S256)**. The issuer must support S256 when it lists its methods.
 - Identity comes from the userinfo response. The email must be marked `"email_verified": true`; a missing or false claim refuses the login with HTTP 403 before any account is looked up or created, like the other providers.
-- The person is found or created by email (so the same email is the same Rungu user whichever provider they use), and `ADMIN_EMAILS` decides the admin role.
+- The person is found or created by email (so the same email is the same Rungu user whichever provider they use), and `ADMIN_EMAILS` decides the admin role. Identity is the email, not the issuer's `sub`: the `sub` is recorded as a link but never checked, so if the issuer later reports a different verified email for the same `sub`, the login goes to whoever owns that email.
+- The built-in `agent@rungu.local` and `mcp@rungu.local` identities (admins used by the API key and `rungu mcp`) can never be logged into through any provider: such a login is refused with 403, whatever the provider says about the address.
 
 ## Using the same issuer for MCP
 

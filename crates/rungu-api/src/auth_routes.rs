@@ -165,7 +165,9 @@ pub async fn login(
     // We carry it in REDIRECT_COOKIE (signed) rather than as a provider param,
     // because OAuth providers don't echo arbitrary params back to the callback.
     let redirect_cookie = match query.redirect.as_ref() {
-        Some(r) if r.starts_with('/') && !r.starts_with("//") && !r.contains('\\') => {
+        Some(r)
+            if r.starts_with('/') && !r.starts_with("//") && !r.contains('\\') && !r.chars().any(char::is_control) =>
+        {
             match session::issue_redirect_token(r, &state.config.app_secret) {
                 Ok(tok) => Some(build_cookie(REDIRECT_COOKIE, &tok, REDIRECT_MAX_AGE_SECS, state.config.secure_cookie)),
                 Err(e) => {
@@ -312,6 +314,13 @@ pub async fn callback(
             StatusCode::FORBIDDEN,
             "Email is not verified by the provider. Verify your email with the provider and try again.".to_string(),
         ));
+    }
+
+    // The built-in admin identities (API-key agent, stdio MCP user) are never
+    // reachable through an identity provider, whatever it asserts about them.
+    if rungu_auth::middleware::is_reserved_email(&identity.email) {
+        warn!(provider = %provider, "Rejecting login: reserved email address");
+        return Err((StatusCode::FORBIDDEN, "This email address is reserved.".to_string()));
     }
 
     // Find or create user (email dedup)

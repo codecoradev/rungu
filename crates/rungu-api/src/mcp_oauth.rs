@@ -450,7 +450,7 @@ impl McpOAuth {
             return Err(Reject::NoEmail);
         }
         // Built-in identities must never be reachable by naming their address.
-        if email == rungu_auth::middleware::AGENT_USER_EMAIL || email == "mcp@rungu.local" {
+        if rungu_auth::middleware::is_reserved_email(&email) {
             return Err(Reject::Invalid("reserved_email"));
         }
 

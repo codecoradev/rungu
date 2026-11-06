@@ -1,7 +1,7 @@
 //! Generic OIDC login (#267) against a fake issuer: discovery, PKCE, the
 //! code exchange, userinfo, and the identity rules.
 
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use axum::body::Body;
@@ -25,6 +25,9 @@ struct IssuerState {
     token_calls: Arc<AtomicUsize>,
     /// The last form the token endpoint received.
     last_token_form: Arc<Mutex<Vec<(String, String)>>>,
+    /// How many times discovery was asked, and whether it currently fails.
+    discovery_hits: Arc<AtomicUsize>,
+    discovery_down: Arc<AtomicBool>,
 }
 
 struct Issuer {
@@ -50,7 +53,19 @@ async fn start_issuer() -> Issuer {
         "code_challenge_methods_supported": ["S256"],
     });
     let app = axum::Router::new()
-        .route("/.well-known/openid-configuration", axum::routing::get(move || async move { axum::Json(doc) }))
+        .route(
+            "/.well-known/openid-configuration",
+            axum::routing::get(move |State(s): State<IssuerState>| {
+                let doc = doc.clone();
+                async move {
+                    s.discovery_hits.fetch_add(1, Ordering::SeqCst);
+                    if s.discovery_down.load(Ordering::SeqCst) {
+                        return (StatusCode::INTERNAL_SERVER_ERROR, axum::Json(json!({})));
+                    }
+                    (StatusCode::OK, axum::Json(doc))
+                }
+            }),
+        )
         .route(
             "/token",
             axum::routing::post(
@@ -84,6 +99,16 @@ async fn start_issuer() -> Issuer {
 }
 
 async fn app_for(issuer_url: Option<&str>) -> (axum::Router, Store) {
+    let oidc = issuer_url.map(|url| {
+        Arc::new(
+            OidcLogin::new(url, "rungu-client", "rungu-secret", Some("CodeCora ID"), APP_URL, reqwest::Client::new())
+                .unwrap(),
+        )
+    });
+    app_with(oidc).await
+}
+
+async fn app_with(oidc: Option<Arc<OidcLogin>>) -> (axum::Router, Store) {
     let pool = open_pool("sqlite::memory:").await.unwrap();
     run_migrations(&pool, "sqlite::memory:").await.unwrap();
     let store = Store::new_with_kind(pool, true);
@@ -97,12 +122,6 @@ async fn app_for(issuer_url: Option<&str>) -> (axum::Router, Store) {
         github: None,
         keycloak: None,
     };
-    let oidc = issuer_url.map(|url| {
-        Arc::new(
-            OidcLogin::new(url, "rungu-client", "rungu-secret", Some("CodeCora ID"), APP_URL, reqwest::Client::new())
-                .unwrap(),
-        )
-    });
     let state = AppState::new(
         store.clone(),
         config,
@@ -327,10 +346,94 @@ async fn an_unreachable_or_wrong_issuer_fails_the_login_not_the_server() {
     let (app, _) = app_for(Some("http://127.0.0.1:9")).await;
     assert_eq!(get(&app, "/auth/oidc/login", "").await.status, StatusCode::BAD_GATEWAY);
     assert_eq!(get(&app, "/auth/providers", "").await.status, StatusCode::OK);
+}
 
-    // A discovery document that names another issuer is refused.
+#[tokio::test]
+async fn a_discovery_document_naming_another_issuer_is_refused() {
+    // `localhost` reaches the same fake issuer, but its document names the 127.0.0.1 origin.
     let issuer = start_issuer().await;
-    let (app, _) = app_for(Some(&format!("{}/", issuer.url.replace("127.0.0.1", "localhost")))).await;
-    // (`localhost` serves the same fake issuer, but its document names the 127.0.0.1 origin.)
-    assert_eq!(get(&app, "/auth/oidc/login", "").await.status, StatusCode::BAD_GATEWAY);
+    let other_name = issuer.url.replace("127.0.0.1", "localhost");
+    let login = OidcLogin::new(&other_name, "rungu-client", "s", None, APP_URL, reqwest::Client::new()).unwrap();
+    let err = login.provider().await.unwrap_err();
+    assert!(err.contains("different issuer"), "{err}");
+}
+
+#[tokio::test]
+async fn built_in_identities_cannot_log_in_through_a_provider() {
+    for email in ["agent@rungu.local", "MCP@rungu.local", "  agent@rungu.local "] {
+        let issuer = start_issuer().await;
+        let (app, store) = app_for(Some(&issuer.url)).await;
+        *issuer.state.userinfo.lock().unwrap() = json!({ "sub": "x", "email": email, "email_verified": true });
+        let (state, cookies) = start_login(&app, &issuer).await;
+        let r = get(&app, &format!("/auth/oidc/callback?code=good-code&state={state}"), &cookies).await;
+        assert_eq!(r.status, StatusCode::FORBIDDEN, "{email:?}");
+        assert!(r.cookie("session").is_none(), "{email:?}: no session for a built-in identity");
+        let accounts: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM users WHERE email LIKE '%@rungu.local'")
+            .fetch_one(store.pool())
+            .await
+            .unwrap();
+        assert_eq!(accounts, 0, "{email:?}: nothing was created or reached");
+    }
+}
+
+#[tokio::test]
+async fn a_redirect_with_a_control_character_is_dropped() {
+    let issuer = start_issuer().await;
+    let (app, _) = app_for(Some(&issuer.url)).await;
+    // A tab is stripped by browsers' URL parsers: `/<TAB>/evil.example` would become `//evil.example`.
+    for bad in ["/%09/evil.example", "/%0A/x", "/%0D%0A", "/%7F/x", "//evil.example", "/%5Cevil.example"] {
+        let r = get(&app, &format!("/auth/oidc/login?redirect={bad}"), "").await;
+        assert_eq!(r.status, StatusCode::FOUND, "{bad}");
+        assert!(r.cookie("oauth_redirect").is_none(), "{bad}: no redirect cookie is signed for it");
+    }
+    let ok = get(&app, "/auth/oidc/login?redirect=/board/demo", "").await;
+    assert!(ok.cookie("oauth_redirect").is_some_and(|c| !c.is_empty()));
+}
+
+#[tokio::test]
+async fn a_burst_of_logins_asks_the_issuer_once() {
+    let issuer = start_issuer().await;
+    let (app, _) = app_for(Some(&issuer.url)).await;
+    let logins: Vec<_> = (0..12)
+        .map(|_| {
+            let app = app.clone();
+            tokio::spawn(async move { get(&app, "/auth/oidc/login", "").await.status })
+        })
+        .collect();
+    for login in logins {
+        assert_eq!(login.await.unwrap(), StatusCode::FOUND);
+    }
+    assert_eq!(issuer.state.discovery_hits.load(Ordering::SeqCst), 1, "one discovery for the whole burst");
+    // And the cached document serves later logins.
+    get(&app, "/auth/oidc/login", "").await;
+    assert_eq!(issuer.state.discovery_hits.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn a_down_issuer_is_not_hammered_and_the_last_good_document_keeps_serving() {
+    // Expired immediately, so every login needs a refresh.
+    let issuer = start_issuer().await;
+    let login = OidcLogin::new(&issuer.url, "rungu-client", "s", None, APP_URL, reqwest::Client::new())
+        .unwrap()
+        .with_cache_ttl(std::time::Duration::ZERO);
+    let (app, _) = app_with(Some(Arc::new(login))).await;
+    assert_eq!(get(&app, "/auth/oidc/login", "").await.status, StatusCode::FOUND);
+    assert_eq!(issuer.state.discovery_hits.load(Ordering::SeqCst), 1);
+
+    // The issuer goes down: the refresh fails once, then logins keep working from the
+    // last good document and the issuer is left alone for a while.
+    issuer.state.discovery_down.store(true, Ordering::SeqCst);
+    for _ in 0..6 {
+        assert_eq!(get(&app, "/auth/oidc/login", "").await.status, StatusCode::FOUND);
+    }
+    assert_eq!(issuer.state.discovery_hits.load(Ordering::SeqCst), 2, "one failed refresh, then back-off");
+
+    // With no good document at all, a down issuer is a 502, also without hammering.
+    let down = start_issuer().await;
+    down.state.discovery_down.store(true, Ordering::SeqCst);
+    let (cold, _) = app_for(Some(&down.url)).await;
+    for _ in 0..4 {
+        assert_eq!(get(&cold, "/auth/oidc/login", "").await.status, StatusCode::BAD_GATEWAY);
+    }
+    assert_eq!(down.state.discovery_hits.load(Ordering::SeqCst), 1);
 }

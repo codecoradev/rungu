@@ -25,6 +25,9 @@ use tokio::sync::Mutex;
 use url::Url;
 
 const DISCOVERY_TTL: Duration = Duration::from_secs(3600);
+/// After a failed discovery fetch, answer from the last good document (or fail)
+/// for this long instead of asking the issuer again on every login.
+const DISCOVERY_BACKOFF: Duration = Duration::from_secs(15);
 const FETCH_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_DOC_BYTES: usize = 1_048_576;
 /// Button label when `OIDC_NAME` is not set.
@@ -38,7 +41,19 @@ pub struct OidcLogin {
     client_secret: String,
     redirect_uri: String,
     http: reqwest::Client,
-    cache: Mutex<Option<(Instant, ProviderConfig)>>,
+    ttl: Duration,
+    cache: Mutex<Cache>,
+    /// Held while the issuer is being asked, so a burst of logins on a cold or
+    /// expired cache makes one request, not one each.
+    fetch: Mutex<()>,
+}
+
+#[derive(Default)]
+struct Cache {
+    /// The last good document and when it was fetched.
+    good: Option<(Instant, ProviderConfig)>,
+    /// When the last fetch failed.
+    failed: Option<Instant>,
 }
 
 impl OidcLogin {
@@ -75,8 +90,16 @@ impl OidcLogin {
             client_secret: client_secret.to_string(),
             redirect_uri: format!("{}/auth/oidc/callback", app_url.trim_end_matches('/')),
             http,
+            ttl: DISCOVERY_TTL,
             cache: Mutex::default(),
+            fetch: Mutex::default(),
         })
+    }
+
+    /// Refresh discovery after `ttl` instead of an hour (tests).
+    pub fn with_cache_ttl(mut self, ttl: Duration) -> Self {
+        self.ttl = ttl;
+        self
     }
 
     /// Label for the login button.
@@ -85,15 +108,56 @@ impl OidcLogin {
     }
 
     /// The provider config with the issuer's endpoints, discovered on first use.
+    ///
+    /// A fresh cached document is returned as is. When it has expired the
+    /// issuer is asked once (concurrent logins wait for that one answer); if the
+    /// issuer then fails, the last good document keeps serving and the failure is
+    /// remembered for [`DISCOVERY_BACKOFF`] so a down issuer is not hammered.
+    /// With no good document at all, a failure is an error.
     pub async fn provider(&self) -> Result<ProviderConfig, String> {
-        if let Some((at, cfg)) = &*self.cache.lock().await
-            && at.elapsed() < DISCOVERY_TTL
-        {
-            return Ok(cfg.clone());
+        if let Some(answer) = self.cached().await {
+            return answer;
         }
-        let cfg = self.discover().await?;
-        *self.cache.lock().await = Some((Instant::now(), cfg.clone()));
-        Ok(cfg)
+        let _one_at_a_time = self.fetch.lock().await;
+        // Someone may have answered while this request waited.
+        if let Some(answer) = self.cached().await {
+            return answer;
+        }
+        match self.discover().await {
+            Ok(cfg) => {
+                *self.cache.lock().await = Cache { good: Some((Instant::now(), cfg.clone())), failed: None };
+                Ok(cfg)
+            }
+            Err(e) => {
+                let mut cache = self.cache.lock().await;
+                cache.failed = Some(Instant::now());
+                match &cache.good {
+                    Some((_, stale)) => {
+                        tracing::warn!("OIDC discovery failed ({e}); serving the last good document");
+                        Ok(stale.clone())
+                    }
+                    None => Err(e),
+                }
+            }
+        }
+    }
+
+    /// An answer that needs no fetch: a fresh document, or the stale one / the
+    /// error while a recent failure is backing off. `None` = ask the issuer.
+    async fn cached(&self) -> Option<Result<ProviderConfig, String>> {
+        let cache = self.cache.lock().await;
+        if let Some((at, cfg)) = &cache.good
+            && at.elapsed() < self.ttl
+        {
+            return Some(Ok(cfg.clone()));
+        }
+        if cache.failed.is_some_and(|t| t.elapsed() < DISCOVERY_BACKOFF) {
+            return Some(match &cache.good {
+                Some((_, stale)) => Ok(stale.clone()),
+                None => Err("the OIDC issuer is unavailable (recent discovery failure)".to_string()),
+            });
+        }
+        None
     }
 
     async fn discover(&self) -> Result<ProviderConfig, String> {
@@ -134,10 +198,17 @@ fn provider_from_discovery(
     if doc.get("issuer").and_then(Value::as_str).map(|i| i.trim_end_matches('/')) != Some(issuer) {
         return Err("OIDC discovery names a different issuer than OIDC_ISSUER".into());
     }
+    let issuer_is_loopback = Url::parse(issuer).is_ok_and(|u| u.scheme() == "http");
     let endpoint = |field: &str| -> Result<String, String> {
         let value = doc.get(field).and_then(Value::as_str).ok_or_else(|| format!("OIDC discovery has no {field}"))?;
         let url = Url::parse(value).map_err(|_| format!("OIDC discovery {field} is not a URL"))?;
         crate::mcp_oauth::require_https(&url, field)?;
+        // A plain-http loopback endpoint is only for a local development issuer:
+        // a public issuer must not be able to send the client secret and the
+        // code to a service on this machine.
+        if url.scheme() == "http" && !issuer_is_loopback {
+            return Err(format!("OIDC discovery {field} must be https:// (the issuer is not a loopback address)"));
+        }
         Ok(value.to_string())
     };
     // When the issuer lists its PKCE methods, S256 must be one of them.
@@ -240,6 +311,11 @@ mod tests {
             plain_http[field] = json!("http://id.example/x");
             assert!(build(&plain_http).unwrap_err().contains("https"), "{field}");
         }
+
+        // A public issuer may not send the client secret to a loopback service.
+        let mut loopback = doc();
+        loopback["token_endpoint"] = json!("http://127.0.0.1:8080/token");
+        assert!(build(&loopback).unwrap_err().contains("https"));
 
         let mut no_s256 = doc();
         no_s256["code_challenge_methods_supported"] = json!(["plain"]);
