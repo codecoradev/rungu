@@ -381,9 +381,7 @@ impl Operations {
         post_id: &str,
         comment_id: Option<&str>,
     ) -> OpResult<OfficialResponseOutcome> {
-        if !actor.is_admin() {
-            return Err(OpError::forbidden("Admin access required"));
-        }
+        actor.require_admin()?;
         let post = self.existing_post(post_id).await?;
 
         if let Some(cid) = comment_id {

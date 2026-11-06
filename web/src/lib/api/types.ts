@@ -48,9 +48,11 @@ export interface Post {
 
 /** What the viewer may do with a post, decided by the server (same rules that enforce it). */
 export interface PostPermissions {
-    /** The author or an admin: change status or category, delete, manage attachments. */
+    /** The author or an admin: change status or category, delete the post, upload attachments.
+     *  (Deleting an attachment is per attachment: its uploader or an admin.) */
     can_edit: boolean;
-    /** An admin: pin the official response, delete any comment. */
+    /** An admin: pin the official response, delete any comment.
+     *  (A comment's own author may also delete it: per comment.) */
     can_moderate: boolean;
 }
 

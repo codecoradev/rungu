@@ -18,7 +18,7 @@ use axum::Json;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 
-use rungu_proto::{CurrentUser, UserRole};
+use rungu_proto::CurrentUser;
 
 /// Standard API error.
 #[derive(Debug)]
@@ -54,7 +54,12 @@ impl ApiError {
 
     /// Require admin role. Returns 403 Forbidden if not admin.
     pub fn require_admin(user: &CurrentUser) -> Result<(), Self> {
-        if user.role == UserRole::Admin { Ok(()) } else { Err(Self::forbidden("Admin access required")) }
+        // The same rule core enforces and reports as `can_moderate`.
+        if rungu_core::Actor::from(user).can_moderate() {
+            Ok(())
+        } else {
+            Err(Self::forbidden("Admin access required"))
+        }
     }
 }
 

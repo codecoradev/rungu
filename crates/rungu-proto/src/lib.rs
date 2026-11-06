@@ -143,9 +143,11 @@ pub struct PostDetail {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct PostPermissions {
     /// The post's author or an admin: change its status or category, delete
-    /// it, manage its attachments.
+    /// the post, upload attachments to it. (Deleting an attachment is decided
+    /// per attachment: its uploader or an admin.)
     pub can_edit: bool,
-    /// An admin: pin the official response, delete any comment.
+    /// An admin: pin the official response, delete any comment. (A comment's
+    /// own author may also delete it; that is decided per comment.)
     pub can_moderate: bool,
 }
 

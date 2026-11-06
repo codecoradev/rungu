@@ -483,6 +483,10 @@ async fn reported_permissions_match_what_is_enforced() {
 
         let pinned = f.ops.set_official_response(actor, &id, None).await;
         assert_eq!(pinned.is_ok(), flags.can_moderate, "can_moderate vs set_official_response for {:?}", actor.role);
+
+        let doomed = f.post("To delete").await;
+        let deleted = f.ops.delete_post(actor, &doomed).await;
+        assert_eq!(deleted.is_ok(), flags.can_edit, "can_edit vs delete_post for {:?}", actor.role);
     }
 
     // Nobody but the author and admins edits; only admins moderate.
