@@ -107,6 +107,19 @@ Set these to enable Keycloak login:
 
 Redirect URI is constructed automatically as `{APP_URL}/auth/keycloak/callback`. Realm administrators must enforce email verification upstream for email-based account linking to work.
 
+### OpenID Connect (Gatehouse and others)
+
+Set these to enable login with any OpenID Connect issuer. See [OpenID Connect setup](auth/oidc.md).
+
+| Variable | Description |
+|----------|-------------|
+| `OIDC_ISSUER` | Issuer URL (e.g., `https://identity.example.com/api/auth`). Must be `https://`; endpoints are discovered from `{issuer}/.well-known/openid-configuration` |
+| `OIDC_CLIENT_ID` | Client ID for Rungu at the issuer (required when `OIDC_ISSUER` is set) |
+| `OIDC_CLIENT_SECRET` | Client secret (required when `OIDC_ISSUER` is set) |
+| `OIDC_NAME` | Optional button label (default `OpenID Connect`) |
+
+Redirect URI is constructed automatically as `{APP_URL}/auth/oidc/callback`. Logins use PKCE (S256), and the userinfo email must be marked verified.
+
 ## Example .env
 
 ```env

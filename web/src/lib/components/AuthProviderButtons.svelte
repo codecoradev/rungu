@@ -37,7 +37,7 @@
 
 <div class="flex flex-col gap-3">
     {#each providers as provider (provider.name)}
-        {@const meta = providerMeta[provider.name] ?? { label: provider.name }}
+        {@const label = provider.label ?? providerMeta[provider.name]?.label ?? provider.name}
         <Button
             variant="outline"
             size="lg"
@@ -59,7 +59,7 @@
             {:else}
                 <KeyRound class="size-5" aria-hidden="true" />
             {/if}
-            <span>Continue with {meta.label}</span>
+            <span>Continue with {label}</span>
         </Button>
     {/each}
 
@@ -70,7 +70,7 @@
             {:else}
                 <p class="text-sm font-medium">No login methods configured</p>
                 <p class="mt-1 text-sm text-muted-foreground">
-                    This {branding.value.brandName} instance has no OAuth provider enabled. Admins can enable Google, GitHub or Keycloak in the server configuration.
+                    This {branding.value.brandName} instance has no OAuth provider enabled. Admins can enable Google, GitHub, Keycloak or an OpenID Connect provider in the server configuration.
                 </p>
             {/if}
         </div>

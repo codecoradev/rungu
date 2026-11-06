@@ -63,6 +63,8 @@ pub enum AuthProvider {
     Google,
     GitHub,
     Keycloak,
+    /// Any standards-compliant OpenID Connect issuer (e.g. Gatehouse), found by discovery.
+    Oidc,
 }
 
 // ── User ────────────────────────────────────────────────────────────────
@@ -335,6 +337,10 @@ pub struct OAuthIdentity {
 pub struct ProviderInfo {
     pub name: String,
     pub login_url: String,
+    /// Display name for the login button, when the operator set one (the
+    /// generic OIDC provider); the built-in providers are labelled by the client.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
 }
 
 // ── Handler Request Bodies (shared for OpenAPI) ──────────────────────────

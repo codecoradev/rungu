@@ -4,6 +4,13 @@
 
 ### Added
 
+- **Generic OpenID Connect login** (#267). `OIDC_ISSUER`, `OIDC_CLIENT_ID`
+  and `OIDC_CLIENT_SECRET` (and an optional `OIDC_NAME` label) add a login
+  button for any OIDC issuer, such as Gatehouse. Endpoints come from the
+  issuer's discovery document (fetched on first use, so an issuer that is down
+  at boot does not stop Rungu), the flow uses PKCE (S256), and the userinfo
+  email must be marked verified, as for the other providers. `/auth/providers`
+  gains an optional `label`. See `docs/auth/oidc.md`.
 - **Per-viewer permissions on a post** (#264). `GET /api/posts/{id}` and the MCP
   `get_post` tool return `permissions: { can_edit, can_moderate }` for the
   caller: `can_edit` for the author or an admin (change status or category,
@@ -117,6 +124,13 @@
 
 ### Fixed
 
+- The post-login `redirect` rejects any control character: a tab was stripped
+  by browsers' URL parsers, so `/<TAB>/evil.example` became the
+  protocol-relative `//evil.example` (an open redirect after login, all
+  providers) (#267).
+- No login provider can sign in as the built-in `agent@rungu.local` or
+  `mcp@rungu.local` admin identities: the web login now refuses them, as the
+  `/mcp` OAuth path already did (#267).
 - `/mcp` OAuth: a token the issuer refuses at userinfo (a banned or revoked
   person) is now answered `401 invalid_token` instead of `503`, so the client
   signs in again instead of retrying (#253).

@@ -50,6 +50,7 @@ export default defineConfig({
           { text: 'Google OAuth', link: '/auth/google' },
           { text: 'GitHub OAuth', link: '/auth/github' },
           { text: 'Keycloak', link: '/auth/keycloak' },
+          { text: 'OpenID Connect (Gatehouse)', link: '/auth/oidc' },
         ],
       },
       {

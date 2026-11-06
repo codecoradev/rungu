@@ -120,6 +120,35 @@ fn is_safe_relative_path(path: &str) -> bool {
     path.starts_with('/')
         && !path.starts_with("//")
         && !path.contains('\\')
-        // Block control chars that could header-inject a Location header.
-        && !path.chars().any(|c| c == '\n' || c == '\r')
+        // Block control chars: CR/LF could header-inject a Location header, and a
+        // tab or other control is stripped by the browser's URL parser, so
+        // `/<TAB>/evil.example` would become the protocol-relative `//evil.example`.
+        && !path.chars().any(char::is_control)
+}
+
+#[cfg(test)]
+mod redirect_path_tests {
+    use super::is_safe_relative_path;
+
+    #[test]
+    fn only_plain_same_origin_paths_are_safe() {
+        for ok in ["/", "/board/demo", "/board/demo?sort=trending", "/a%20b"] {
+            assert!(is_safe_relative_path(ok), "{ok:?}");
+        }
+        for bad in [
+            "board/demo",
+            "//evil.example",
+            "/\\evil.example",
+            "https://evil.example",
+            "/\nSet-Cookie: x=1",
+            "/\r\n",
+            // A tab (or any control character) is stripped by browsers' URL parsers,
+            // turning this into the protocol-relative `//evil.example`.
+            "/\t/evil.example",
+            "/\u{0b}/evil.example",
+            "/\u{7f}/x",
+        ] {
+            assert!(!is_safe_relative_path(bad), "{bad:?}");
+        }
+    }
 }
