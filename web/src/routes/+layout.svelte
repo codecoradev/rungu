@@ -4,7 +4,7 @@
     import { page } from '$app/state';
     import { loginHref } from '$lib/utils';
     import { api } from '$lib/api/client';
-    import type { CurrentUser } from '$lib/api/types';
+    import { session } from '$lib/session.svelte';
     import { branding } from '$lib/branding.svelte';
     import { Button } from '$lib/components/ui/button';
     import Keyboard from '@lucide/svelte/icons/keyboard';
@@ -15,8 +15,8 @@
     import { resolveShortcut, type ShortcutDef } from '$lib/shortcuts';
 
     let { children } = $props();
-    let user = $state<CurrentUser | null>(null);
-    let loading = $state(true);
+    const user = $derived(session.user);
+    const loading = $derived(session.status === 'loading');
     let helpOpen = $state(false);
 
     onMount(async () => {
@@ -28,18 +28,12 @@
             .catch(() => {
                 // Keep boot/default branding — non-critical.
             });
-        try {
-            user = await api.getCurrentUser();
-        } catch {
-            user = null;
-        } finally {
-            loading = false;
-        }
+        await session.ready();
     });
 
     async function handleLogout() {
         await api.logout();
-        user = null;
+        session.clear();
         window.location.href = '/';
     }
 
@@ -152,6 +146,12 @@
                         <Button variant="ghost" size="sm" href="/admin" class="hidden sm:inline-flex">Admin</Button>
                     {/if}
                     <Button variant="outline" size="sm" class="max-sm:h-11" onclick={handleLogout}>Logout</Button>
+                {:else if session.status === 'unknown'}
+                    <!-- The sign-in check itself failed (rate limit, offline): we can't
+                         say the visitor is signed out, so don't pretend to. -->
+                    <Button variant="outline" size="sm" class="max-sm:h-11" onclick={() => session.refresh()}>
+                        Retry sign-in check
+                    </Button>
                 {:else}
                     <Button size="sm" class="max-sm:h-11" href={loginHref(page.url.pathname + page.url.search)}>Login</Button>
                 {/if}
