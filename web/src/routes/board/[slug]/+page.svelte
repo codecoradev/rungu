@@ -2,9 +2,17 @@
     import { branding } from '$lib/branding.svelte';
     import { onMount } from 'svelte';
     import { goto } from '$app/navigation';
-    import { api, ApiError } from '$lib/api/client';
+    import { api } from '$lib/api/client';
     import { session } from '$lib/session.svelte';
-    import type { Project, PostDetail, PostStatus, PostCategory } from '$lib/api/types';
+    import {
+        SORT_OPTIONS,
+        createBoardState,
+        hrefWithSort,
+        sortFromSearch,
+        PAGE_SIZE,
+        type Sort,
+    } from '$lib/board/state.svelte';
+    import type { PostStatus, PostCategory } from '$lib/api/types';
     import PostCard from '$lib/components/PostCard.svelte';
     import PostForm from '$lib/components/PostForm.svelte';
     import SortTabs from '$lib/components/SortTabs.svelte';
@@ -24,59 +32,43 @@
     let slug = $derived(params.slug);
     const loginUrl = $derived(loginHref(page.url.pathname + page.url.search));
 
-    let project = $state<Project | null>(null);
-    let posts = $state<PostDetail[]>([]);
-    let total = $state(0);
-    let loading = $state(true);
-    // True while re-fetching with posts already on screen (filter/search refill).
-    // Gates the dimming overlay so the first load still shows skeletons. #148
-    let refetching = $state(false);
-    // Monotonic guard against stale loads (#173): every loadBoard() bumps the
-    // generation; only the latest generation may commit its response.
-    let loadGeneration = $state(0);
-    let error = $state('');
-
-    let sort = $state('newest');
-    // URL is the source of truth for sort (#203): hydrate from ?sort= on boot
-    // and push changes back so reload/share preserves the state. Falls back to
-    // the default for unknown values (BE also clamps unknown → newest).
-    // (Keep this list in sync with `sortOptions` below; inlined here because
-    // this initializer runs before that const exists.)
-    {
-        const fromUrl = new URLSearchParams(window.location.search).get('sort');
-        if (fromUrl && ['newest', 'trending', 'most_votes', 'recently_updated'].includes(fromUrl)) sort = fromUrl;
-    }
-    $effect(() => {
-        if (!initialized) return;
-        const url = new URL(window.location.href);
-        if (sort === 'newest') url.searchParams.delete('sort');
-        else url.searchParams.set('sort', sort);
-        if (url.href !== window.location.href) history.replaceState(history.state, '', url.href);
+    // Everything the board does with data (loading, the stale-response guard,
+    // paging, counts, filters, voting) lives in the state module; this page
+    // renders it and forwards events. The URL is the source of truth for the
+    // sort (#203): hydrate from ?sort= on boot, push changes back below.
+    const board = createBoardState(api, {
+        initialSort: sortFromSearch(window.location.search),
+        onLoadMoreError: () => toastError('Failed to load more posts'),
     });
-    let statusFilter = $state<PostStatus | ''>('');
-    let categoryFilter = $state<PostCategory | ''>('');
-    // Sidebar / filter counts (#202): refreshed with every board load.
-    let counts = $state<{ by_status: Record<string, number>; by_category: Record<string, number> } | null>(null);
-    let searchQuery = $state('');
-    let showForm = $state(false);
+
+    const project = $derived(board.project);
+    const posts = $derived(board.posts);
+    const total = $derived(board.total);
+    const loading = $derived(board.loading);
+    const refetching = $derived(board.refetching);
+    const error = $derived(board.error);
+    const counts = $derived(board.counts);
+    const sort = $derived(board.sort);
+    const statusFilter = $derived(board.statusFilter);
+    const categoryFilter = $derived(board.categoryFilter);
+    const searchQuery = $derived(board.searchQuery);
+    const focusedPostIndex = $derived(board.focusedIndex);
     const authed = $derived(session.signedIn);
+
+    let showForm = $state(false);
     // Mobile toolbar: filter panel visibility (see mobile toolbar markup).
     let showFilters = $state(false);
-    // Set true once the initial onMount load finishes; gates the filter $effect
-    // so it doesn't fire before the first board fetch completes. Declared up
-    // here (before onMount) to avoid a forward reference / TDZ smell.
+    // Set true once the initial onMount load finishes; gates the effects below
+    // so they don't fire before the first board fetch completes.
     let initialized = $state(false);
 
-    // Keyboard-shortcut focus state. Tracks the currently-focused post card
-    // so j/k navigation and Enter/v shortcuts have a target. -1 = none focused.
-    let focusedPostIndex = $state(-1);
+    $effect(() => {
+        if (!initialized) return;
+        const next = hrefWithSort(window.location.href, sort);
+        if (next !== window.location.href) history.replaceState(history.state, '', next);
+    });
 
-    const sortOptions = [
-        { value: 'newest', label: 'Newest' },
-        { value: 'trending', label: 'Trending' },
-        { value: 'most_votes', label: 'Most Voted' },
-        { value: 'recently_updated', label: 'Recently Updated' },
-    ];
+    const sortOptions = SORT_OPTIONS.map((o) => ({ value: o.value, label: o.label }));
 
     const statusOptions: { value: PostStatus; label: string }[] = [
         { value: 'open', label: 'Open' },
@@ -93,70 +85,31 @@
         { value: 'question', label: 'Question' },
     ];
 
-    async function loadBoard() {
-        // Filter/search refill: posts are already rendered — dim them instead
-        // of flashing skeletons, and reset pagination. #148
-        refetching = posts.length > 0;
-        loading = posts.length === 0;
-        error = '';
-
-        // Stale-response guard (#173): mutations and filter changes can fire
-        // loadBoard() concurrently. Capture the generation; a newer load
-        // invalidates this one, so an older response never overwrites it.
-        const generation = ++loadGeneration;
-
-        try {
-            const projectData = await api.getProject(slug);
-            const result = await api.listPosts(slug, {
-                sort,
-                status: statusFilter || undefined,
-                category: categoryFilter || undefined,
-                q: searchQuery || undefined,
-                per_page: 50,
-            });
-            if (generation !== loadGeneration) return; // a newer load superseded this one
-            project = projectData;
-            posts = result.data;
-            total = result.pagination.total;
-            focusedPostIndex = -1;
-            // Counts load best-effort; their absence must never break the board.
-            api.getProjectCounts(slug).then((c) => (counts = c)).catch(() => {});
-        } catch (e) {
-            if (generation !== loadGeneration) return;
-            error = e instanceof ApiError && e.status === 404 ? 'Project not found' : 'Failed to load board';
-        } finally {
-            if (generation === loadGeneration) {
-                loading = false;
-                refetching = false;
-            }
-        }
-    }
-
-    async function loadMore() {
-        const before = posts.length;
-        if (before >= total) return;
-        try {
-            const result = await api.listPosts(slug, {
-                sort,
-                status: statusFilter || undefined,
-                category: categoryFilter || undefined,
-                q: searchQuery || undefined,
-                per_page: 50,
-                page: Math.floor(before / 50) + 1,
-            });
-            // Merge, dedup by id (defensive against shifting sort orders)
-            const seen = new Set(posts.map((p) => p.id));
-            posts = [...posts, ...result.data.filter((p) => !seen.has(p.id))];
-            total = result.pagination.total;
-        } catch {
-            toastError('Failed to load more posts');
-        }
-    }
+    // What the board was last loaded for. The effect below runs once right after
+    // the first load; without this it would fetch the same page a second time.
+    const loadKey = () => JSON.stringify([slug, statusFilter, categoryFilter, sort, searchQuery]);
+    let loadedKey = '';
 
     onMount(async () => {
         await session.ready();
-        await loadBoard();
+        // The key the load is issued for — not whatever the slug/filters have
+        // become by the time it lands (a navigation mid-load must still reload).
+        const key = loadKey();
+        await board.load(slug);
+        // A failed first load leaves the key empty so the effect retries once.
+        loadedKey = board.error ? '' : key;
         initialized = true;
+    });
+
+    // Reload when the slug, a filter or the sort changes; typing in the search
+    // box is debounced by the state module. Only these are read here — reading
+    // `project`/`posts` would re-trigger the effect on our own state writes.
+    $effect(() => {
+        if (!initialized) return;
+        const key = loadKey();
+        if (key === loadedKey) return;
+        loadedKey = key;
+        return board.queueReload(slug);
     });
 
     /**
@@ -189,21 +142,19 @@
                 break;
             }
             case 'j': {
-                if (posts.length === 0) return;
-                focusedPostIndex = Math.min(focusedPostIndex + 1, posts.length - 1);
+                if (!board.focusNext()) return;
                 scrollFocusedIntoView();
                 e.preventDefault();
                 break;
             }
             case 'k': {
-                if (posts.length === 0) return;
-                focusedPostIndex = Math.max(focusedPostIndex - 1, 0);
+                if (!board.focusPrev()) return;
                 scrollFocusedIntoView();
                 e.preventDefault();
                 break;
             }
             case 'Enter': {
-                const post = posts[focusedPostIndex];
+                const post = board.focusedPost;
                 if (!post) return;
                 goto(`/board/${slug}/post/${post.id}`);
                 e.preventDefault();
@@ -213,9 +164,9 @@
                 // Voting always requires auth. `authRequired` is irrelevant
                 // here (there's no anonymous vote path), so just guard on auth.
                 if (!authed) return;
-                const post = posts[focusedPostIndex];
+                const post = board.focusedPost;
                 if (!post) return;
-                toggleVote(post);
+                board.toggleVote(post);
                 e.preventDefault();
                 break;
             }
@@ -226,21 +177,11 @@
         if (focusedPostIndex < 0) return;
         // Defer to after DOM updates.
         queueMicrotask(() => {
-            const el = document.querySelector(`[data-post-index="${focusedPostIndex}"]`);
+            const el = document.querySelector(`[data-post-index="${board.focusedIndex}"]`);
             if (el instanceof HTMLElement) {
                 el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
             }
         });
-    }
-
-    async function toggleVote(post: PostDetail) {
-        try {
-            const result = await api.toggleVote(post.id);
-            post.user_voted = result.voted;
-            post.vote_count = result.vote_count;
-        } catch {
-            // Silently ignore — vote failure isn't worth a banner here.
-        }
     }
 
     onMount(() => {
@@ -249,40 +190,9 @@
     });
 
     async function handleCreatePost(data: { title: string; description: string; category: PostCategory }) {
-        await api.createPost(slug, data);
+        await board.createPost(slug, data);
         showForm = false;
-        await loadBoard();
     }
-
-    // Re-fetch when the slug changes (route param swap). We intentionally
-    // read only `slug` inside this effect — reading `project`/`posts`/etc
-    // would re-trigger the effect on our own state writes and cause loops.
-    // `loadBoard()` is safe to call before `project` is set; it sets `project`
-    // on first resolve. We also guard against running before mount completes
-    // via the `initialized` flag set at the end of onMount.
-    // Reload board when filters or slug change.
-    // Search is debounced to avoid excessive API calls while typing.
-    let searchTimer: ReturnType<typeof setTimeout> | null = null;
-    $effect(() => {
-        if (!initialized) return;
-        // Touch all reactive deps so $effect re-runs when any changes
-        void slug;
-        void statusFilter;
-        void categoryFilter;
-        void sort;
-
-        // Debounce search input
-        const sq = searchQuery;
-        if (searchTimer) clearTimeout(searchTimer);
-        searchTimer = setTimeout(() => {
-            loadBoard();
-        }, sq ? 300 : 0);
-
-        // Cleanup on re-run or unmount
-        return () => {
-            if (searchTimer) clearTimeout(searchTimer);
-        };
-    });
 </script>
 
 <svelte:head>
@@ -370,7 +280,7 @@
                     <div class="flex gap-1 overflow-x-auto pb-1" role="group" aria-label="Filter by category">
                         {#each categoryOptions as cat (cat.value)}
                             <button
-                                onclick={() => (categoryFilter = categoryFilter === cat.value ? '' : cat.value)}
+                                onclick={() => board.toggleCategory(cat.value)}
                                 aria-pressed={categoryFilter === cat.value}
                                 class={cn(
                                     'min-h-11 shrink-0 whitespace-nowrap rounded-full border px-3 py-1 text-sm transition-colors',
@@ -389,7 +299,7 @@
                     <div class="flex gap-1 overflow-x-auto pb-1" role="group" aria-label="Filter by status">
                         {#each statusOptions as st (st.value)}
                             <button
-                                onclick={() => (statusFilter = statusFilter === st.value ? '' : st.value)}
+                                onclick={() => board.toggleStatus(st.value)}
                                 aria-pressed={statusFilter === st.value}
                                 class={cn(
                                     'min-h-11 shrink-0 whitespace-nowrap rounded-full border px-3 py-1 text-sm capitalize transition-colors',
@@ -443,7 +353,7 @@
                 <div class="relative min-w-0 flex-1">
                     <Input
                         id="board-search"
-                        bind:value={searchQuery}
+                        bind:value={board.searchQuery}
                         type="search"
                         placeholder="Search..."
                         aria-label="Search posts"
@@ -459,18 +369,18 @@
                         </span>
                     {/if}
                 </div>
-                <SortTabs options={sortOptions} value={sort} onchange={(v) => (sort = v)} />
+                <SortTabs options={sortOptions} value={sort} onchange={(v) => (board.sort = v as Sort)} />
             </div>
 
             {#if statusFilter || categoryFilter}
                 <div class="mb-4 flex flex-wrap gap-2">
                     {#if statusFilter}
-                        <Button variant="secondary" size="xs" onclick={() => (statusFilter = '')}>
+                        <Button variant="secondary" size="xs" onclick={() => (board.statusFilter = '')}>
                             {statusOptions.find((s) => s.value === statusFilter)?.label} ✕
                         </Button>
                     {/if}
                     {#if categoryFilter}
-                        <Button variant="secondary" size="xs" onclick={() => (categoryFilter = '')}>
+                        <Button variant="secondary" size="xs" onclick={() => (board.categoryFilter = '')}>
                             {categoryOptions.find((c) => c.value === categoryFilter)?.label} ✕
                         </Button>
                     {/if}
@@ -493,31 +403,27 @@
                 {/each}
             </div>
 
-            {#if posts.length > 0 && total > posts.length}
+            {#if posts.length > 0 && board.hasMore}
                 <div class="mt-4 text-center">
                     <p class="mb-2 text-xs text-muted-foreground" aria-live="polite">
                         Showing {posts.length} of {total} posts
                     </p>
-                    <Button variant="outline" size="sm" onclick={loadMore}>Show more</Button>
+                    <Button variant="outline" size="sm" onclick={() => board.loadMore(slug)}>Show more</Button>
                 </div>
-            {:else if posts.length > 0 && total === posts.length && total > 50}
-                <p class="mt-4 text-center text-xs text-muted-foreground">Showing all {total} posts</p>
+            {:else if posts.length > 0 && !board.hasMore && total > PAGE_SIZE}
+                <p class="mt-4 text-center text-xs text-muted-foreground">Showing all {posts.length} posts</p>
             {/if}
 
             {#if posts.length === 0}
                 <div class="rounded-xl border border-dashed border-border py-12 text-center">
-                    {#if searchQuery || statusFilter || categoryFilter}
+                    {#if board.hasFilters}
                         <p class="text-lg font-medium">No results</p>
                         <p class="mt-1 text-sm text-muted-foreground">No posts match your current filters.</p>
                         <Button
                             variant="outline"
                             size="sm"
                             class="mt-4"
-                            onclick={() => {
-                                searchQuery = '';
-                                statusFilter = '';
-                                categoryFilter = '';
-                            }}
+                            onclick={() => board.clearFilters()}
                         >
                             Clear all filters
                         </Button>
@@ -548,7 +454,7 @@
                 <div class="flex flex-col gap-1">
                     {#each categoryOptions as cat (cat.value)}
                         <button
-                            onclick={() => (categoryFilter = categoryFilter === cat.value ? '' : cat.value)}
+                            onclick={() => board.toggleCategory(cat.value)}
                             class={cn(
                                 'flex min-h-11 items-center justify-between gap-2 rounded-md px-2 py-1 text-left text-sm transition-colors',
                                 categoryFilter === cat.value
@@ -568,7 +474,7 @@
                 <div class="flex flex-col gap-1">
                     {#each statusOptions as st (st.value)}
                         <button
-                            onclick={() => (statusFilter = statusFilter === st.value ? '' : st.value)}
+                            onclick={() => board.toggleStatus(st.value)}
                             class={cn(
                                 'flex min-h-11 items-center justify-between gap-2 rounded-md px-2 py-1 text-left text-sm capitalize transition-colors',
                                 statusFilter === st.value
