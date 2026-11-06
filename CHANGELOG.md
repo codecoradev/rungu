@@ -124,6 +124,9 @@
 
 ### Fixed
 
+- The OpenAPI spec (and Swagger UI at `/swagger-ui`) reported the version as
+  `0.2.1`, hard-coded; it now follows the crate version. A test keeps them in
+  step.
 - The post-login `redirect` rejects any control character: a tab was stripped
   by browsers' URL parsers, so `/<TAB>/evil.example` became the
   protocol-relative `//evil.example` (an open redirect after login, all

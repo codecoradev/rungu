@@ -8,7 +8,7 @@ use utoipa::OpenApi;
 #[openapi(
     info(
         title = "Rungu API",
-        version = "0.2.1",
+        version = env!("CARGO_PKG_VERSION"),
         description = "Lightweight self-hosted feedback board API.\n\nCollect feature requests, bug reports, and suggestions with voting and commenting.",
         license(name = "Apache-2.0", url = "https://www.apache.org/licenses/LICENSE-2.0"),
     ),

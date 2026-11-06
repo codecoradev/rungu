@@ -8,7 +8,7 @@ Lightweight, self-hosted feedback board. Collect feature requests, bug reports, 
 
 ## Features
 
-- **Multi-provider auth** — Google, GitHub, Keycloak (ENV-driven, mix-and-match)
+- **Multi-provider auth** — Google, GitHub, Keycloak and any OpenID Connect issuer such as Gatehouse (ENV-driven, mix-and-match, PKCE)
 - **Email-based identity** — same email across providers = one user
 - **Vote & comment** — upvote the features you want
 - **Image attachments** — screenshots and mockups on posts (PNG/JPEG/WebP/GIF, max 10MB)
@@ -16,27 +16,80 @@ Lightweight, self-hosted feedback board. Collect feature requests, bug reports, 
 - **Full-text search** — FTS5-powered search across all posts
 - **Dark mode** — light/dark/system theme toggle
 - **Keyboard shortcuts** — full board navigation without a mouse
-- **MCP server** — 26 AI agent tools for Claude Code, Cursor, Windsurf
-- **REST API** — full CRUD for posts, votes, comments, attachments
+- **MCP server** — 26 AI agent tools for Claude Code, Cursor, Windsurf, over stdio or HTTP (API key, or OAuth for Claude connectors)
+- **REST API** — full CRUD for posts, votes, comments, attachments, with OpenAPI docs at `/swagger-ui`
 - **Dual database** — SQLite (default) or PostgreSQL via `DATABASE_URL`
 - **Single binary** — embedded SPA, Docker ready
 
 ## Screenshots
 
-| Board | Roadmap |
-|:---:|:---:|
-| ![Board](docs/screenshots/board-desktop.png) | ![Roadmap](docs/screenshots/roadmap-desktop.png) |
+The screenshots use demo data (a fictional note-taking app, "Acme Notes").
 
-| Post detail | Dark mode |
+| Boards | Board |
+|:---:|:---:|
+| ![Boards](docs/screenshots/home-desktop.png) | ![Board](docs/screenshots/board-desktop.png) |
+
+| Roadmap | Changelog |
+|:---:|:---:|
+| ![Roadmap](docs/screenshots/roadmap-desktop.png) | ![Changelog](docs/screenshots/changelog-desktop.png) |
+
+| New post (similar posts are suggested while typing) | Filters and sorting |
+|:---:|:---:|
+| ![New post](docs/screenshots/new-post-desktop.png) | ![Filters](docs/screenshots/board-filters-desktop.png) |
+
+| Post detail (attachment, official team response, threaded comments) | Dark mode |
 |:---:|:---:|
 | ![Post detail](docs/screenshots/post-detail-desktop.png) | ![Dark mode](docs/screenshots/board-desktop-dark.png) |
 
-<details>
-<summary>More views</summary>
-
-| Changelog | Mobile |
+| Sign in (Google, GitHub, OpenID Connect) | API docs (`/swagger-ui`) |
 |:---:|:---:|
-| ![Changelog](docs/screenshots/changelog-desktop.png) | ![Mobile](docs/screenshots/board-mobile.png) |
+| ![Login](docs/screenshots/login-desktop.png) | ![API docs](docs/screenshots/api-docs-desktop.png) |
+
+<details>
+<summary>Admin</summary>
+
+| Projects | Moderation |
+|:---:|:---:|
+| ![Admin projects](docs/screenshots/admin-projects-desktop.png) | ![Admin moderation](docs/screenshots/admin-moderation-desktop.png) |
+
+| Webhooks | Analytics |
+|:---:|:---:|
+| ![Admin webhooks](docs/screenshots/admin-webhooks-desktop.png) | ![Admin analytics](docs/screenshots/admin-analytics-desktop.png) |
+
+</details>
+
+<details>
+<summary>Mobile</summary>
+
+| Boards | Board | Roadmap | Post | Sign in |
+|:---:|:---:|:---:|:---:|:---:|
+| ![Boards](docs/screenshots/home-mobile.png) | ![Board](docs/screenshots/board-mobile.png) | ![Roadmap](docs/screenshots/roadmap-mobile.png) | ![Post](docs/screenshots/post-detail-mobile.png) | ![Sign in](docs/screenshots/login-mobile.png) |
+
+</details>
+
+<details>
+<summary>Dark mode</summary>
+
+| Boards | Post detail |
+|:---:|:---:|
+| ![Boards](docs/screenshots/home-desktop-dark.png) | ![Post detail](docs/screenshots/post-detail-desktop-dark.png) |
+
+| Roadmap | Changelog |
+|:---:|:---:|
+| ![Roadmap](docs/screenshots/roadmap-desktop-dark.png) | ![Changelog](docs/screenshots/changelog-desktop-dark.png) |
+
+| Sign in | Admin | Board (mobile) |
+|:---:|:---:|:---:|
+| ![Sign in](docs/screenshots/login-desktop-dark.png) | ![Admin](docs/screenshots/admin-projects-desktop-dark.png) | ![Board mobile](docs/screenshots/board-mobile-dark.png) |
+
+</details>
+
+<details>
+<summary>Errors</summary>
+
+| Post not found |
+|:---:|
+| ![Post not found](docs/screenshots/post-not-found-desktop.png) |
 
 </details>
 
@@ -87,9 +140,9 @@ KEYCLOAK_CLIENT_SECRET=your-keycloak-secret
 |-------|---------|
 | `rungu-proto` | Wire types (Post, Vote, Comment, User, Project) |
 | `rungu-core` | Storage, business logic, SQLite queries |
-| `rungu-auth` | Multi-provider OAuth + JWT session |
+| `rungu-auth` | Multi-provider OAuth/OIDC + JWT session |
 | `rungu-api` | REST API routes (Axum) |
-| `rungu-mcp` | MCP server (stdio JSON-RPC 2.0) |
+| `rungu-mcp` | MCP server (JSON-RPC 2.0 over stdio and `/mcp`) |
 | `rungud` | Daemon binary (CLI: `rungu`) |
 
 ## CLI
@@ -133,7 +186,7 @@ Local (stdio):
 }
 ```
 
-Remote (HTTP, requires `RUNGU_API_KEY` on the server):
+Remote (HTTP, with the `RUNGU_API_KEY` Bearer key):
 ```json
 {
   "mcpServers": {
@@ -144,6 +197,8 @@ Remote (HTTP, requires `RUNGU_API_KEY` on the server):
   }
 }
 ```
+
+Claude connectors sign in with OAuth instead of a shared key: set `RUNGU_MCP_OAUTH_ISSUER` (for example Gatehouse) and add `https://your-rungu-host/mcp` as the connector URL. See [MCP](docs/integrations/mcp.md#connect-from-claude-oauth).
 
 ## License
 

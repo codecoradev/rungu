@@ -824,6 +824,12 @@ async fn every_tool_is_exercised_by_a_parity_scenario() {
     );
 }
 
+#[test]
+fn the_spec_reports_the_crate_version() {
+    let doc = serde_json::to_value(ApiDoc::openapi()).unwrap();
+    assert_eq!(doc["info"]["version"], env!("CARGO_PKG_VERSION"), "the OpenAPI version was hard-coded and went stale");
+}
+
 /// The post read documents what it returns: `PostView` is a registered schema
 /// and carries the viewer's `permissions` (the other parity checks only look at
 /// methods, paths and security).
