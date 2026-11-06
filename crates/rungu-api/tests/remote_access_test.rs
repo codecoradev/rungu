@@ -417,6 +417,24 @@ async fn test_mcp_http_legacy_handshake_notifications_and_methods() {
     .await;
     assert_eq!(json["result"]["isError"], true);
 
+    // A tool call sent without an id is never executed.
+    let (status, _) = mcp(
+        &app,
+        "POST",
+        &[],
+        r#"{"jsonrpc":"2.0","method":"tools/call","params":{"name":"create_project","arguments":{"name":"Ghost"}}}"#,
+    )
+    .await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+    let (_, json) =
+        mcp(&app, "POST", &[], r#"{"jsonrpc":"2.0","id":3,"method":"get_project","params":{"slug":"ghost"}}"#).await;
+    assert_eq!(json["error"]["kind"].as_str().or(json["error"]["data"]["kind"].as_str()), Some("not_found"));
+
+    // Batches are refused, not silently dropped.
+    let (status, json) = mcp(&app, "POST", &[], r#"[{"jsonrpc":"2.0","id":1,"method":"tools/list"}]"#).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(json["error"]["code"], -32600);
+
     // No server-initiated streams and no sessions.
     for method in ["GET", "DELETE"] {
         let (status, _) = mcp(&app, method, &[], "").await;

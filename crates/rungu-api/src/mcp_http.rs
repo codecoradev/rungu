@@ -84,6 +84,11 @@ pub async fn mcp_http(
     // Header checks need the body's method, so parse once here; a body that
     // isn't JSON falls through to the dispatcher's own parse error.
     if let Ok(message) = serde_json::from_str::<serde_json::Value>(input) {
+        if message.is_array() {
+            let response = handle_message(input, &state.ops, &api_key_actor(&state)).await;
+            return (StatusCode::BAD_REQUEST, [(axum::http::header::CONTENT_TYPE, "application/json")], response)
+                .into_response();
+        }
         let header = |name: &str| headers.get(name).and_then(|v| v.to_str().ok());
         if let Err(e) = rungu_mcp::validate_headers(
             header("mcp-protocol-version"),

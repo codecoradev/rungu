@@ -19,7 +19,7 @@ use serde_json::{Value, json};
 /// The stateless protocol revision.
 pub const MODERN_VERSION: &str = "2026-07-28";
 /// Handshake-based revisions still answered, newest first.
-pub const LEGACY_VERSIONS: &[&str] = &["2025-11-25", "2025-06-18", "2025-03-26"];
+pub const LEGACY_VERSIONS: &[&str] = &["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
 
 const META_VERSION: &str = "io.modelcontextprotocol/protocolVersion";
 const META_SERVER_INFO: &str = "io.modelcontextprotocol/serverInfo";

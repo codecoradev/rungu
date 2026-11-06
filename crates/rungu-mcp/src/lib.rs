@@ -77,14 +77,24 @@ pub async fn handle_message(input: &str, ops: &Operations, actor: &Actor) -> Str
         }
     };
 
+    // Batching was dropped from MCP after 2025-03-26; refuse it loudly rather
+    // than mistake an array for a notification and drop it silently.
+    if msg.is_array() {
+        return McpError::new(McpError::INVALID_REQUEST, "invalid_request", "Batch requests are not supported")
+            .to_json(None)
+            .to_string();
+    }
+
     let id = msg.get("id").cloned();
     let method = msg.get("method").and_then(|m| m.as_str()).unwrap_or("").to_string();
     let params = msg.get("params").cloned().unwrap_or(json!({}));
 
     // JSON-RPC notifications (no "id") get NO response — replying corrupts
-    // protocol-conformant client streams. Side effects still run.
+    // protocol-conformant client streams. They run nothing: the only
+    // notifications MCP defines (`notifications/*`) carry no work for a
+    // server, and a tool call sent without an id must never be executed
+    // behind an acknowledgement.
     if id.is_none() {
-        let _ = handle_request(&method, &params, ops, actor).await;
         return String::new();
     }
 
@@ -206,6 +216,7 @@ pub struct McpError {
 }
 
 impl McpError {
+    pub const INVALID_REQUEST: i64 = -32600;
     pub const INVALID_PARAMS: i64 = -32602;
     pub const METHOD_NOT_FOUND: i64 = -32601;
     pub const INTERNAL: i64 = -32603;
@@ -789,7 +800,21 @@ mod tests {
         let ops = test_ops().await;
         let input = json!({ "jsonrpc": "2.0", "method": "create_project", "params": { "name": "Quiet" } }).to_string();
         assert_eq!(handle_message(&input, &ops, &admin(&ops).await).await, "");
-        assert!(ops.store().get_project_by_slug("quiet").await.unwrap().is_some(), "the side effect still ran");
+        assert!(ops.store().get_project_by_slug("quiet").await.unwrap().is_none(), "notifications run nothing");
+
+        let call = json!({ "jsonrpc": "2.0", "method": "tools/call",
+            "params": { "name": "create_project", "arguments": { "name": "Quiet" } } })
+        .to_string();
+        assert_eq!(handle_message(&call, &ops, &admin(&ops).await).await, "");
+        assert!(ops.store().get_project_by_slug("quiet").await.unwrap().is_none(), "tools/call needs an id");
+    }
+
+    #[tokio::test]
+    async fn batch_arrays_are_refused_not_dropped() {
+        let ops = test_ops().await;
+        let input = json!([{ "jsonrpc": "2.0", "id": 1, "method": "tools/list" }]).to_string();
+        let r: Value = serde_json::from_str(&handle_message(&input, &ops, &admin(&ops).await).await).unwrap();
+        assert_eq!(r["error"]["code"], McpError::INVALID_REQUEST);
     }
 
     #[tokio::test]
