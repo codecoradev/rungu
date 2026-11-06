@@ -388,6 +388,25 @@ async fn scenario_posts(w: &World) {
         .await;
     assert_eq!(r.body["data"]["id"], m.body["data"]["id"]);
     assert_eq!(r.body["data"]["title"], m.body["data"]["title"]);
+
+    // What the viewer may do with the post is part of the read, and both
+    // transports report the same flags for the same person (#264).
+    for (role, can_edit, can_moderate) in [(&w.owner, true, false), (&w.admin, true, true), (&w.stranger, false, false)]
+    {
+        let (r, m) = w
+            .both(
+                role,
+                "post permissions",
+                ("GET", &format!("/api/posts/{rest_id}"), None),
+                ("get_post", json!({ "id": rest_id })),
+                Ok,
+            )
+            .await;
+        let expected = json!({ "can_edit": can_edit, "can_moderate": can_moderate });
+        assert_eq!(r.body["data"]["permissions"], expected, "REST, {:?}", role.actor.role);
+        assert_eq!(m.body["data"]["permissions"], expected, "MCP, {:?}", role.actor.role);
+    }
+
     w.both(&w.owner, "unknown post", ("GET", "/api/posts/nope", None), ("get_post", json!({ "id": "nope" })), NotFound)
         .await;
     let (r, m) = w
@@ -803,4 +822,26 @@ async fn every_tool_is_exercised_by_a_parity_scenario() {
         untested.is_empty(),
         "no parity scenario calls these tools (add a step to a scenario in parity_test.rs): {untested:?}"
     );
+}
+
+/// The post read documents what it returns: `PostView` is a registered schema
+/// and carries the viewer's `permissions` (the other parity checks only look at
+/// methods, paths and security).
+#[test]
+fn the_post_read_documents_its_permissions() {
+    let doc = serde_json::to_value(ApiDoc::openapi()).unwrap();
+    let schemas = &doc["components"]["schemas"];
+    for name in ["PostView", "PostPermissions"] {
+        assert!(schemas.get(name).is_some(), "{name} is in the OpenAPI components");
+    }
+    let permissions = &schemas["PostPermissions"]["properties"];
+    assert_eq!(permissions["can_edit"]["type"], "boolean");
+    assert_eq!(permissions["can_moderate"]["type"], "boolean");
+
+    // `PostView` is the post flattened with `permissions`, however utoipa spells it.
+    let view = schemas["PostView"].to_string();
+    assert!(view.contains("permissions") && view.contains("PostDetail"), "PostView schema: {view}");
+
+    let get = &doc["paths"]["/api/posts/{id}"]["get"]["responses"]["200"]["content"]["application/json"]["schema"];
+    assert!(get.to_string().contains("PostView"), "GET /api/posts/{{id}} responds with PostView: {get}");
 }

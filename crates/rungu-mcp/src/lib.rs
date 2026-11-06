@@ -319,9 +319,10 @@ async fn list_posts(params: &Value, store: &Store) -> Result<Value, McpError> {
     Ok(post_page(posts))
 }
 
-/// Get a single post by ID.
-async fn get_post(params: &Value, store: &Store) -> Result<Value, McpError> {
-    let post = existing_post(store, get_str(params, "id")?).await?;
+/// Get a single post by ID, as the acting identity sees it: `user_voted` is
+/// their own vote and `permissions` says what they may do with the post.
+async fn get_post(params: &Value, store: &Store, actor: &Actor) -> Result<Value, McpError> {
+    let post = queries(store).post(get_str(params, "id")?, Some(actor)).await.map_err(op_err)?;
     Ok(json!({ "data": post }))
 }
 

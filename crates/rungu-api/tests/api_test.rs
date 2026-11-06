@@ -224,6 +224,8 @@ async fn test_create_and_get_post() {
     let body = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
     let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(json["data"]["title"], "My Feature Request");
+    // A visitor who is not signed in may do nothing with the post (#264).
+    assert_eq!(json["data"]["permissions"], serde_json::json!({ "can_edit": false, "can_moderate": false }));
 }
 
 #[tokio::test]

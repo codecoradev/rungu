@@ -46,6 +46,16 @@ export interface Post {
     updated_at: string;
 }
 
+/** What the viewer may do with a post, decided by the server (same rules that enforce it). */
+export interface PostPermissions {
+    /** The author or an admin: change status or category, delete the post, upload attachments.
+     *  (Deleting an attachment is per attachment: its uploader or an admin.) */
+    can_edit: boolean;
+    /** An admin: pin the official response, delete any comment.
+     *  (A comment's own author may also delete it: per comment.) */
+    can_moderate: boolean;
+}
+
 export interface PostDetail {
     id: string;
     project_id: string;
@@ -60,6 +70,11 @@ export interface PostDetail {
     updated_at: string;
     creator: UserSummary;
     user_voted: boolean;
+}
+
+/** A post as one viewer sees it (`GET /api/posts/{id}`). */
+export interface PostView extends PostDetail {
+    permissions: PostPermissions;
 }
 
 export interface Comment {

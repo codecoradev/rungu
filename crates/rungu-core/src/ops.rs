@@ -13,8 +13,8 @@
 use std::sync::Arc;
 
 use rungu_proto::{
-    Attachment, CommentDetail, CurrentUser, Post, PostCategory, PostDetail, PostSort, PostStatus, Project, UserRole,
-    Webhook,
+    Attachment, CommentDetail, CurrentUser, Post, PostCategory, PostDetail, PostPermissions, PostSort, PostStatus,
+    Project, UserRole, Webhook,
 };
 
 use crate::events::{DomainEvent, EventBus};
@@ -72,12 +72,29 @@ impl Actor {
         self.role == UserRole::Admin
     }
 
+    /// Whether this actor may edit something owned by `owner_id`: the owner
+    /// or an admin. The one definition of the rule; [`Self::require_owner_or_admin`]
+    /// enforces it and [`Self::post_permissions`] reports it.
+    pub fn can_edit_owned_by(&self, owner_id: &str) -> bool {
+        self.id == owner_id || self.is_admin()
+    }
+
+    /// Whether this actor may use moderation powers (admins only).
+    pub fn can_moderate(&self) -> bool {
+        self.is_admin()
+    }
+
+    /// What this actor may do with a post written by `author_id`.
+    pub fn post_permissions(&self, author_id: &str) -> PostPermissions {
+        PostPermissions { can_edit: self.can_edit_owned_by(author_id), can_moderate: self.can_moderate() }
+    }
+
     fn require_owner_or_admin(&self, owner_id: &str, msg: &str) -> OpResult<()> {
-        if self.id == owner_id || self.is_admin() { Ok(()) } else { Err(OpError::forbidden(msg)) }
+        if self.can_edit_owned_by(owner_id) { Ok(()) } else { Err(OpError::forbidden(msg)) }
     }
 
     fn require_admin(&self) -> OpResult<()> {
-        if self.is_admin() { Ok(()) } else { Err(OpError::forbidden("Admin access required")) }
+        if self.can_moderate() { Ok(()) } else { Err(OpError::forbidden("Admin access required")) }
     }
 }
 
@@ -364,9 +381,7 @@ impl Operations {
         post_id: &str,
         comment_id: Option<&str>,
     ) -> OpResult<OfficialResponseOutcome> {
-        if !actor.is_admin() {
-            return Err(OpError::forbidden("Admin access required"));
-        }
+        actor.require_admin()?;
         let post = self.existing_post(post_id).await?;
 
         if let Some(cid) = comment_id {

@@ -27,10 +27,7 @@
     // Everything the page does with data (loading, comments, moderation, the
     // official response) lives in the state module; this page renders it and
     // forwards events. Transient per-action errors go through the toaster (#144).
-    const detail = createPostState(api, {
-        user: () => session.user,
-        notify: { success: toastSuccess, error: toastError },
-    });
+    const detail = createPostState(api, { notify: { success: toastSuccess, error: toastError } });
 
     const user = $derived(session.user);
     const post = $derived(detail.post);
@@ -42,8 +39,9 @@
     const replyTo = $derived(detail.replyTo);
     const commentLoading = $derived(detail.commentLoading);
     const officialBusy = $derived(detail.officialBusy);
-    const isAdmin = $derived(detail.isAdmin);
-    const canEditStatus = $derived(detail.canModerate);
+    // What the viewer may do comes from the server, with the post.
+    const isAdmin = $derived(detail.canModerate);
+    const canEditStatus = $derived(detail.canEdit);
 
     const statusOptions: PostStatus[] = ['open', 'planned', 'in_progress', 'done', 'declined'];
     const categoryOptions: PostCategory[] = ['feedback', 'bug', 'feature', 'question'];
@@ -198,7 +196,7 @@
     <!-- Attachments belong to the post body, so they sit directly under it
          (they used to float between the team response and the comments). -->
     <section class="mt-4" aria-label="Attachments">
-        <AttachmentGallery postId={post.id} canEdit={detail.canModerate} />
+        <AttachmentGallery postId={post.id} canEdit={detail.canEdit} />
     </section>
 
     <!-- Inline similar posts (#206): visible dedup between body and comments. -->

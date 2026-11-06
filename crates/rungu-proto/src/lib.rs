@@ -136,6 +136,29 @@ pub struct PostDetail {
     pub user_voted: bool,
 }
 
+/// What the viewer of a post may do with it. Computed by core from the same
+/// rules that enforce them (`Actor::post_permissions`), so clients decide which
+/// controls to show without copying the rules. All false for a visitor who is
+/// not signed in.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct PostPermissions {
+    /// The post's author or an admin: change its status or category, delete
+    /// the post, upload attachments to it. (Deleting an attachment is decided
+    /// per attachment: its uploader or an admin.)
+    pub can_edit: bool,
+    /// An admin: pin the official response, delete any comment. (A comment's
+    /// own author may also delete it; that is decided per comment.)
+    pub can_moderate: bool,
+}
+
+/// A post as one viewer sees it: the post plus what that viewer may do with it.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct PostView {
+    #[serde(flatten)]
+    pub detail: PostDetail,
+    pub permissions: PostPermissions,
+}
+
 /// Lightweight PUBLIC user info for post/comment display.
 ///
 /// Deliberately excludes email (#192): these structs ship in unauthenticated

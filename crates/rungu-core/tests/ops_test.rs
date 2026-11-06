@@ -461,3 +461,37 @@ async fn upload_attachment_checks_owner_and_image_then_stores_file_and_row() {
     f.ops.upload_attachment(&f.admin, &id, upload(png())).await.unwrap();
     assert_eq!(f.store().list_attachments(&id).await.unwrap().len(), 2);
 }
+
+/// The flags clients use to decide which controls to show come from the same
+/// rule that refuses the call: whatever `post_permissions` says, the operation
+/// agrees.
+#[tokio::test]
+async fn reported_permissions_match_what_is_enforced() {
+    let f = Fixture::new().await;
+    let author_id = f.owner.id.clone();
+
+    for actor in [&f.owner, &f.stranger, &f.admin] {
+        let flags = actor.post_permissions(&author_id);
+
+        let id = f.post("Flagged").await; // written by the owner
+        let changed =
+            f.ops.update_post(actor, &id, PostChanges { status: Some("planned"), ..Default::default() }).await;
+        assert_eq!(changed.is_ok(), flags.can_edit, "can_edit vs update_post for {:?}", actor.role);
+        if let Err(e) = changed {
+            assert!(matches!(e, OpError::Forbidden(_)));
+        }
+
+        let pinned = f.ops.set_official_response(actor, &id, None).await;
+        assert_eq!(pinned.is_ok(), flags.can_moderate, "can_moderate vs set_official_response for {:?}", actor.role);
+
+        let doomed = f.post("To delete").await;
+        let deleted = f.ops.delete_post(actor, &doomed).await;
+        assert_eq!(deleted.is_ok(), flags.can_edit, "can_edit vs delete_post for {:?}", actor.role);
+    }
+
+    // Nobody but the author and admins edits; only admins moderate.
+    assert!(!f.stranger.post_permissions(&author_id).can_edit);
+    assert!(f.owner.post_permissions(&author_id).can_edit);
+    assert!(!f.owner.post_permissions(&author_id).can_moderate);
+    assert!(f.admin.post_permissions(&author_id).can_moderate);
+}
