@@ -33,7 +33,7 @@
 
 use std::io::{BufRead, Write};
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use rungu_core::ops::{NewPost, NewProject, NewWebhook, PostChanges};
 use rungu_core::query::{BoardFilters, PageRequest, PostPage};
 use rungu_core::{Actor, BoardQuery, OpError, Operations, Store};
@@ -140,6 +140,16 @@ fn get_optional_u64(params: &Value, key: &str) -> Option<u64> {
     params.get(key).and_then(|v| v.as_u64())
 }
 
+/// A post that must exist for the call to make sense. A missing post is
+/// `not_found` (as in REST), not an internal error.
+async fn existing_post(store: &Store, post_id: &str) -> Result<PostDetail, McpError> {
+    store
+        .get_post(post_id, None)
+        .await
+        .map_err(|e| format!("Failed to get post: {e}"))?
+        .ok_or_else(|| McpError::not_found(format!("Post not found: {post_id}")))
+}
+
 fn queries(store: &Store) -> BoardQuery {
     BoardQuery::new(store.clone())
 }
@@ -195,6 +205,10 @@ impl McpError {
         Self::new(Self::INVALID_PARAMS, "invalid_params", message)
     }
 
+    fn not_found(message: impl Into<String>) -> Self {
+        Self::new(Self::NOT_FOUND, "not_found", message)
+    }
+
     fn method_not_found(message: impl Into<String>) -> Self {
         Self::new(Self::METHOD_NOT_FOUND, "method_not_found", message)
     }
@@ -214,7 +228,7 @@ impl From<OpError> for McpError {
         let message = e.to_string();
         match e {
             OpError::Invalid(_) => Self::invalid_params(message),
-            OpError::NotFound(_) => Self::new(Self::NOT_FOUND, "not_found", message),
+            OpError::NotFound(_) => Self::not_found(message),
             OpError::Forbidden(_) => Self::new(Self::FORBIDDEN, "forbidden", message),
             OpError::Conflict(_) => Self::new(Self::CONFLICT, "conflict", message),
             OpError::Internal(_) => Self::new(Self::INTERNAL, "internal", message),
@@ -238,7 +252,10 @@ fn op_err(e: OpError) -> McpError {
 /// of a trusted agent (see the module docs), so it is deliberately an admin.
 /// Resolved once at startup; other transports pass the actor they authenticated.
 pub async fn local_admin_actor(store: &Store) -> Result<Actor> {
-    let user = store.find_or_create_user("mcp@rungu.local", Some("MCP Bot"), None, &[]).await?;
+    let user = store
+        .find_or_create_user("mcp@rungu.local", Some("MCP Bot"), None, &[])
+        .await
+        .context("creating the local MCP admin user (is the database writable?)")?;
     Ok(Actor { id: user.id, role: UserRole::Admin })
 }
 
@@ -270,12 +287,7 @@ async fn list_posts(params: &Value, store: &Store) -> Result<Value, McpError> {
 
 /// Get a single post by ID.
 async fn get_post(params: &Value, store: &Store) -> Result<Value, McpError> {
-    let id = get_str(params, "id")?;
-    let post = store
-        .get_post(id, None)
-        .await
-        .map_err(|e| format!("Failed to get post: {e}"))?
-        .ok_or_else(|| format!("Post not found: {id}"))?;
+    let post = existing_post(store, get_str(params, "id")?).await?;
     Ok(json!({ "data": post }))
 }
 
@@ -326,6 +338,9 @@ async fn get_changelog(params: &Value, store: &Store) -> Result<Value, McpError>
 /// List comments for a post.
 async fn list_comments(params: &Value, store: &Store) -> Result<Value, McpError> {
     let post_id = get_str(params, "post_id")?;
+    // Same as REST: comments of a post that doesn't exist are a not-found,
+    // not an empty list.
+    existing_post(store, post_id).await?;
     let comments = store.list_comments(post_id).await.map_err(|e| format!("Failed to list comments: {e}"))?;
 
     Ok(json!({ "data": comments }))
@@ -575,11 +590,7 @@ async fn delete_comment(params: &Value, ops: &Operations, actor: &Actor) -> Resu
 async fn list_attachments(params: &Value, store: &Store) -> Result<Value, McpError> {
     let post_id = get_str(params, "post_id")?;
     // Verify post exists (consistent with REST API behavior)
-    store
-        .get_post(post_id, None)
-        .await
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| format!("Post not found: {post_id}"))?;
+    existing_post(store, post_id).await?;
     let attachments = store.list_attachments(post_id).await.map_err(|e| e.to_string())?;
     let total = attachments.len();
     Ok(json!({ "attachments": attachments, "total": total }))
@@ -685,6 +696,16 @@ mod tests {
 
         // The message is unchanged by the code.
         assert!(not_found["error"]["message"].as_str().unwrap().contains("not found"));
+
+        // A missing post is a not-found on every tool that takes one.
+        for (method, params) in [
+            ("get_post", json!({ "id": "missing" })),
+            ("list_comments", json!({ "post_id": "missing" })),
+            ("list_attachments", json!({ "post_id": "missing" })),
+        ] {
+            let missing = call(&ops, method, params).await;
+            assert_eq!(code(&missing), (McpError::NOT_FOUND, "not_found".into()), "{method}");
+        }
     }
 
     /// Blank search is an error, not "the whole board" (shared with REST via BoardQuery).
@@ -694,6 +715,15 @@ mod tests {
         call(&ops, "create_project", json!({ "name": "Acme" })).await;
         let blank = call(&ops, "search_posts", json!({ "slug": "acme", "q": "   " })).await;
         assert_eq!(blank["error"]["code"], McpError::INVALID_PARAMS);
+    }
+
+    /// A JSON-RPC notification (no id) runs the call but gets no response.
+    #[tokio::test]
+    async fn notifications_get_no_response() {
+        let ops = test_ops().await;
+        let input = json!({ "jsonrpc": "2.0", "method": "create_project", "params": { "name": "Quiet" } }).to_string();
+        assert_eq!(handle_message(&input, &ops, &admin(&ops).await).await, "");
+        assert!(ops.store().get_project_by_slug("quiet").await.unwrap().is_some(), "the side effect still ran");
     }
 
     #[tokio::test]

@@ -23,7 +23,14 @@
   used to be `-32603` for everything. Messages are unchanged apart from the
   wording changes noted under #247.
 - MCP `search_posts` with a blank `q` returns an error (`-32602`) instead
-  of the whole board.
+  of the whole board. `get_post`, `list_comments` and `list_attachments`
+  return a not-found error (`-32004`) for a post that doesn't exist; before,
+  `get_post` and `list_attachments` reported an internal error and
+  `list_comments` returned an empty list.
+- `rungu mcp` creates its local admin user when it starts, rather than on
+  the first write, so it needs a writable database. (A SQLite database in
+  WAL mode needs write access to open at all, so this changes nothing in
+  practice.)
 - MCP and architecture docs describe both transports and the real tool
   count (26). The design decision "MCP stdio only" is replaced by "stdio and
   HTTP, actor from the transport".
