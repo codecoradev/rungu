@@ -116,6 +116,18 @@ pub fn auth_routes() -> Router<AppState> {
     auth_routes::auth_routes()
 }
 
+/// OAuth flow routes (`/auth/{provider}/login`, `/auth/{provider}/callback`).
+/// Mount behind the strict auth rate limiter.
+pub fn auth_flow_routes() -> Router<AppState> {
+    auth_routes::auth_flow_routes()
+}
+
+/// Session routes (`/auth/me`, `/auth/providers`, `/auth/logout`).
+/// Called on ordinary page loads; mount behind the general API rate limiter.
+pub fn auth_session_routes() -> Router<AppState> {
+    auth_routes::auth_session_routes()
+}
+
 /// API routes — mounted under `/api`.
 pub fn api_routes() -> Router<AppState> {
     Router::new()
