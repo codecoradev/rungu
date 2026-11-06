@@ -199,6 +199,7 @@ pub async fn get_attachment_file(
         (status = 403, description = "Not authorized"),
         (status = 404, description = "Not found"),
     ),
+    security(("session" = [])),
     tag = "attachments",
 )]
 pub async fn delete_attachment(
