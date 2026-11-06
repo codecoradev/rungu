@@ -365,8 +365,35 @@ async fn create_webhook_validates_the_url_and_generates_a_secret() {
     let created = f.ops.create_webhook(&f.admin, "acme", hook(" https://example.com/h ")).await.unwrap();
     assert_eq!(created.webhook.url, "https://example.com/h");
     assert!(!created.secret.is_empty(), "a secret is generated when none is given");
-    let given = NewWebhook { url: "https://example.com/g", events: Some(" "), secret: Some("s3cret") };
-    assert_eq!(f.ops.create_webhook(&f.admin, "acme", given).await.unwrap().secret, "s3cret");
+    // A supplied secret is used exactly as given; receivers sign with it.
+    let given = NewWebhook { url: "https://example.com/g", events: Some("post.created"), secret: Some(" s3cret") };
+    assert_eq!(f.ops.create_webhook(&f.admin, "acme", given).await.unwrap().secret, " s3cret");
+    let blank_events = NewWebhook { url: "https://example.com/b", events: Some("  "), secret: None };
+    assert!(matches!(f.ops.create_webhook(&f.admin, "acme", blank_events).await, Err(OpError::Invalid(_))));
+}
+
+#[tokio::test]
+async fn create_project_ignores_a_stale_slug_cache() {
+    let f = Fixture::new().await;
+    // Warm the slug cache, then delete the row the way another process (e.g.
+    // `rungu mcp`) would: straight in the database, without this cache seeing it.
+    assert!(f.store().get_project_by_slug("acme").await.unwrap().is_some());
+    sqlx::query("DELETE FROM projects WHERE slug = 'acme'").execute(f.store().pool()).await.unwrap();
+
+    let again = NewProject { name: "Acme", slug: Some("acme"), ..Default::default() };
+    let p = f.ops.create_project(&f.admin, again).await.expect("a stale cache entry must not cause a false conflict");
+    assert_eq!(p.slug, "acme");
+}
+
+#[tokio::test]
+async fn update_project_checks_input_before_existence() {
+    let f = Fixture::new().await;
+    // Admin-only, so the old REST order is kept: an empty body is a 400 even
+    // for an unknown slug.
+    assert!(matches!(
+        f.ops.update_project(&f.admin, "nope", ProjectChanges::default()).await,
+        Err(OpError::Invalid(_))
+    ));
 }
 
 #[tokio::test]

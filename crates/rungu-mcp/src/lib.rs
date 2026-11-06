@@ -503,7 +503,8 @@ async fn create_webhook(params: &Value, ops: &Operations) -> Result<Value, Strin
 async fn delete_webhook(params: &Value, ops: &Operations) -> Result<Value, String> {
     let actor = mcp_actor(ops.store()).await?;
     let id = get_str(params, "id")?;
-    ops.delete_webhook(&actor, id, get_optional_str(params, "slug")).await.map_err(op_err)?;
+    let slug = get_optional_str(params, "slug").filter(|s| !s.is_empty());
+    ops.delete_webhook(&actor, id, slug).await.map_err(op_err)?;
     Ok(json!({ "deleted": true, "id": id }))
 }
 

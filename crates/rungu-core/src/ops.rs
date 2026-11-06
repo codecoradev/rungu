@@ -124,9 +124,9 @@ pub struct ProjectChanges<'a> {
 #[derive(Debug, Clone, Copy, Default)]
 pub struct NewWebhook<'a> {
     pub url: &'a str,
-    /// Absent or blank = all events (`*`).
+    /// Absent = all events (`*`). Present but blank is rejected.
     pub events: Option<&'a str>,
-    /// Absent or blank = a random secret is generated.
+    /// Absent or empty = a random secret is generated; otherwise used as is.
     pub secret: Option<&'a str>,
 }
 
@@ -405,21 +405,31 @@ impl Operations {
         if !is_valid_slug(&slug) {
             return Err(OpError::invalid("Slug must contain only lowercase letters, numbers, and hyphens"));
         }
-        if self.store.get_project_by_slug(&slug).await?.is_some() {
-            return Err(OpError::conflict(format!("A project with slug '{slug}' already exists")));
+        let taken = || OpError::conflict(format!("A project with slug '{slug}' already exists"));
+        // Uncached: the slug cache may still hold a project deleted elsewhere.
+        if self.store.project_slug_exists(&slug).await? {
+            return Err(taken());
         }
-
-        Ok(self.store.create_project(name, &slug, input.description.unwrap_or("")).await?)
+        // A concurrent create can still win between the check and the insert;
+        // its UNIQUE violation is the same conflict, not a server error.
+        match self.store.create_project(name, &slug, input.description.unwrap_or("")).await {
+            Ok(project) => Ok(project),
+            Err(e) if is_unique_violation(&e) => Err(taken()),
+            Err(e) => Err(e.into()),
+        }
     }
 
     pub async fn update_project(&self, actor: &Actor, slug: &str, changes: ProjectChanges<'_>) -> OpResult<Project> {
         actor.require_admin()?;
-        let project = self.existing_project(slug).await?;
-
+        // Admin-only, so checking input before existence leaks nothing.
         if changes.name.is_none() && changes.description.is_none() {
             return Err(OpError::invalid("No fields to update"));
         }
+        if changes.name.is_some_and(|n| n.trim().is_empty()) {
+            return Err(OpError::invalid("Project name cannot be empty"));
+        }
         let name = changes.name.map(validate_project_name).transpose()?;
+        let project = self.existing_project(slug).await?;
 
         Ok(self.store.update_project(&project.id, name, changes.description).await?)
     }
@@ -445,8 +455,14 @@ impl Operations {
         let project = self.existing_project(slug).await?;
 
         let url = validate_new_webhook_url(input.url)?;
-        let events = input.events.map(str::trim).filter(|e| !e.is_empty()).unwrap_or("*");
-        let secret = match input.secret.map(str::trim) {
+        let events = match input.events {
+            None => "*",
+            Some(e) if e.trim().is_empty() => return Err(OpError::invalid("Webhook events cannot be empty")),
+            Some(e) => e,
+        };
+        // A supplied secret is used exactly as given (receivers sign with it);
+        // absent or empty means generate one.
+        let secret = match input.secret {
             Some(s) if !s.is_empty() => s.to_string(),
             _ => uuid::Uuid::new_v4().to_string(),
         };
@@ -575,6 +591,14 @@ fn validate_project_name(name: &str) -> OpResult<&str> {
         return Err(OpError::invalid("Project name must be 100 characters or less"));
     }
     Ok(name)
+}
+
+/// SQLite and Postgres both report a UNIQUE violation in the error text.
+fn is_unique_violation(e: &anyhow::Error) -> bool {
+    e.chain().any(|cause| {
+        let msg = cause.to_string();
+        msg.contains("UNIQUE constraint failed") || msg.contains("duplicate key value")
+    })
 }
 
 fn validate_new_webhook_url(url: &str) -> OpResult<&str> {

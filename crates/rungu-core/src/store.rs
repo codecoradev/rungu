@@ -297,6 +297,18 @@ impl Store {
         Ok(project)
     }
 
+    /// Whether a project with this slug exists, read straight from the
+    /// database. Use this for uniqueness checks: the slug cache can still hold
+    /// a project that another process (e.g. `rungu mcp`) has deleted.
+    pub async fn project_slug_exists(&self, slug: &str) -> Result<bool> {
+        let row = sqlx::query("SELECT 1 AS hit FROM projects WHERE slug = ?")
+            .bind(slug)
+            .fetch_optional(&self.pool)
+            .await
+            .context("Failed to check project slug")?;
+        Ok(row.is_some())
+    }
+
     /// Get a project by ID.
     pub async fn get_project_by_id(&self, id: &str) -> Result<Option<Project>> {
         let row = sqlx::query("SELECT id, slug, name, description, created_at FROM projects WHERE id = ?")
@@ -1283,7 +1295,6 @@ impl Store {
         Ok(attachments)
     }
 
-    /// Get a single attachment by ID (returns storage_path too).
     /// Storage paths of every attachment on every post in a project, so the
     /// files can be removed when the project is deleted (the FK cascade only
     /// removes the rows).
@@ -1298,6 +1309,7 @@ impl Store {
         Ok(rows.iter().map(|r| r.get("storage_path")).collect())
     }
 
+    /// Get a single attachment by ID (returns storage_path too).
     pub async fn get_attachment(&self, attachment_id: &str) -> Result<Option<(rungu_proto::Attachment, String)>> {
         let row = sqlx::query(
             "SELECT id, post_id, filename, mime, size, storage_path, created_by, created_at \
