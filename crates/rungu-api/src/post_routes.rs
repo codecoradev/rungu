@@ -6,8 +6,9 @@ use axum::response::IntoResponse;
 use axum::{Json, Router};
 use rungu_auth::CurrentUser;
 use rungu_core::Actor;
-use rungu_core::ops::{NewPost, PostChanges, parse_category, parse_sort, parse_status};
-use rungu_proto::{CreatePostBody, PostDetail, PostSort, PostStatus, UpdatePostBody};
+use rungu_core::ops::{NewPost, PostChanges};
+use rungu_core::query::{BoardFilters, PageRequest, PostPage};
+use rungu_proto::{CreatePostBody, PostDetail, UpdatePostBody};
 use serde::Deserialize;
 use utoipa::{IntoParams, ToSchema};
 
@@ -66,51 +67,20 @@ pub async fn list_posts(
     Query(query): Query<ListPostsQuery>,
     user: rungu_auth::OptionalCurrentUser,
 ) -> Result<impl IntoResponse, ApiError> {
-    let project =
-        state.store.get_project_by_slug(&slug).await?.ok_or_else(|| ApiError::not_found("Project not found"))?;
+    let filters = BoardFilters {
+        sort: query.sort.as_deref(),
+        status: query.status.as_deref(),
+        category: query.category.as_deref(),
+        q: query.q.as_deref(),
+    };
+    let viewer = user.user.as_ref().map(|cu| cu.id.as_str());
+    let (project, posts) =
+        state.ops.queries().board(&slug, filters, page_request(query.page, query.per_page), viewer).await?;
 
     // Analytics: board view (#186) — fire-and-forget, aggregate only.
     crate::analytics::capture(&state.store, &project.id, None, "board_view");
 
-    let page = query.page.unwrap_or(1).clamp(1, 10_000_000);
-    let per_page = query.per_page.unwrap_or(20).clamp(1, 100);
-    let offset = (page - 1) * per_page;
-
-    // Validate filter values explicitly rather than silently dropping unknown
-    // values — otherwise a typo like `?status=opennnn` returns 200 with unfiltered
-    // results and hides client bugs. Mirrors update_post_status behavior.
-    let status = match query.status.as_deref() {
-        Some(s) => Some(parse_status(s).ok_or_else(|| ApiError::bad_request("Invalid status filter"))?),
-        None => None,
-    };
-    let category = match query.category.as_deref() {
-        Some(c) => Some(parse_category(c).ok_or_else(|| ApiError::bad_request("Invalid category filter"))?),
-        None => None,
-    };
-
-    let params = rungu_proto::ListPostsParams {
-        project_id: &project.id,
-        sort: parse_sort(query.sort.as_deref()),
-        status,
-        category,
-        query: query.q.as_deref(),
-        since: None,
-        user_id: user.user.as_ref().map(|cu| cu.id.as_str()),
-        offset,
-        limit: per_page,
-    };
-
-    let (posts, total) = state.store.list_posts(params).await?;
-
-    Ok(Json(serde_json::json!({
-        "data": posts,
-        "pagination": {
-            "page": page,
-            "per_page": per_page,
-            "total": total,
-            "total_pages": ((total as f64 / per_page as f64).ceil() as i64).max(1),
-        }
-    })))
+    Ok(Json(paginated(posts)))
 }
 
 /// Create a new post in a project.
@@ -271,57 +241,18 @@ pub async fn get_project_roadmap(
     Path(slug): Path<String>,
     Query(query): Query<RoadmapQuery>,
 ) -> Result<impl IntoResponse, ApiError> {
-    let project =
-        state.store.get_project_by_slug(&slug).await?.ok_or_else(|| ApiError::not_found("Project not found"))?;
-
-    // Clamp per-bucket limit. 10 keeps the board readable; 50 is the ceiling
-    // so a single API call can never return more than 150 post rows.
-    let per_bucket = query.limit.unwrap_or(10).clamp(1, 50);
-
-    // Fetch each committed-work bucket. We reuse `list_posts` so the roadmap
-    // inherits its parameter binding, sort, and (FTS5/LIKE) search behavior.
-    // Three round-trips is acceptable — these are indexed status scans, and
-    // it keeps the store API the single source of truth for post queries.
-    let planned = fetch_bucket(&state, &project.id, PostStatus::Planned, per_bucket).await?;
-    let in_progress = fetch_bucket(&state, &project.id, PostStatus::InProgress, per_bucket).await?;
-    let done = fetch_bucket(&state, &project.id, PostStatus::Done, per_bucket).await?;
-
+    let roadmap = state.ops.queries().roadmap(&slug, query.limit).await?;
     Ok(Json(serde_json::json!({
         "data": {
-            "planned": planned.0,
-            "planned_total": planned.1,
-            "in_progress": in_progress.0,
-            "in_progress_total": in_progress.1,
-            "done": done.0,
-            "done_total": done.1,
-            "limit": per_bucket,
+            "planned": roadmap.planned.posts,
+            "planned_total": roadmap.planned.total,
+            "in_progress": roadmap.in_progress.posts,
+            "in_progress_total": roadmap.in_progress.total,
+            "done": roadmap.done.posts,
+            "done_total": roadmap.done.total,
+            "limit": roadmap.limit,
         }
     })))
-}
-
-/// Fetch a single roadmap bucket: the top-N most-voted posts for `status`.
-///
-/// Returns `(posts, total_matching)` so the UI can show "12 planned" even when
-/// only the top 10 are rendered.
-async fn fetch_bucket(
-    state: &AppState,
-    project_id: &str,
-    status: PostStatus,
-    limit: i64,
-) -> Result<(Vec<PostDetail>, i64), ApiError> {
-    let params = rungu_proto::ListPostsParams {
-        project_id,
-        sort: PostSort::MostVotes,
-        status: Some(status),
-        category: None,
-        query: None,
-        since: None,
-        user_id: None,
-        offset: 0,
-        limit,
-    };
-    let (posts, total) = state.store.list_posts(params).await?;
-    Ok((posts, total))
 }
 
 // ── Changelog ──────────────────────────────────────────────────────────
@@ -362,48 +293,9 @@ pub async fn get_project_changelog(
     Path(slug): Path<String>,
     Query(query): Query<ChangelogQuery>,
 ) -> Result<impl IntoResponse, ApiError> {
-    let project =
-        state.store.get_project_by_slug(&slug).await?.ok_or_else(|| ApiError::not_found("Project not found"))?;
-
-    let page = query.page.unwrap_or(1).clamp(1, 10_000_000);
-    let per_page = query.per_page.unwrap_or(20).clamp(1, 100);
-    let offset = (page - 1) * per_page;
-
-    // Parse the optional `since` bound. A malformed timestamp must 400, not
-    // silently behave as "no filter" — otherwise a client bug (wrong timezone
-    // format, stray space) would silently return the full history.
-    let since = match query.since.as_deref() {
-        Some(s) => Some(
-            chrono::DateTime::parse_from_rfc3339(s)
-                .map(|dt| dt.with_timezone(&chrono::Utc))
-                .map_err(|_| ApiError::bad_request("Invalid `since` timestamp; expected RFC3339"))?,
-        ),
-        None => None,
-    };
-
-    let params = rungu_proto::ListPostsParams {
-        project_id: &project.id,
-        sort: PostSort::RecentlyUpdated,
-        status: Some(PostStatus::Done),
-        category: None,
-        query: None,
-        since,
-        user_id: None,
-        offset,
-        limit: per_page,
-    };
-
-    let (posts, total) = state.store.list_posts(params).await?;
-
-    Ok(Json(serde_json::json!({
-        "data": posts,
-        "pagination": {
-            "page": page,
-            "per_page": per_page,
-            "total": total,
-            "total_pages": ((total as f64 / per_page as f64).ceil() as i64).max(1),
-        }
-    })))
+    let posts =
+        state.ops.queries().changelog(&slug, query.since.as_deref(), page_request(query.page, query.per_page)).await?;
+    Ok(Json(paginated(posts)))
 }
 
 // ── Official team response (#205) ──────────────────────────────────────
@@ -483,7 +375,7 @@ pub async fn get_similar_posts(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> Result<impl IntoResponse, ApiError> {
-    let similar = state.store.find_similar_posts(&id, 3).await?;
+    let similar = state.ops.queries().similar_to_post(&id).await?;
     Ok(Json(serde_json::json!({ "data": similar })))
 }
 
@@ -512,12 +404,28 @@ pub async fn get_similar_by_title(
     Path(slug): Path<String>,
     Query(query): Query<SimilarQuery>,
 ) -> Result<impl IntoResponse, ApiError> {
-    let project =
-        state.store.get_project_by_slug(&slug).await?.ok_or_else(|| ApiError::not_found("Project not found"))?;
-    // Titles are capped at 200 chars on create; ignore anything longer.
-    let title: String = query.title.chars().take(200).collect();
-    let similar = state.store.find_similar_by_title(&project.id, &title, None, 3).await?;
+    let similar = state.ops.queries().similar_to_title(&slug, &query.title).await?;
     Ok(Json(serde_json::json!({ "data": similar })))
+}
+
+// ── Encoding helpers ───────────────────────────────────────────────────
+
+fn page_request(page: Option<i64>, per_page: Option<i64>) -> PageRequest {
+    PageRequest { page, per_page }
+}
+
+/// The REST shape of a [`PostPage`]: `{ data, pagination }`.
+fn paginated(posts: PostPage) -> serde_json::Value {
+    let total_pages = posts.total_pages();
+    serde_json::json!({
+        "data": posts.posts,
+        "pagination": {
+            "page": posts.page,
+            "per_page": posts.per_page,
+            "total": posts.total,
+            "total_pages": total_pages,
+        }
+    })
 }
 
 // ── Request bodies ─────────────────────────────────────────────────────

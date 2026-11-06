@@ -38,8 +38,7 @@ pub async fn get_project_counts(
     State(state): State<AppState>,
     Path(slug): Path<String>,
 ) -> Result<impl IntoResponse, ApiError> {
-    let project =
-        state.store.get_project_by_slug(&slug).await?.ok_or_else(|| ApiError::not_found("Project not found"))?;
+    let project = state.ops.queries().project(&slug).await?;
     let stats = state.store.project_stats(&project.id).await?;
     Ok(Json(serde_json::json!({
         "data": {
@@ -106,8 +105,7 @@ pub async fn get_project(
     State(state): State<AppState>,
     Path(slug): Path<String>,
 ) -> Result<impl IntoResponse, ApiError> {
-    let project =
-        state.store.get_project_by_slug(&slug).await?.ok_or_else(|| ApiError::not_found("Project not found"))?;
+    let project = state.ops.queries().project(&slug).await?;
 
     Ok(Json(serde_json::json!({ "data": project })))
 }

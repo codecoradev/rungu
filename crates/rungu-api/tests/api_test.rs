@@ -945,3 +945,72 @@ async fn test_similar_by_title_unknown_project_returns_404() {
     let (status, _) = similar_titles(app, "/projects/nope/similar?title=dark%20mode").await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
+
+// ── REST/MCP parity for the read side (#247) ──────────────────────────
+
+async fn rest_json(app: axum::Router, uri: &str) -> serde_json::Value {
+    let response = app.oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap()).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK, "{uri}");
+    let bytes = axum::body::to_bytes(response.into_body(), 1024 * 1024).await.unwrap();
+    serde_json::from_slice(&bytes).unwrap()
+}
+
+async fn mcp_json(ops: &rungu_core::Operations, method: &str, params: serde_json::Value) -> serde_json::Value {
+    let input = serde_json::json!({ "jsonrpc": "2.0", "method": method, "params": params, "id": 1 }).to_string();
+    let out: serde_json::Value = serde_json::from_str(&rungu_mcp::handle_message(&input, ops).await).unwrap();
+    out["result"].clone()
+}
+
+fn ids(posts: &serde_json::Value) -> Vec<String> {
+    posts.as_array().unwrap().iter().map(|p| p["id"].as_str().unwrap().to_string()).collect()
+}
+
+#[tokio::test]
+async fn test_rest_and_mcp_return_the_same_posts() {
+    let (app, store) = setup_app().await;
+    let user = store.find_or_create_user("u@t.com", None, None, &[]).await.unwrap();
+    let project = store.get_project_by_slug("test-app").await.unwrap().unwrap();
+    for i in 0..5 {
+        let p = store
+            .create_post(&project.id, &format!("Planned {i}"), "d", PostCategory::Feature, &user.id)
+            .await
+            .unwrap();
+        store.update_post_status(&p.id, rungu_proto::PostStatus::Planned).await.unwrap();
+    }
+    let done = store.create_post(&project.id, "Shipped", "d", PostCategory::Bug, &user.id).await.unwrap();
+    store.update_post_status(&done.id, rungu_proto::PostStatus::Done).await.unwrap();
+    let ops = rungu_core::Operations::new(
+        store.clone(),
+        std::sync::Arc::new(rungu_core::NoopStorage),
+        rungu_core::EventBus::default(),
+    );
+
+    // Same filters, same page → same posts in the same order.
+    let rest = rest_json(app.clone(), "/projects/test-app/posts?status=planned&per_page=2&page=2").await;
+    let mcp = mcp_json(
+        &ops,
+        "list_posts",
+        serde_json::json!({ "slug": "test-app", "status": "planned", "limit": 2, "page": 2 }),
+    )
+    .await;
+    assert_eq!(ids(&rest["data"]), ids(&mcp["data"]));
+    assert_eq!(rest["pagination"]["total"], mcp["total"]);
+    assert_eq!(rest["pagination"]["total_pages"], mcp["total_pages"]);
+
+    let rest = rest_json(app.clone(), "/projects/test-app/roadmap?limit=3").await;
+    let mcp = mcp_json(&ops, "get_roadmap", serde_json::json!({ "slug": "test-app", "limit": 3 })).await;
+    assert_eq!(rest["data"], mcp["data"]);
+
+    let rest = rest_json(app, "/projects/test-app/changelog").await;
+    let mcp = mcp_json(&ops, "get_changelog", serde_json::json!({ "slug": "test-app" })).await;
+    assert_eq!(ids(&rest["data"]), ids(&mcp["data"]));
+    assert_eq!(ids(&mcp["data"]), vec![done.id]);
+}
+
+#[tokio::test]
+async fn test_similar_for_unknown_post_is_404() {
+    let (app, _store) = setup_app().await;
+    let response =
+        app.oneshot(Request::builder().uri("/posts/no-such-post/similar").body(Body::empty()).unwrap()).await.unwrap();
+    assert_eq!(response.status(), StatusCode::NOT_FOUND, "used to be a 500");
+}

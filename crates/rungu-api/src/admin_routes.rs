@@ -115,8 +115,7 @@ pub async fn project_stats(
 ) -> Result<impl IntoResponse, ApiError> {
     ApiError::require_admin(&user)?;
 
-    let project =
-        state.store.get_project_by_slug(&slug).await?.ok_or_else(|| ApiError::not_found("Project not found"))?;
+    let project = state.ops.queries().project(&slug).await?;
 
     let stats = state.store.project_stats(&project.id).await?;
 
@@ -150,8 +149,7 @@ pub async fn project_analytics(
     // Authz BEFORE any query validation per repo convention (#162).
     ApiError::require_admin(&user)?;
 
-    let project =
-        state.store.get_project_by_slug(&slug).await?.ok_or_else(|| ApiError::not_found("Project not found"))?;
+    let project = state.ops.queries().project(&slug).await?;
 
     let days = query.days.unwrap_or(30).clamp(0, 365);
     let totals = state.store.analytics_totals(&project.id, days).await?;
@@ -199,8 +197,7 @@ pub async fn project_analytics_top(
 ) -> Result<impl IntoResponse, ApiError> {
     ApiError::require_admin(&user)?;
 
-    let project =
-        state.store.get_project_by_slug(&slug).await?.ok_or_else(|| ApiError::not_found("Project not found"))?;
+    let project = state.ops.queries().project(&slug).await?;
 
     let days = query.days.unwrap_or(30).clamp(0, 365);
     let limit = query.limit.unwrap_or(10).clamp(1, 50);
