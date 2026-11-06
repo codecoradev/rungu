@@ -7,6 +7,7 @@
     import PostCard from '$lib/components/PostCard.svelte';
     import PostForm from '$lib/components/PostForm.svelte';
     import SortTabs from '$lib/components/SortTabs.svelte';
+    import BoardTabs from '$lib/components/BoardTabs.svelte';
     import { Button } from '$lib/components/ui/button';
     import { Input } from '$lib/components/ui/input';
     import * as Card from '$lib/components/ui/card';
@@ -309,44 +310,19 @@
                     <p class="mt-1 text-sm text-muted-foreground">{project.description}</p>
                 {/if}
             </div>
+            <!-- Desktop only: below lg the sticky toolbar carries this action,
+                 so showing both put two New Post buttons on one screen. -->
             {#if authed}
-                <Button class="max-sm:h-11" onclick={() => (showForm = true)}>
+                <Button class="hidden lg:inline-flex" onclick={() => (showForm = true)}>
                     <Plus class="size-4" aria-hidden="true" /> New Post
                 </Button>
+            {:else}
+                <Button class="hidden lg:inline-flex" href={loginUrl}>Login to post</Button>
             {/if}
         </div>
     </div>
 
-    <!-- View tabs (Featurebase pattern): the board's three surfaces share one
-         nav row so the list context is explicit and the sidebar stays content-only. -->
-    <nav aria-label="Board views" class="mb-4 border-b">
-        <div class="flex gap-1 overflow-x-auto" role="tablist">
-            <a
-                href="/board/{slug}"
-                role="tab"
-                aria-selected="true"
-                class="whitespace-nowrap border-b-2 border-primary px-3 py-2 text-sm font-medium text-foreground max-sm:h-11 max-sm:inline-flex max-sm:items-center"
-            >
-                Feedback
-            </a>
-            <a
-                href="/board/{slug}/roadmap"
-                role="tab"
-                aria-selected="false"
-                class="whitespace-nowrap border-b-2 border-transparent px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground max-sm:h-11 max-sm:inline-flex max-sm:items-center"
-            >
-                Roadmap
-            </a>
-            <a
-                href="/board/{slug}/changelog"
-                role="tab"
-                aria-selected="false"
-                class="whitespace-nowrap border-b-2 border-transparent px-3 py-2 text-sm text-muted-foreground transition-colors hover:text-foreground max-sm:h-11 max-sm:inline-flex max-sm:items-center"
-            >
-                Changelog
-            </a>
-        </div>
-    </nav>
+    <BoardTabs {slug} current="feedback" />
 
     <!-- Mobile action toolbar: sticky, replaces the desktop sidebar below lg.
          Navigation lives in the view tabs; this row carries New Post + Filters
@@ -562,15 +538,7 @@
              sticky toolbar's chip sliders). Navigation lives in the view tabs;
              posting opens the dialog. -->
         <div class="hidden min-w-0 space-y-4 lg:block">
-            {#if !authed}
-                <Card.Root>
-                    <Card.Content class="pt-6 text-center text-sm text-muted-foreground">
-                        <a href={loginUrl} class="font-medium text-primary-text hover:underline">Login</a> to post and vote
-                    </Card.Content>
-                </Card.Root>
-            {/if}
-
-            <Card.Root class="p-3">
+            <Card.Root class="gap-2 p-3">
                 <h2 class="mb-2 text-xs font-semibold uppercase text-muted-foreground">Categories</h2>
                 <div class="flex flex-col gap-1">
                     {#each categoryOptions as cat (cat.value)}
@@ -590,7 +558,7 @@
                 </div>
             </Card.Root>
 
-            <Card.Root class="p-3">
+            <Card.Root class="gap-2 p-3">
                 <h2 class="mb-2 text-xs font-semibold uppercase text-muted-foreground">Status</h2>
                 <div class="flex flex-col gap-1">
                     {#each statusOptions as st (st.value)}

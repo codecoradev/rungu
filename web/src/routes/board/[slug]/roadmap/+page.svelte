@@ -7,6 +7,7 @@
     import { Button } from '$lib/components/ui/button';
     import * as Card from '$lib/components/ui/card';
     import { Skeleton } from '$lib/components/ui/skeleton';
+    import BoardTabs from '$lib/components/BoardTabs.svelte';
 
     let { params } = $props();
     let slug = $derived(params.slug);
@@ -67,12 +68,13 @@
     <title>{(project ? `${project.name} · Roadmap` : 'Roadmap') + ' · ' + branding.value.brandName}</title>
 </svelte:head>
 
-<div class="mx-auto max-w-7xl px-4 py-8">
+<!-- The layout <main> already sets width and padding; no second container. -->
+<div>
     <!-- Header -->
-    <div class="mb-6 flex items-center justify-between gap-4">
+    <div class="mb-4 flex items-center justify-between gap-4">
         <div>
-            <Button variant="link" size="sm" href="/board/{slug}" class="max-sm:h-11 mb-1 px-0 text-muted-foreground">
-                ← Back to board
+            <Button variant="link" size="sm" href="/" class="max-sm:h-11 mb-1 px-0 text-muted-foreground">
+                ← All boards
             </Button>
             <h1 class="text-2xl font-bold tracking-tight">
                 {project ? project.name : 'Roadmap'}
@@ -82,6 +84,8 @@
             {/if}
         </div>
     </div>
+
+    <BoardTabs {slug} current="roadmap" />
 
     {#if loading}
         <!-- Skeleton: three columns of placeholder cards -->
@@ -130,7 +134,8 @@
                         </p>
                     {:else}
                         {#each roadmap[col.key] as post (post.id)}
-                            <PostCard {post} {slug} />
+                            <!-- The column header already names the status. -->
+                            <PostCard {post} {slug} showStatus={false} />
                         {/each}
                     {/if}
                 </div>

@@ -7,6 +7,7 @@
     import { Button } from '$lib/components/ui/button';
     import * as Card from '$lib/components/ui/card';
     import { Skeleton } from '$lib/components/ui/skeleton';
+    import BoardTabs from '$lib/components/BoardTabs.svelte';
 
     let { params } = $props();
     let slug = $derived(params.slug);
@@ -96,11 +97,12 @@
     <title>{(project ? `${project.name} · Changelog` : 'Changelog') + ' · ' + branding.value.brandName}</title>
 </svelte:head>
 
-<div class="mx-auto max-w-3xl px-4 py-8">
+<!-- The layout <main> already sets width and padding; no second container. -->
+<div class="max-w-3xl">
     <!-- Header -->
-    <div class="mb-6">
-        <Button variant="link" size="sm" href="/board/{slug}" class="max-sm:h-11 mb-1 px-0 text-muted-foreground">
-            ← Back to board
+    <div class="mb-4">
+        <Button variant="link" size="sm" href="/" class="max-sm:h-11 mb-1 px-0 text-muted-foreground">
+            ← All boards
         </Button>
         <h1 class="text-2xl font-bold tracking-tight">
             {project ? project.name : 'Changelog'}
@@ -109,6 +111,8 @@
             What's shipped — updated as feedback moves to <span class="font-medium">done</span>.
         </p>
     </div>
+
+    <BoardTabs {slug} current="changelog" />
 
     {#if loading}
         <div class="space-y-4">

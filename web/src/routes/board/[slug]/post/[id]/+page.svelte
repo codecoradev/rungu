@@ -231,26 +231,30 @@
         <Card.Header class="items-stretch gap-0">
             <div class="min-w-0" data-slot="card-action">
                 <div class="mb-2 flex flex-wrap items-center gap-2">
-                    <CategoryBadge category={post.category} />
-                    {#if canEditStatus}
+                    <!-- Editors get one control per field (the select shows the
+                         current value); everyone else sees the read-only badge. -->
+                    {#if !canEditStatus}
+                        <CategoryBadge category={post.category} />
+                    {:else}
                         <select
                             value={post.category}
                             onchange={handleCategoryChange}
                             aria-label="Change category"
-                            class="rounded-md border border-input bg-background px-2 py-0.5 text-base capitalize sm:text-xs"
+                            class="h-11 rounded-md border border-input bg-background px-2 text-base capitalize sm:h-7 sm:text-xs"
                         >
                             {#each categoryOptions as c (c)}
                                 <option value={c} class="capitalize">{c}</option>
                             {/each}
                         </select>
                     {/if}
-                    <StatusBadge status={post.status} />
-                    {#if canEditStatus}
+                    {#if !canEditStatus}
+                        <StatusBadge status={post.status} />
+                    {:else}
                         <select
                             value={post.status}
                             onchange={handleStatusChange}
                             aria-label="Change status"
-                            class="rounded-md border border-input bg-background px-2 py-0.5 text-base capitalize sm:text-xs"
+                            class="h-11 rounded-md border border-input bg-background px-2 text-base capitalize sm:h-7 sm:text-xs"
                         >
                             {#each statusOptions as s (s)}
                                 <option value={s} class="capitalize">{s.replace('_', ' ')}</option>
@@ -271,12 +275,18 @@
         </Card.Header>
         {#if post.description}
             <Card.Content>
-                <div class="whitespace-pre-wrap text-sm leading-relaxed text-muted-foreground">
+                <div class="whitespace-pre-wrap text-sm leading-relaxed text-foreground">
                     {post.description}
                 </div>
             </Card.Content>
         {/if}
     </Card.Root>
+
+    <!-- Attachments belong to the post body, so they sit directly under it
+         (they used to float between the team response and the comments). -->
+    <section class="mt-4" aria-label="Attachments">
+        <AttachmentGallery postId={post.id} canEdit={!!user && (user.id === post.created_by || user.role === 'admin')} />
+    </section>
 
     <!-- Inline similar posts (#206): visible dedup between body and comments. -->
     {#if similar.length > 0}
@@ -331,10 +341,6 @@
         </section>
     {/if}
 
-    <section class="mt-4">
-        <AttachmentGallery postId={post.id} canEdit={!!user && (user.id === post.created_by || user.role === 'admin')} />
-    </section>
-
     <section class="mt-6">
         <h2 class="mb-4 text-sm font-semibold">Comments ({comments.length})</h2>
 
@@ -386,6 +392,7 @@
         <CommentThread
             {comments}
             currentUserId={user?.id}
+            pinnedId={official?.id}
             onreply={user ? startReply : undefined}
             ondelete={handleDeleteComment}
         >

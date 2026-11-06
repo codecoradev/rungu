@@ -6,7 +6,16 @@
     import MessageSquare from '@lucide/svelte/icons/message-square';
     import { timeAgo } from '$lib/utils';
 
-    let { post, slug }: { post: PostDetail; slug: string } = $props();
+    let {
+        post,
+        slug,
+        showStatus = true,
+    }: {
+        post: PostDetail;
+        slug: string;
+        /** Hide the status badge where the context already states it (roadmap columns). */
+        showStatus?: boolean;
+    } = $props();
 </script>
 
 <!--
@@ -24,9 +33,11 @@
     <div class="min-w-0 flex-1">
         <div class="mb-1 flex items-center gap-2">
             <CategoryBadge category={post.category} />
-            <StatusBadge status={post.status} />
+            {#if showStatus}
+                <StatusBadge status={post.status} />
+            {/if}
         </div>
-        <h2 class="truncate text-[length:var(--board-title-size)] font-semibold">
+        <h2 class="line-clamp-2 break-words text-[length:var(--board-title-size)] leading-snug font-semibold">
             <a
                 href={`/board/${slug}/post/${post.id}`}
                 title={post.title}

@@ -13,19 +13,20 @@
 </script>
 
 <!--
-    Segmented sort tabs (#203): obvious selected state driven by #199 tokens
-    (--sort-tab-*). role="tablist"/"tab" with aria-selected; height bumps to
-    the 44px touch minimum below sm.
+    Sort control (#203). A row of toggle buttons (aria-pressed) from sm up,
+    styled by the #199 --sort-tab-* tokens. They are not ARIA tabs: there is
+    no tabpanel and no arrow-key model, so role="tab" promised behaviour the
+    control never had. Below sm, four pills overflowed the row and cut off
+    the last option, so phones get a native select instead.
 -->
-<div role="tablist" aria-label="Sort posts" class="flex items-center gap-1 overflow-x-auto">
+<div role="group" aria-label="Sort posts" class="hidden items-center gap-1 sm:flex">
     {#each options as opt (opt.value)}
         <button
             type="button"
-            role="tab"
-            aria-selected={value === opt.value}
+            aria-pressed={value === opt.value}
             onclick={() => onchange(opt.value)}
             class={cn(
-                'flex min-h-[var(--vote-target-min)] shrink-0 items-center whitespace-nowrap rounded-[var(--sort-tab-radius)] px-3 sm:min-h-[var(--sort-tab-height)]',
+                'flex min-h-[var(--sort-tab-height)] shrink-0 items-center whitespace-nowrap rounded-[var(--sort-tab-radius)] px-3',
                 'text-sm font-medium transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring',
                 value === opt.value
                     ? 'bg-[var(--sort-tab-active-bg)] text-[var(--sort-tab-active-fg)]'
@@ -36,3 +37,16 @@
         </button>
     {/each}
 </div>
+
+<label class="flex items-center gap-2 text-sm text-muted-foreground sm:hidden">
+    <span>Sort</span>
+    <select
+        {value}
+        onchange={(e) => onchange(e.currentTarget.value)}
+        class="h-11 rounded-md border border-input bg-background px-3 text-base text-foreground"
+    >
+        {#each options as opt (opt.value)}
+            <option value={opt.value}>{opt.label}</option>
+        {/each}
+    </select>
+</label>

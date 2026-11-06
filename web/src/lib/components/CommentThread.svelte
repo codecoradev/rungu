@@ -3,16 +3,20 @@
     import type { Snippet } from 'svelte';
     import { timeAgo } from '$lib/utils';
     import { Button } from '$lib/components/ui/button';
+    import ShieldCheck from '@lucide/svelte/icons/shield-check';
 
     let {
         comments,
         currentUserId,
+        pinnedId,
         onreply,
         ondelete,
         commentActions,
     }: {
         comments: Comment[];
         currentUserId?: string;
+        /** Comment pinned as the official team response (#205); labelled in the thread. */
+        pinnedId?: string;
         onreply?: (parentId: string) => void;
         ondelete?: (id: string) => void;
         /** Optional extra per-comment actions (e.g. admin "official response" pin, #205). */
@@ -56,7 +60,7 @@
                 ? 'rounded-lg border border-border bg-card p-4'
                 : 'rounded-lg bg-muted p-3'}
         >
-            <div class="flex items-center gap-2 text-sm">
+            <div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
                 <div
                     class={depth === 0
                         ? 'flex size-8 items-center justify-center rounded-full bg-muted text-xs font-medium text-muted-foreground'
@@ -66,8 +70,15 @@
                 </div>
                 <span class="font-medium">{displayName(comment)}</span>
                 <span class="text-muted-foreground">· {timeAgo(comment.created_at)}</span>
+                {#if pinnedId === comment.id}
+                    <!-- Same text is pinned above the thread; say so, so it
+                         doesn't read as an accidental duplicate. -->
+                    <span class="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary-text">
+                        <ShieldCheck class="size-3" aria-hidden="true" /> Pinned as official response
+                    </span>
+                {/if}
             </div>
-            <p class="mt-1.5 whitespace-pre-wrap text-sm text-muted-foreground">{comment.content}</p>
+            <p class="mt-1.5 whitespace-pre-wrap text-sm text-foreground">{comment.content}</p>
             <div class="mt-2 flex flex-wrap gap-2">
                 {#if onreply}
                     <Button variant="ghost" size="xs" onclick={() => onreply(comment.id)}>
