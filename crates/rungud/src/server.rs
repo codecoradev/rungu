@@ -81,6 +81,12 @@ pub async fn serve(config: Config, pool: sqlx::AnyPool, is_sqlite: bool, listen:
         info!("MCP OAuth: accepting tokens from {} for {}", oauth.issuer(), oauth.resource());
     }
 
+    let oidc = rungu_api::oidc_login::OidcLogin::from_env(&config.auth.app_url, http_client.clone())
+        .map_err(|e| anyhow::anyhow!(e))?;
+    if let Some(oidc) = &oidc {
+        info!("OIDC login enabled: \"{}\"", oidc.label());
+    }
+
     let email = rungu_api::email::EmailConfig::from_env();
     info!("Email notifications: {}", email.describe());
     let state = AppState::new(
@@ -93,7 +99,8 @@ pub async fn serve(config: Config, pool: sqlx::AnyPool, is_sqlite: bool, listen:
         agent_user_id,
     )
     .with_email(email)
-    .with_mcp(mcp);
+    .with_mcp(mcp)
+    .with_oidc(oidc);
 
     // CORS — secure by default.
     // If RUNGU_CORS_ORIGINS is empty, only allow the APP_URL origin.

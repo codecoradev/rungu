@@ -15,6 +15,7 @@ pub mod mcp_oauth;
 pub mod meta;
 pub mod notification_routes;
 pub mod oauth;
+pub mod oidc_login;
 pub mod openapi;
 pub mod post_routes;
 pub mod project_routes;
@@ -75,6 +76,8 @@ pub struct AppState {
     /// OAuth issuer and extra origins for `/mcp` (off by default; see
     /// [`AppState::with_mcp`]).
     pub mcp: mcp_oauth::McpSettings,
+    /// Generic OIDC login provider (Gatehouse), off unless `OIDC_ISSUER` is set.
+    pub oidc: Option<Arc<oidc_login::OidcLogin>>,
 }
 
 impl AppState {
@@ -91,12 +94,29 @@ impl AppState {
     ) -> Self {
         let events = default_event_bus(&store, &http_client, &config, email::EmailConfig::Disabled);
         let ops = Operations::new(store.clone(), storage.clone(), events);
-        Self { store, ops, config, http_client, storage, branding, license, agent_user_id, mcp: Default::default() }
+        Self {
+            store,
+            ops,
+            config,
+            http_client,
+            storage,
+            branding,
+            license,
+            agent_user_id,
+            mcp: Default::default(),
+            oidc: None,
+        }
     }
 
     /// Enable OAuth access and extra browser origins for `/mcp` (#253).
     pub fn with_mcp(mut self, mcp: mcp_oauth::McpSettings) -> Self {
         self.mcp = mcp;
+        self
+    }
+
+    /// Enable the generic OIDC login provider (#267).
+    pub fn with_oidc(mut self, oidc: Option<Arc<oidc_login::OidcLogin>>) -> Self {
+        self.oidc = oidc;
         self
     }
 

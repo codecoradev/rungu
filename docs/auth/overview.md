@@ -38,6 +38,7 @@ If a user sees "Email is not verified by the provider," ask them to verify their
 | Google | [Google OAuth Setup](/auth/google) |
 | GitHub | [GitHub OAuth Setup](/auth/github) |
 | Keycloak | [Keycloak Setup](/auth/keycloak) |
+| OpenID Connect (e.g. Gatehouse) | [OpenID Connect Setup](/auth/oidc) |
 
 ## ENV Reference
 
@@ -54,6 +55,9 @@ KEYCLOAK_URL=https://auth.example.com      # Keycloak (optional)
 KEYCLOAK_REALM=myorg
 KEYCLOAK_CLIENT_ID=rungu
 KEYCLOAK_CLIENT_SECRET=xxx
+OIDC_ISSUER=https://identity.example.com/api/auth   # OpenID Connect (optional)
+OIDC_CLIENT_ID=rungu
+OIDC_CLIENT_SECRET=xxx
 ```
 
 ## User Roles

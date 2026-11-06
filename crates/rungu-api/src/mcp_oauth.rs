@@ -486,7 +486,7 @@ fn parse_jwks(doc: &Value) -> Option<JwkSet> {
 }
 
 /// HTTPS is required, except for loopback (local development and tests).
-fn require_https(url: &Url, name: &str) -> Result<(), String> {
+pub(crate) fn require_https(url: &Url, name: &str) -> Result<(), String> {
     let loopback = matches!(url.host_str(), Some("localhost" | "127.0.0.1" | "[::1]"));
     if url.scheme() == "https" || (url.scheme() == "http" && loopback) {
         Ok(())

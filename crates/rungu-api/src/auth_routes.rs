@@ -1,7 +1,7 @@
 //! Auth routes — login, callback, logout, me, providers.
 //!
 //! Full OAuth2 Authorization Code flow with CSRF protection.
-//! Supports Google, GitHub, and Keycloak providers.
+//! Supports Google, GitHub, Keycloak and a generic OpenID Connect provider.
 
 use axum::extract::{Path, Query, State};
 use axum::http::header::SET_COOKIE;
@@ -26,6 +26,11 @@ const SESSION_COOKIE: &str = "session";
 
 /// CSRF state cookie name — validates the OAuth round-trip.
 const STATE_COOKIE: &str = "oauth_state";
+
+/// PKCE `code_verifier` cookie (generic OIDC provider only): the secret half of
+/// the challenge sent at login, presented when the code is exchanged. HttpOnly
+/// and as short-lived as the state cookie.
+const PKCE_COOKIE: &str = "oauth_pkce";
 
 /// Cookie name for the signed post-login redirect target.
 ///
@@ -88,7 +93,14 @@ pub fn auth_session_routes() -> Router<AppState> {
     ),
 )]
 pub async fn list_providers(State(state): State<AppState>) -> Json<serde_json::Value> {
-    let providers = state.config.active_providers();
+    let mut providers = state.config.active_providers();
+    if let Some(oidc) = &state.oidc {
+        providers.push(rungu_proto::ProviderInfo {
+            name: OIDC_PROVIDER.to_string(),
+            login_url: format!("{}/auth/{OIDC_PROVIDER}/login", state.config.app_url),
+            label: Some(oidc.label().to_string()),
+        });
+    }
     Json(serde_json::json!({ "providers": providers }))
 }
 
@@ -108,7 +120,7 @@ pub struct LoginQuery {
     path = "/auth/{provider}/login",
     tag = "auth",
     params(
-        ("provider" = String, Path, description = "OAuth provider name (google, github, keycloak)"),
+        ("provider" = String, Path, description = "OAuth provider name (google, github, keycloak, oidc)"),
     ),
     responses(
         (status = 302, description = "Redirect to provider authorization URL"),
@@ -120,7 +132,11 @@ pub async fn login(
     Path(provider): Path<String>,
     Query(query): Query<LoginQuery>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    let (cfg, provider_enum) = state.config.get_provider(&provider).ok_or(StatusCode::NOT_FOUND)?;
+    let (cfg, provider_enum) = resolve_provider(&state, &provider).await.inspect_err(|status| {
+        if *status != StatusCode::NOT_FOUND {
+            warn!(provider = %provider, "Login refused: provider could not be resolved");
+        }
+    })?;
 
     // Generate CSRF state token
     let state_token = uuid::Uuid::new_v4().to_string();
@@ -132,6 +148,17 @@ pub async fn login(
     all_params.insert("redirect_uri".to_string(), cfg.redirect_uri.clone());
     all_params.insert("response_type".to_string(), "code".to_string());
     all_params.insert("state".to_string(), state_token.clone());
+
+    // PKCE (generic OIDC provider): send the S256 challenge now, keep the
+    // verifier in a cookie for the code exchange.
+    let pkce_cookie = if provider_enum == AuthProvider::Oidc {
+        let (verifier, challenge) = crate::oidc_login::new_pkce();
+        all_params.insert("code_challenge".to_string(), challenge);
+        all_params.insert("code_challenge_method".to_string(), "S256".to_string());
+        Some(build_cookie(PKCE_COOKIE, &verifier, STATE_MAX_AGE_SECS, state.config.secure_cookie))
+    } else {
+        None
+    };
 
     // Store redirect target in a signed cookie — validate to prevent open redirect.
     // Only allow relative paths starting with "/" (no protocol-relative "//").
@@ -176,6 +203,9 @@ pub async fn login(
     if let Some(c) = redirect_cookie {
         headers.push((SET_COOKIE, c));
     }
+    if let Some(c) = pkce_cookie {
+        headers.push((SET_COOKIE, c));
+    }
 
     Ok((StatusCode::FOUND, AppendHeaders(headers)))
 }
@@ -197,7 +227,7 @@ pub struct CallbackQuery {
     path = "/auth/{provider}/callback",
     tag = "auth",
     params(
-        ("provider" = String, Path, description = "OAuth provider name (google, github, keycloak)"),
+        ("provider" = String, Path, description = "OAuth provider name (google, github, keycloak, oidc)"),
     ),
     responses(
         (status = 302, description = "Login successful, redirect to app"),
@@ -236,21 +266,36 @@ pub async fn callback(
     }
 
     // Resolve provider config
-    let (cfg, provider_enum) = state
-        .config
-        .get_provider(&provider)
-        .ok_or((StatusCode::NOT_FOUND, format!("Provider '{provider}' not configured")))?;
+    let (cfg, provider_enum) = resolve_provider(&state, &provider).await.map_err(|status| {
+        let message = if status == StatusCode::NOT_FOUND {
+            format!("Provider '{provider}' not configured")
+        } else {
+            "Login provider is unavailable".to_string()
+        };
+        (status, message)
+    })?;
+
+    // PKCE verifier from the login step (generic OIDC provider only). Without it
+    // the code cannot be redeemed, so refuse before calling the issuer.
+    let code_verifier = if provider_enum == AuthProvider::Oidc {
+        Some(
+            extract_cookie_value(&headers, PKCE_COOKIE)
+                .ok_or((StatusCode::BAD_REQUEST, "Missing or invalid PKCE cookie".to_string()))?,
+        )
+    } else {
+        None
+    };
 
     // Exchange code → access token → fetch identity using the shared HTTP client
     // (reused across requests — avoids per-callback connection-pool/TLS setup).
     let http_client = &state.http_client;
 
-    let access_token = oauth::exchange_code(http_client, cfg, code).await.map_err(|e| {
+    let access_token = oauth::exchange_code(http_client, &cfg, code, code_verifier.as_deref()).await.map_err(|e| {
         error!(error = %e, "Token exchange failed");
         (StatusCode::BAD_GATEWAY, format!("Token exchange failed: {e}"))
     })?;
 
-    let identity = oauth::fetch_identity(http_client, cfg, provider_enum, &access_token).await.map_err(|e| {
+    let identity = oauth::fetch_identity(http_client, &cfg, provider_enum, &access_token).await.map_err(|e| {
         error!(error = %e, "Userinfo fetch failed");
         (StatusCode::BAD_GATEWAY, format!("Failed to fetch user info: {e}"))
     })?;
@@ -301,6 +346,7 @@ pub async fn callback(
 
     let session_cookie = build_cookie(SESSION_COOKIE, &jwt, SESSION_MAX_AGE_SECS, state.config.secure_cookie);
     let clear_state_cookie = clear_cookie(STATE_COOKIE, state.config.secure_cookie);
+    let clear_pkce_cookie = clear_cookie(PKCE_COOKIE, state.config.secure_cookie);
     let clear_redirect_cookie = clear_cookie(REDIRECT_COOKIE, state.config.secure_cookie);
 
     // Resolve post-login destination from the signed redirect cookie.
@@ -323,6 +369,7 @@ pub async fn callback(
         AppendHeaders([
             (SET_COOKIE, session_cookie),
             (SET_COOKIE, clear_state_cookie),
+            (SET_COOKIE, clear_pkce_cookie),
             (SET_COOKIE, clear_redirect_cookie),
         ]),
     ))
@@ -418,12 +465,34 @@ fn extract_cookie_value(headers: &HeaderMap, name: &str) -> Option<String> {
     None
 }
 
+/// Path segment and DB name of the generic OIDC provider.
+const OIDC_PROVIDER: &str = "oidc";
+
+/// Resolve a provider by its path name. The built-in providers come straight
+/// from the config; the generic OIDC one is discovered from its issuer (cached),
+/// so it can also fail with 502 when the issuer cannot be reached.
+async fn resolve_provider(
+    state: &AppState,
+    name: &str,
+) -> Result<(rungu_auth::config::ProviderConfig, AuthProvider), StatusCode> {
+    if name == OIDC_PROVIDER {
+        let oidc = state.oidc.as_ref().ok_or(StatusCode::NOT_FOUND)?;
+        let cfg = oidc.provider().await.map_err(|e| {
+            error!(error = %e, "OIDC discovery failed");
+            StatusCode::BAD_GATEWAY
+        })?;
+        return Ok((cfg, AuthProvider::Oidc));
+    }
+    state.config.get_provider(name).map(|(cfg, provider)| (cfg.clone(), provider)).ok_or(StatusCode::NOT_FOUND)
+}
+
 /// Get provider-specific OAuth scopes.
 fn provider_scopes(provider: AuthProvider) -> (&'static str, HashMap<String, String>) {
     let scope = match provider {
         AuthProvider::Google => "openid email profile",
         AuthProvider::GitHub => "read:user user:email",
         AuthProvider::Keycloak => "openid email profile",
+        AuthProvider::Oidc => "openid email profile",
     };
 
     let mut params = HashMap::new();
@@ -437,6 +506,7 @@ fn provider_enum_as_str(provider: AuthProvider) -> &'static str {
         AuthProvider::Google => "google",
         AuthProvider::GitHub => "github",
         AuthProvider::Keycloak => "keycloak",
+        AuthProvider::Oidc => OIDC_PROVIDER,
     }
 }
 

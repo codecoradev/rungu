@@ -114,18 +114,21 @@ impl AuthConfig {
             providers.push(ProviderInfo {
                 name: "google".to_string(),
                 login_url: format!("{}/auth/google/login", self.app_url),
+                label: None,
             });
         }
         if self.github.is_some() {
             providers.push(ProviderInfo {
                 name: "github".to_string(),
                 login_url: format!("{}/auth/github/login", self.app_url),
+                label: None,
             });
         }
         if self.keycloak.is_some() {
             providers.push(ProviderInfo {
                 name: "keycloak".to_string(),
                 login_url: format!("{}/auth/keycloak/login", self.app_url),
+                label: None,
             });
         }
         providers

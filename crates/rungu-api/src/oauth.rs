@@ -2,7 +2,7 @@
 //!
 //! Handles the provider-specific details of exchanging an authorization code
 //! for an access token and extracting user identity (email, name, avatar, provider ID).
-//! Supports Google, GitHub, and Keycloak.
+//! Supports Google, GitHub, Keycloak and any generic OpenID Connect issuer.
 
 use anyhow::{Context, Result, bail};
 use rungu_auth::config::ProviderConfig;
@@ -41,19 +41,26 @@ struct TokenResponse {
 ///
 /// All three providers (Google, GitHub, Keycloak) accept the same standard
 /// `application/x-www-form-urlencoded` body per RFC 6749.
-pub async fn exchange_code(client: &reqwest::Client, cfg: &ProviderConfig, code: &str) -> Result<String> {
-    let resp = client
-        .post(&cfg.token_url)
-        .form(&[
-            ("grant_type", "authorization_code"),
-            ("client_id", &cfg.client_id),
-            ("client_secret", &cfg.client_secret),
-            ("code", code),
-            ("redirect_uri", &cfg.redirect_uri),
-        ])
-        .send()
-        .await
-        .context("Failed to send token exchange request")?;
+///
+/// `code_verifier` is the PKCE secret (RFC 7636) for providers whose login
+/// sent a `code_challenge`; the others pass `None`.
+pub async fn exchange_code(
+    client: &reqwest::Client,
+    cfg: &ProviderConfig,
+    code: &str,
+    code_verifier: Option<&str>,
+) -> Result<String> {
+    let mut form = vec![
+        ("grant_type", "authorization_code"),
+        ("client_id", cfg.client_id.as_str()),
+        ("client_secret", cfg.client_secret.as_str()),
+        ("code", code),
+        ("redirect_uri", cfg.redirect_uri.as_str()),
+    ];
+    if let Some(verifier) = code_verifier {
+        form.push(("code_verifier", verifier));
+    }
+    let resp = client.post(&cfg.token_url).form(&form).send().await.context("Failed to send token exchange request")?;
 
     let status = resp.status();
     if !status.is_success() {
@@ -105,6 +112,7 @@ pub async fn fetch_identity(
         AuthProvider::Google => parse_google(&json),
         AuthProvider::GitHub => parse_github(client, cfg, access_token, &json).await,
         AuthProvider::Keycloak => parse_keycloak(&json),
+        AuthProvider::Oidc => parse_oidc(&json),
     }
 }
 
@@ -244,6 +252,30 @@ fn parse_keycloak(v: &serde_json::Value) -> Result<OAuthIdentity> {
     })
 }
 
+/// Generic OpenID Connect userinfo (e.g. Gatehouse).
+///
+/// Fields: `sub`, `email`, `email_verified`, `name` or `preferred_username`,
+/// `picture`. `email_verified` must be an explicit `true`: the caller refuses a
+/// login otherwise, so a missing claim must read as unverified.
+fn parse_oidc(v: &serde_json::Value) -> Result<OAuthIdentity> {
+    let email =
+        v.get("email").and_then(|e| e.as_str()).map(String::from).context("OIDC userinfo missing 'email' field")?;
+    let provider_id =
+        v.get("sub").and_then(|s| s.as_str()).map(String::from).context("OIDC userinfo missing 'sub' field")?;
+    let email_verified = v.get("email_verified").and_then(|b| b.as_bool()).unwrap_or(false);
+    Ok(OAuthIdentity {
+        provider_id,
+        email,
+        email_verified,
+        name: v
+            .get("name")
+            .and_then(|n| n.as_str())
+            .or_else(|| v.get("preferred_username").and_then(|n| n.as_str()))
+            .map(String::from),
+        avatar_url: v.get("picture").and_then(|p| p.as_str()).map(String::from),
+    })
+}
+
 /// Take up to `max_chars` characters from the start of `s`. Used to preview
 /// provider error bodies for logging without risking a panic on multibyte
 /// UTF-8 (which a byte-length slice like `&s[..n]` would cause).
@@ -291,6 +323,24 @@ mod tests {
         });
         let id = parse_google(&v).unwrap();
         assert!(!id.email_verified, "missing email_verified must default to false");
+    }
+
+    #[test]
+    fn parse_oidc_requires_an_explicit_verified_email() {
+        let v = serde_json::json!({ "sub": "u1", "email": "a@x.test", "email_verified": true, "name": "A" });
+        let id = parse_oidc(&v).unwrap();
+        assert_eq!((id.provider_id.as_str(), id.email.as_str(), id.name.as_deref()), ("u1", "a@x.test", Some("A")));
+        assert!(id.email_verified);
+
+        for missing_or_false in [
+            serde_json::json!({ "sub": "u1", "email": "a@x.test" }),
+            serde_json::json!({ "sub": "u1", "email": "a@x.test", "email_verified": false }),
+            serde_json::json!({ "sub": "u1", "email": "a@x.test", "email_verified": "true" }),
+        ] {
+            assert!(!parse_oidc(&missing_or_false).unwrap().email_verified, "{missing_or_false}");
+        }
+        assert!(parse_oidc(&serde_json::json!({ "sub": "u1" })).is_err(), "no email");
+        assert!(parse_oidc(&serde_json::json!({ "email": "a@x.test" })).is_err(), "no sub");
     }
 
     #[test]

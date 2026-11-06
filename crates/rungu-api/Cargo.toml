@@ -38,6 +38,7 @@ anyhow = { workspace = true }
 rungu_core = { workspace = true }
 tempfile = "3"
 ring = "0.17"
+sqlx = { workspace = true }
 
 [lints]
 workspace = true

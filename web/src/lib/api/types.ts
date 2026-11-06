@@ -95,6 +95,8 @@ export interface VoteResponse {
 export interface ProviderInfo {
     name: string;
     login_url: string;
+    /** Button label set by the operator (the generic OIDC provider). */
+    label?: string;
 }
 
 // API response envelopes
