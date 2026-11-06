@@ -131,6 +131,9 @@
 - No login provider can sign in as the built-in `agent@rungu.local` or
   `mcp@rungu.local` admin identities: the web login now refuses them, as the
   `/mcp` OAuth path already did (#267).
+- `/mcp` OAuth: a token the issuer refuses at userinfo (a banned or revoked
+  person) is now answered `401 invalid_token` instead of `503`, so the client
+  signs in again instead of retrying (#253).
 - MCP tools reject arguments whose type contradicts the schema (a string for
   an integer, a negative page) instead of silently using the default (#253).
 - MCP no longer returns raw internal error text (database messages) to

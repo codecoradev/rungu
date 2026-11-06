@@ -241,6 +241,13 @@ impl McpOAuth {
             Reject::IssuerUnavailable
         };
         let response = request.send().await.map_err(|e| fail(url, e.to_string()))?;
+        // The issuer refusing the *caller's* token (userinfo 401/403: the person was
+        // banned or the token revoked) is the token's fault, not an outage: answer
+        // 401 so the client signs in again instead of retrying a 503.
+        if bearer.is_some() && matches!(response.status().as_u16(), 401 | 403) {
+            tracing::warn!("MCP OAuth: issuer refused the access token at {url}: HTTP {}", response.status());
+            return Err(Reject::Invalid("token_rejected_by_issuer"));
+        }
         if !response.status().is_success() {
             return Err(fail(url, format!("HTTP {}", response.status())));
         }

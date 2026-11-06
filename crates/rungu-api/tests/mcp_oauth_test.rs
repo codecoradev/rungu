@@ -5,7 +5,7 @@
 //! material lives in the repo.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
@@ -47,6 +47,8 @@ struct Issuer {
     url: String,
     key: TestKey,
     jwks_hits: Arc<AtomicUsize>,
+    /// While set, userinfo answers 401 (a banned person / revoked token).
+    revoked: Arc<AtomicBool>,
 }
 
 /// Start the fake issuer. Its userinfo knows one person per token `sub`.
@@ -57,6 +59,8 @@ async fn start_issuer() -> Issuer {
     let jwks = json!({ "keys": [key.jwk.clone()] });
     let jwks_hits = Arc::new(AtomicUsize::new(0));
     let hits = jwks_hits.clone();
+    let revoked = Arc::new(AtomicBool::new(false));
+    let userinfo_revoked = revoked.clone();
     let metadata = json!({
         "issuer": url,
         "jwks_uri": format!("{url}/jwks"),
@@ -75,8 +79,8 @@ async fn start_issuer() -> Issuer {
         )
         .route(
             "/userinfo",
-            axum::routing::get(|headers: axum::http::HeaderMap| async move {
-                if headers.get("authorization").is_none() {
+            axum::routing::get(move |headers: axum::http::HeaderMap| async move {
+                if headers.get("authorization").is_none() || userinfo_revoked.load(Ordering::SeqCst) {
                     return (StatusCode::UNAUTHORIZED, axum::Json(json!({}))).into_response_pair();
                 }
                 (StatusCode::OK, axum::Json(json!({ "sub": "user-1", "email": "Alice@Example.test", "email_verified": true, "name": "Alice" })))
@@ -84,7 +88,7 @@ async fn start_issuer() -> Issuer {
             }),
         );
     tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
-    Issuer { url, key, jwks_hits }
+    Issuer { url, key, jwks_hits, revoked }
 }
 
 trait IntoPair {
@@ -490,7 +494,12 @@ async fn an_issuer_with_a_trailing_slash_in_iss_works() {
 async fn an_unreachable_issuer_is_a_503_not_a_reason_to_log_in_again() {
     let (app, _) = app_for(Some("http://127.0.0.1:9")).await;
     let key = test_key("k1");
-    let fake = Issuer { url: "http://127.0.0.1:9".into(), key, jwks_hits: Arc::new(AtomicUsize::new(0)) };
+    let fake = Issuer {
+        url: "http://127.0.0.1:9".into(),
+        key,
+        jwks_hits: Arc::new(AtomicUsize::new(0)),
+        revoked: Arc::new(AtomicBool::new(false)),
+    };
     let token = good_token(&fake);
     let r = mcp_call(&app, &token, "tools/list", json!({})).await;
     assert_eq!(r.status, StatusCode::SERVICE_UNAVAILABLE);
@@ -513,4 +522,31 @@ async fn a_refused_token_says_invalid_token_and_the_scheme_is_case_insensitive()
     let auth = format!("BEARER {API_KEY}");
     let r = send(&app, "POST", "/mcp", &[("authorization", &auth), ("content-type", "application/json")], &body).await;
     assert_eq!(r.status, StatusCode::OK);
+}
+
+/// Gatehouse access tokens are JWTs that cannot be revoked: after a ban the
+/// issuer's userinfo answers 401. Rungu must read that as "this token is no
+/// longer good" (401, sign in again), not as an outage (503, retry).
+#[tokio::test]
+async fn a_token_the_issuer_refuses_is_a_401_not_a_503() {
+    let issuer = start_issuer().await;
+    let (app, _) = app_for(Some(&issuer.url)).await;
+
+    // Works while the person is in good standing.
+    let token = good_token(&issuer);
+    assert_eq!(mcp_call(&app, &token, "tools/list", json!({})).await.status, StatusCode::OK);
+
+    // Banned: a person we have not resolved yet (no cached identity) is refused.
+    issuer.revoked.store(true, Ordering::SeqCst);
+    let mut claims = good_claims(&issuer);
+    claims["sub"] = json!("banned-sub");
+    let banned = token_with(&issuer, &issuer.key.der, "k1", claims);
+    let r = mcp_call(&app, &banned, "tools/list", json!({})).await;
+    assert_eq!(r.status, StatusCode::UNAUTHORIZED, "a refused token is not an outage");
+    let challenge = r.headers["www-authenticate"].to_str().unwrap();
+    assert!(challenge.contains("error=\"invalid_token\"") && challenge.contains("resource_metadata="), "{challenge}");
+
+    // Someone already resolved keeps working only until the cache entry
+    // expires (60 s); documented, and the API key is unaffected.
+    assert_eq!(mcp_call(&app, API_KEY, "tools/list", json!({})).await.status, StatusCode::OK);
 }
