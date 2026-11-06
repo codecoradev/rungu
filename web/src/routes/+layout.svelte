@@ -85,12 +85,16 @@
 
         // Scope-specific shortcuts are handled by the page via a custom event.
         // This keeps layout out of per-page DOM details (which post is focused, etc).
-        window.dispatchEvent(
+        // The event is cancelable: a page calls preventDefault() on it only when
+        // it acted, and only then is the key swallowed. Otherwise (Enter with no
+        // post focused, `c` while signed out) the key keeps its native meaning.
+        const acted = !window.dispatchEvent(
             new CustomEvent('rungu:shortcut', {
+                cancelable: true,
                 detail: { key: def.key, scope: def.scope, authRequired: def.authRequired },
             }),
         );
-        e.preventDefault();
+        if (acted) e.preventDefault();
     }
 </script>
 

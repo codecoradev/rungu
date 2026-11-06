@@ -121,6 +121,18 @@ describe('native activation and modals', () => {
         expect(resolveShortcut(enter(), scopes)).toBeUndefined();
     });
 
+    it('leaves Enter alone on menu items, tree items, grid cells and image-map areas', () => {
+        for (const role of ['menuitemcheckbox', 'menuitemradio', 'treeitem', 'gridcell']) {
+            document.body.innerHTML = '';
+            const el = document.createElement('div');
+            el.setAttribute('role', role);
+            el.tabIndex = 0;
+            document.body.appendChild(el);
+            el.focus();
+            expect(resolveShortcut(enter(), scopes), role).toBeUndefined();
+        }
+    });
+
     it('still resolves letter shortcuts on a focused link', () => {
         const a = document.createElement('a');
         a.href = '#';

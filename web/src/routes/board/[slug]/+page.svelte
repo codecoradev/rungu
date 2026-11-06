@@ -169,41 +169,48 @@
      * the registry (see $lib/shortcuts.ts).
      */
     function onShortcut(e: Event) {
-        if (posts.length === 0 && (focusedPostIndex === -1)) {
-            // Still allow `/` to focus search even when the list is empty.
-        }
-        const { key, authRequired } = (e as CustomEvent).detail as {
+        const { key } = (e as CustomEvent).detail as {
             key: string;
             scope: string;
             authRequired?: boolean;
         };
 
+        // Mark the event handled (preventDefault) only when an action ran, so
+        // the layout swallows the key only then.
         switch (key) {
             case '/': {
                 const el = document.getElementById('board-search');
-                if (el instanceof HTMLElement) el.focus();
+                if (el instanceof HTMLElement) {
+                    el.focus();
+                    e.preventDefault(); // don't type the '/' into the search box
+                }
                 break;
             }
             case 'c': {
                 if (!authed) return;
                 showForm = true;
+                e.preventDefault(); // don't type the 'c' into the title field
                 break;
             }
             case 'j': {
                 if (posts.length === 0) return;
                 focusedPostIndex = Math.min(focusedPostIndex + 1, posts.length - 1);
                 scrollFocusedIntoView();
+                e.preventDefault();
                 break;
             }
             case 'k': {
                 if (posts.length === 0) return;
                 focusedPostIndex = Math.max(focusedPostIndex - 1, 0);
                 scrollFocusedIntoView();
+                e.preventDefault();
                 break;
             }
             case 'Enter': {
                 const post = posts[focusedPostIndex];
-                if (post) goto(`/board/${slug}/post/${post.id}`);
+                if (!post) return;
+                goto(`/board/${slug}/post/${post.id}`);
+                e.preventDefault();
                 break;
             }
             case 'v': {
@@ -211,7 +218,9 @@
                 // here (there's no anonymous vote path), so just guard on auth.
                 if (!authed) return;
                 const post = posts[focusedPostIndex];
-                if (post) toggleVote(post);
+                if (!post) return;
+                toggleVote(post);
+                e.preventDefault();
                 break;
             }
         }

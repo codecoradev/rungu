@@ -860,3 +860,61 @@ async fn test_unsubscribe_get_confirms_and_post_unsubscribes() {
         assert_eq!(send(&app, req).await.0, StatusCode::BAD_REQUEST);
     }
 }
+
+// ── As-you-type duplicate check: GET /projects/{slug}/similar ─────────
+
+async fn similar_titles(app: axum::Router, uri: &str) -> (StatusCode, Vec<String>) {
+    let response = app.oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap()).await.unwrap();
+    let status = response.status();
+    let bytes = axum::body::to_bytes(response.into_body(), 1024 * 1024).await.unwrap();
+    if status != StatusCode::OK {
+        return (status, vec![]);
+    }
+    let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    let titles = json["data"].as_array().unwrap().iter().map(|p| p["title"].as_str().unwrap().to_string()).collect();
+    (status, titles)
+}
+
+#[tokio::test]
+async fn test_similar_by_title_matches_keywords_without_auth() {
+    let (app, store) = setup_app().await;
+    let user = store.find_or_create_user("u@t.com", None, None, &[]).await.unwrap();
+    let project = store.get_project_by_slug("test-app").await.unwrap().unwrap();
+    store.create_post(&project.id, "Dark mode for the widget", "desc", PostCategory::Feature, &user.id).await.unwrap();
+    store.create_post(&project.id, "Export to CSV", "desc", PostCategory::Feature, &user.id).await.unwrap();
+
+    // Public (no cookie), keyword match on a draft title.
+    let (status, titles) =
+        similar_titles(app.clone(), "/projects/test-app/similar?title=Please%20add%20dark%20mode").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(titles, vec!["Dark mode for the widget".to_string()]);
+
+    // Ranking: the post sharing more keywords (title hits count double) comes
+    // first, even with fewer votes. Filler words like "please" never match.
+    let noisy = store
+        .create_post(&project.id, "Please make the board faster", "desc", PostCategory::Feedback, &user.id)
+        .await
+        .unwrap();
+    let voter = store.find_or_create_user("v@t.com", None, None, &[]).await.unwrap();
+    store.toggle_vote(&voter.id, &noisy.id).await.unwrap();
+    let partial =
+        store.create_post(&project.id, "Widget sizing", "desc", PostCategory::Feature, &user.id).await.unwrap();
+    store.toggle_vote(&voter.id, &partial.id).await.unwrap();
+    let (_, titles) =
+        similar_titles(app.clone(), "/projects/test-app/similar?title=Please%20dark%20mode%20widget").await;
+    // "Dark mode for the widget" shares 3 keywords, "Widget sizing" 1 (despite
+    // its vote); "Please make the board faster" shares only the filler word.
+    assert_eq!(titles, vec!["Dark mode for the widget".to_string(), "Widget sizing".to_string()]);
+
+    // Only short words (< 4 chars) → nothing to match on.
+    let (status, titles) = similar_titles(app, "/projects/test-app/similar?title=a%20b%20c").await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(titles.is_empty());
+}
+
+#[tokio::test]
+async fn test_similar_by_title_unknown_project_returns_404() {
+    let (app, _store) = setup_app().await;
+    let (status, _) = similar_titles(app, "/projects/nope/similar?title=dark%20mode").await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
