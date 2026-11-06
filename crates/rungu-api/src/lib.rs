@@ -11,6 +11,7 @@ pub mod comment_routes;
 pub mod email;
 pub mod error;
 pub mod mcp_http;
+pub mod mcp_oauth;
 pub mod meta;
 pub mod notification_routes;
 pub mod oauth;
@@ -71,6 +72,9 @@ pub struct AppState {
     /// Extractors forge the agent identity with this id so `created_by`
     /// FKs point at a real user row.
     pub agent_user_id: std::sync::Arc<Option<String>>,
+    /// OAuth issuer and extra origins for `/mcp` (off by default; see
+    /// [`AppState::with_mcp`]).
+    pub mcp: mcp_oauth::McpSettings,
 }
 
 impl AppState {
@@ -87,7 +91,13 @@ impl AppState {
     ) -> Self {
         let events = default_event_bus(&store, &http_client, &config, email::EmailConfig::Disabled);
         let ops = Operations::new(store.clone(), storage.clone(), events);
-        Self { store, ops, config, http_client, storage, branding, license, agent_user_id }
+        Self { store, ops, config, http_client, storage, branding, license, agent_user_id, mcp: Default::default() }
+    }
+
+    /// Enable OAuth access and extra browser origins for `/mcp` (#253).
+    pub fn with_mcp(mut self, mcp: mcp_oauth::McpSettings) -> Self {
+        self.mcp = mcp;
+        self
     }
 
     /// Subscribe email notifications (#73) with the given SMTP configuration.

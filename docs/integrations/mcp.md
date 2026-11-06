@@ -93,8 +93,8 @@ Both transports run the same 26 tools through the same dispatcher. The transport
 | | stdio (`rungu mcp`) | HTTP (`POST /mcp`) |
 |---|---|---|
 | Runs as | a subprocess of the agent | the Rungu server |
-| Auth | none (local trust) | `Authorization: Bearer <RUNGU_API_KEY>` |
-| Acts as | built-in `mcp@rungu.local` admin | the `ai-agent` admin user the key has on the REST API |
+| Auth | none (local trust) | `Authorization: Bearer <RUNGU_API_KEY>`, or an OAuth access token when `RUNGU_MCP_OAUTH_ISSUER` is set |
+| Acts as | built-in `mcp@rungu.local` admin | the `ai-agent` admin user (API key), or the person the token names with their normal role (OAuth) |
 
 stdio uses stdin/stdout: only JSON-RPC is written to stdout and logs go to stderr. HTTP is stateless, one JSON-RPC request per call; see [Configuration](../configuration.md) for the client config.
 
@@ -110,6 +110,27 @@ Rungu answers both MCP eras, on both transports:
 Batch (array) requests are refused with `-32600`. A message without an `id` is a notification and runs nothing. The older bare-method form (`{"method": "list_posts"}`) still works as an extension and returns the JSON-RPC errors described below.
 
 Over HTTP, notifications get `202` with no body, and `GET`/`DELETE` on `/mcp` get `405` (no server-initiated streams, no sessions).
+
+## Connect from Claude (OAuth)
+
+Claude connectors sign in with OAuth instead of a shared key. Rungu acts as the *resource server*; your identity provider is the *authorization server*.
+
+1. Set `RUNGU_MCP_OAUTH_ISSUER` to the provider's issuer URL, and `RUNGU_MCP_RESOURCE_URL` if the public URL of `/mcp` differs from `APP_URL`. Restart.
+2. Register the exact MCP URL as a valid resource on the provider. With Gatehouse (CodeCora ID) that is `OAUTH_RESOURCES` (restart it afterwards); without it, authorization fails with `invalid_target` and Claude only reports "Authorization failed". Let Claude register itself through client ID metadata documents (Gatehouse `CIMD_ENABLED`, `CIMD_ALLOWED_ORIGINS=https://claude.ai`) and leave the connector's advanced settings empty.
+3. In Claude, add a custom connector with the URL `https://your-rungu/mcp`.
+
+What Rungu does for that flow:
+
+- An unauthenticated `POST /mcp` gets `401` with `WWW-Authenticate: Bearer resource_metadata="<origin>/.well-known/oauth-protected-resource/mcp"`.
+- `/.well-known/oauth-protected-resource[/mcp]` (RFC 9728) names the resource and the issuer. `/.well-known/oauth-authorization-server[/mcp]` and `/.well-known/openid-configuration` pass the issuer's own metadata through, so clients that look on the resource origin find it.
+- A token is accepted when its signature verifies against the issuer's JWKS and `iss` equals the issuer, `aud` contains the exact MCP URL, and `exp`/`nbf` hold. Sender-constrained tokens (`cnf`, DPoP) and opaque tokens are refused.
+- The person behind the token is found or created by email, exactly like a web login (the token's email, or the issuer's userinfo when the token has none). Their role comes from `ADMIN_EMAILS`, never from the token: everyone else is a `member`, so the admin-only tools stay closed to them.
+- Browser calls from `https://claude.ai` and `https://claude.com` get CORS headers and a preflight answer; any other foreign `Origin` is refused.
+- Every `/mcp` call is logged (method, user agent, protocol version, `Mcp-Method`, `Accept`, and the reason a token was refused). Tokens and bodies are never logged.
+
+The API key keeps working beside OAuth.
+
+If the connector says "Connected" but no tools appear, or Claude Desktop still shows Connect, check which claude.ai account the browser is signed into: the OAuth callback completes in the browser and is saved to *that* account, not necessarily the Desktop one. Sign in to the same account in both, then connect again.
 
 ## Errors
 

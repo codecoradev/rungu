@@ -139,10 +139,35 @@ impl Tool {
                 Err(McpError::from(rungu_core::OpError::Forbidden("Admin access required".into())))
             });
         }
+        if let Err(e) = self.check_params(params) {
+            return Box::pin(async { Err(e) });
+        }
         match &self.handler {
             Handler::Read(f) => f(params, ops.store()),
             Handler::Write(f) => f(params, ops, actor),
         }
+    }
+
+    /// Reject arguments whose JSON type contradicts the declared schema. The
+    /// handlers read leniently (`"5"` for an integer would be dropped as if
+    /// absent), so a client that sent the wrong type would silently get the
+    /// default instead of an error. `null` counts as absent.
+    fn check_params(&self, params: &Value) -> Result<(), McpError> {
+        for p in self.params {
+            let Some(v) = params.get(p.name).filter(|v| !v.is_null()) else { continue };
+            let ok = match p.kind {
+                Kind::String => v.is_string(),
+                Kind::Integer => v.is_u64(),
+            };
+            if !ok {
+                let expected = match p.kind {
+                    Kind::String => "a string",
+                    Kind::Integer => "a non-negative integer",
+                };
+                return Err(McpError::invalid_params(format!("Parameter `{}` must be {expected}", p.name)));
+            }
+        }
+        Ok(())
     }
 
     /// The tool as an MCP `tools/list` entry.

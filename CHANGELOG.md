@@ -4,6 +4,16 @@
 
 ### Added
 
+- **OAuth for `/mcp`** (#253). With `RUNGU_MCP_OAUTH_ISSUER` set, `/mcp`
+  accepts access tokens from that issuer, so Claude connectors can sign in as
+  a person. Rungu stays a resource server: it answers `401` with
+  `WWW-Authenticate: Bearer resource_metadata=…`, serves RFC 9728 metadata
+  and passes the issuer's metadata through, verifies JWTs against the
+  issuer's JWKS (issuer, audience, expiry; DPoP and opaque tokens refused),
+  and maps the token's email to a Rungu user with the role from
+  `ADMIN_EMAILS`. `/mcp` now answers browser preflights for claude.ai, refuses
+  other foreign `Origin`s (`RUNGU_MCP_ALLOWED_ORIGINS` adds more), and logs
+  each call without tokens or bodies. The API key keeps working.
 - **Standard MCP framing** (#253). `/mcp` and `rungu mcp` now speak the
   protocol clients expect: `server/discover`, `tools/call`, the legacy
   `initialize` handshake and the stateless `2026-07-28` revision
@@ -99,6 +109,8 @@
 
 ### Fixed
 
+- MCP tools reject arguments whose type contradicts the schema (a string for
+  an integer, a negative page) instead of silently using the default (#253).
 - MCP no longer returns raw internal error text (database messages) to
   clients; faults are logged and reported as `Internal error` (#253).
 - **MCP admin-only tools refuse non-admin actors** (#249). `list_webhooks`,
