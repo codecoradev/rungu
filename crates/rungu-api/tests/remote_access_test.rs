@@ -312,3 +312,132 @@ fn test_constant_time_compare_rejects_wrong_lengths() {
     assert!(!rungu_auth::middleware::verify_api_key(&config, ""));
     assert!(rungu_auth::middleware::verify_api_key(&config, "short"));
 }
+
+/// One `/mcp` call with the key and the given extra headers.
+async fn mcp(
+    app: &axum::Router,
+    method: &str,
+    headers: &[(&str, &str)],
+    body: &str,
+) -> (StatusCode, serde_json::Value) {
+    let mut req = Request::builder()
+        .method(method)
+        .uri("/mcp")
+        .header("authorization", format!("Bearer {KEY}"))
+        .header("content-type", "application/json");
+    for (k, v) in headers {
+        req = req.header(*k, *v);
+    }
+    let response = app.clone().oneshot(req.body(Body::from(body.to_string())).unwrap()).await.unwrap();
+    let status = response.status();
+    let bytes = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    (status, serde_json::from_slice(&bytes).unwrap_or(serde_json::Value::Null))
+}
+
+const MODERN_META: &str = r#""_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientCapabilities":{}}"#;
+
+/// The stateless 2026-07-28 flow a Claude connector uses: discover, list,
+/// call — no `initialize`, no session id.
+#[tokio::test]
+async fn test_mcp_http_stateless_flow() {
+    let (app, _store) = setup_app_with_key().await;
+    let modern = [("mcp-protocol-version", "2026-07-28")];
+
+    let body = format!(r#"{{"jsonrpc":"2.0","id":1,"method":"server/discover","params":{{{MODERN_META}}}}}"#);
+    let (status, json) = mcp(&app, "POST", &[modern[0], ("mcp-method", "server/discover")], &body).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["result"]["supportedVersions"][0], "2026-07-28");
+
+    let body = format!(r#"{{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{{{MODERN_META}}}}}"#);
+    let (_, json) = mcp(&app, "POST", &[modern[0], ("mcp-method", "tools/list")], &body).await;
+    assert_eq!(json["result"]["tools"].as_array().unwrap().len(), rungu_mcp::TOOLS.len());
+    assert_eq!(json["result"]["resultType"], "complete");
+
+    let body = format!(
+        r#"{{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{{"name":"list_projects","arguments":{{}},{MODERN_META}}}}}"#
+    );
+    let headers = [modern[0], ("mcp-method", "tools/call"), ("mcp-name", "list_projects")];
+    let (status, json) = mcp(&app, "POST", &headers, &body).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["result"]["isError"], false);
+    assert!(json["result"]["structuredContent"]["data"].is_array());
+}
+
+#[tokio::test]
+async fn test_mcp_http_rejects_mismatched_headers() {
+    let (app, _store) = setup_app_with_key().await;
+    let body = format!(
+        r#"{{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{{"name":"list_projects",{MODERN_META}}}}}"#
+    );
+    let v = ("mcp-protocol-version", "2026-07-28");
+
+    for headers in [
+        vec![v],                                                               // no Mcp-Method
+        vec![v, ("mcp-method", "tools/list"), ("mcp-name", "list_projects")],  // wrong method
+        vec![v, ("mcp-method", "tools/call")],                                 // no Mcp-Name
+        vec![v, ("mcp-method", "tools/call"), ("mcp-name", "delete_project")], // wrong name
+    ] {
+        let (status, json) = mcp(&app, "POST", &headers, &body).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{headers:?}");
+        assert_eq!(json["error"]["code"], -32020);
+        assert_eq!(json["id"], 9);
+    }
+
+    let (status, json) = mcp(&app, "POST", &[("mcp-protocol-version", "2031-01-01")], &body).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(json["error"]["code"], -32022);
+    assert_eq!(json["error"]["data"]["supported"][0], "2026-07-28");
+}
+
+#[tokio::test]
+async fn test_mcp_http_legacy_handshake_notifications_and_methods() {
+    let (app, _store) = setup_app_with_key().await;
+
+    let (status, json) = mcp(
+        &app,
+        "POST",
+        &[("accept", "application/json, text/event-stream")],
+        r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"t","version":"1"}}}"#,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(json["result"]["protocolVersion"], "2025-06-18");
+
+    // A notification gets 202 and no body.
+    let (status, json) = mcp(&app, "POST", &[], r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#).await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+    assert!(json.is_null());
+
+    let (_, json) = mcp(
+        &app,
+        "POST",
+        &[],
+        r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"get_project","arguments":{"slug":"nope"}}}"#,
+    )
+    .await;
+    assert_eq!(json["result"]["isError"], true);
+
+    // A tool call sent without an id is never executed.
+    let (status, _) = mcp(
+        &app,
+        "POST",
+        &[],
+        r#"{"jsonrpc":"2.0","method":"tools/call","params":{"name":"create_project","arguments":{"name":"Ghost"}}}"#,
+    )
+    .await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+    let (_, json) =
+        mcp(&app, "POST", &[], r#"{"jsonrpc":"2.0","id":3,"method":"get_project","params":{"slug":"ghost"}}"#).await;
+    assert_eq!(json["error"]["kind"].as_str().or(json["error"]["data"]["kind"].as_str()), Some("not_found"));
+
+    // Batches are refused, not silently dropped.
+    let (status, json) = mcp(&app, "POST", &[], r#"[{"jsonrpc":"2.0","id":1,"method":"tools/list"}]"#).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(json["error"]["code"], -32600);
+
+    // No server-initiated streams and no sessions.
+    for method in ["GET", "DELETE"] {
+        let (status, _) = mcp(&app, method, &[], "").await;
+        assert_eq!(status, StatusCode::METHOD_NOT_ALLOWED, "{method}");
+    }
+}
