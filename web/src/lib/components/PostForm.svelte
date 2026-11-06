@@ -51,64 +51,75 @@
     }
 </script>
 
-<Card.Root>
-    <Card.Header class={showTitle ? '' : 'hidden'}>
-        <Card.Title class="text-base">New Post</Card.Title>
-    </Card.Header>
-    <Card.Content>
-        <form onsubmit={handleSubmit} class="space-y-3" novalidate>
-            {#if error}
-                <p id="post-form-error" class="text-sm text-destructive" role="alert">{error}</p>
-            {/if}
+{#snippet formBody()}
+    <form onsubmit={handleSubmit} class="space-y-3" novalidate>
+        {#if error}
+            <p id="post-form-error" class="text-sm text-destructive" role="alert">{error}</p>
+        {/if}
 
-            <div>
-                <Input
-                    id="post-form-title"
-                    bind:value={title}
-                    placeholder="What's your feedback?"
-                    maxlength={200}
-                    aria-label="Title"
-                    aria-invalid={error ? 'true' : undefined}
-                    aria-describedby={error ? 'post-form-error' : undefined}
-                />
+        <div>
+            <Input
+                id="post-form-title"
+                bind:value={title}
+                placeholder="What's your feedback?"
+                maxlength={200}
+                aria-label="Title"
+                aria-invalid={error ? 'true' : undefined}
+                aria-describedby={error ? 'post-form-error' : undefined}
+            />
+            <p class="mt-1 text-right text-xs text-muted-foreground" aria-live="polite">
+                {title.length}/200
+            </p>
+        </div>
+
+        <div>
+            <Textarea bind:value={description} placeholder="Add more details (optional)" rows={3} maxlength={4000} aria-label="Description" />
+            {#if description.length > 3600}
                 <p class="mt-1 text-right text-xs text-muted-foreground" aria-live="polite">
-                    {title.length}/200
+                    {description.length}/4000
                 </p>
-            </div>
+            {/if}
+        </div>
 
-            <div>
-                <Textarea bind:value={description} placeholder="Add more details (optional)" rows={3} maxlength={4000} aria-label="Description" />
-                {#if description.length > 3600}
-                    <p class="mt-1 text-right text-xs text-muted-foreground" aria-live="polite">
-                        {description.length}/4000
-                    </p>
-                {/if}
+        <!-- Category: 2x2 toggle buttons, one pressed at a time -->
+        <div class="space-y-1.5">
+            <span id="post-form-category" class="text-xs font-medium text-muted-foreground">Category</span>
+            <div class="grid grid-cols-2 gap-2" role="group" aria-labelledby="post-form-category">
+                {#each categories as cat (cat.value)}
+                    <button
+                        type="button"
+                        aria-pressed={category === cat.value}
+                        onclick={() => (category = cat.value)}
+                        class={cn(
+                            'flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium transition-colors',
+                            category === cat.value
+                                ? 'border-primary bg-primary/10 text-primary-text'
+                                : 'border-border text-muted-foreground hover:bg-muted',
+                        )}
+                    >
+                        <span>{cat.label}</span>
+                    </button>
+                {/each}
             </div>
+        </div>
 
-            <!-- Category: vertical list, no overflow -->
-            <div class="space-y-1.5">
-                <span class="text-xs font-medium text-muted-foreground">Category</span>
-                <div class="grid grid-cols-2 gap-2">
-                    {#each categories as cat (cat.value)}
-                        <button
-                            type="button"
-                            onclick={() => (category = cat.value)}
-                            class={cn(
-                                'flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium transition-colors',
-                                category === cat.value
-                                    ? 'border-primary bg-primary/10 text-primary-text'
-                                    : 'border-border text-muted-foreground hover:bg-muted',
-                            )}
-                        >
-                            <span>{cat.label}</span>
-                        </button>
-                    {/each}
-                </div>
-            </div>
+        <Button type="submit" class="w-full" disabled={loading}>
+            {loading ? 'Posting...' : 'Submit'}
+        </Button>
+    </form>
+{/snippet}
 
-            <Button type="submit" class="w-full" disabled={loading}>
-                {loading ? 'Posting...' : 'Submit'}
-            </Button>
-        </form>
-    </Card.Content>
-</Card.Root>
+<!-- Standalone: a titled card. Embedded in a dialog (showTitle=false): just
+     the form, so the dialog does not draw a card inside its own panel. -->
+{#if showTitle}
+    <Card.Root>
+        <Card.Header>
+            <Card.Title class="text-base">New Post</Card.Title>
+        </Card.Header>
+        <Card.Content>
+            {@render formBody()}
+        </Card.Content>
+    </Card.Root>
+{:else}
+    {@render formBody()}
+{/if}

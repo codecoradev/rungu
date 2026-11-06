@@ -2,6 +2,36 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **One board navigation everywhere** — Roadmap and Changelog now show the
+  same Feedback / Roadmap / Changelog tabs as the board, inside the normal
+  page width (they had their own wider container and doubled padding). The
+  tabs are page links marked with `aria-current="page"` instead of ARIA tabs.
+- **Post titles wrap to two lines** in the board list and roadmap instead of
+  being cut to one line (phones showed about 25 characters).
+- **Mobile board shows one New Post button** — the header copy is now
+  desktop-only, since the sticky toolbar already carries it.
+- **Sort on phones is a native select** — the four sort pills overflowed and
+  cut off "Recently Updated". From `sm` up they stay as toggle buttons with
+  `aria-pressed` (they claimed `role="tab"` without the tab keyboard model).
+- **Post detail** — editors see one select per field instead of a badge plus
+  a select with the same value; attachments sit right under the post; the
+  comment pinned as the official response is labelled in the thread; post
+  and comment text uses the full foreground colour instead of muted grey.
+- **Roadmap cards drop the status badge** that repeated the column title.
+- **Signed-out visitors get a "Login to post" button** next to the board
+  title on desktop (it was a small link in the sidebar).
+- New Post dialog no longer draws a card inside its own panel; category
+  buttons expose `aria-pressed`. Sidebar filter cards lost the empty gap
+  under their headings. Home board cards in a row share one height.
+
+### Removed
+
+- Unused `VoteButton.svelte` (the old star vote button).
+
+## [Unreleased]
+
 ### Fixed
 
 - **Signed-in users no longer appear logged out while browsing** — `/auth/me`,

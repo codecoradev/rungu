@@ -49,15 +49,17 @@
     {:else}
         <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {#each projects as project (project.slug)}
-                <a href={`/board/${project.slug}`}>
-                    <Card.Root class="transition-shadow hover:shadow-md">
+                <!-- h-full + mt-auto footer: cards in a row share one height even
+                     when only some boards have a description. -->
+                <a href={`/board/${project.slug}`} class="block h-full">
+                    <Card.Root class="h-full transition-shadow hover:shadow-md">
                         <Card.Header>
                             <Card.Title>{project.name}</Card.Title>
                             {#if project.description}
                                 <Card.Description class="line-clamp-2">{project.description}</Card.Description>
                             {/if}
                         </Card.Header>
-                        <Card.Footer>
+                        <Card.Footer class="mt-auto">
                             <span class="text-xs font-medium text-primary-text">View board →</span>
                         </Card.Footer>
                     </Card.Root>
