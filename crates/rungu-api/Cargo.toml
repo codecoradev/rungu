@@ -29,6 +29,7 @@ utoipa = { workspace = true }
 tokio-rustls = { workspace = true }
 webpki-roots = { workspace = true }
 base64 = { workspace = true }
+jsonwebtoken = { workspace = true }
 
 [dev-dependencies]
 tower = { workspace = true }
@@ -36,6 +37,7 @@ tokio = { workspace = true }
 anyhow = { workspace = true }
 rungu_core = { workspace = true }
 tempfile = "3"
+ring = "0.17"
 
 [lints]
 workspace = true

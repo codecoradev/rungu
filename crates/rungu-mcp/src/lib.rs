@@ -980,4 +980,29 @@ mod tests {
         let e: McpError = String::from("Failed to list projects: sqlite said no").into();
         assert_eq!(e.message, "Internal error");
     }
+
+    #[tokio::test]
+    async fn arguments_of_the_wrong_type_are_rejected_not_ignored() {
+        let ops = test_ops().await;
+        call(&ops, "create_project", json!({ "name": "Board" })).await;
+
+        // A string for an integer used to be dropped silently (default page size).
+        for (tool, args) in [
+            ("list_posts", json!({ "slug": "board", "limit": "5" })),
+            ("list_posts", json!({ "slug": "board", "page": -1 })),
+            ("list_posts", json!({ "slug": "board", "limit": 2.5 })),
+            ("get_project", json!({ "slug": 7 })),
+            ("search_posts", json!({ "slug": "board", "q": ["x"] })),
+        ] {
+            let r = call(&ops, "tools/call", json!({ "name": tool, "arguments": args })).await;
+            assert_eq!(r["result"]["isError"], true, "{tool} {args}");
+            assert_eq!(r["result"]["structuredContent"]["error"]["kind"], "invalid_params", "{tool} {args}");
+            assert!(r["result"]["structuredContent"]["error"]["message"].as_str().unwrap().contains("must be"));
+        }
+        // Bare-method calls get the same check, and null still means absent.
+        let bare = call(&ops, "list_posts", json!({ "slug": "board", "limit": "5" })).await;
+        assert_eq!(bare["error"]["code"], McpError::INVALID_PARAMS);
+        let ok = call(&ops, "list_posts", json!({ "slug": "board", "limit": null, "page": 1 })).await;
+        assert!(ok.get("error").is_none() && ok["result"].is_object(), "{ok}");
+    }
 }

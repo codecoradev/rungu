@@ -71,6 +71,16 @@ pub async fn serve(config: Config, pool: sqlx::AnyPool, is_sqlite: bool, listen:
         }
     }
 
+    let mcp = rungu_api::mcp_oauth::McpSettings::from_env(
+        &config.auth.app_url,
+        &config.auth.admin_emails,
+        http_client.clone(),
+    )
+    .map_err(|e| anyhow::anyhow!(e))?;
+    if let Some(oauth) = &mcp.oauth {
+        info!("MCP OAuth: accepting tokens from {} for {}", oauth.issuer(), oauth.resource());
+    }
+
     let email = rungu_api::email::EmailConfig::from_env();
     info!("Email notifications: {}", email.describe());
     let state = AppState::new(
@@ -82,7 +92,8 @@ pub async fn serve(config: Config, pool: sqlx::AnyPool, is_sqlite: bool, listen:
         license,
         agent_user_id,
     )
-    .with_email(email);
+    .with_email(email)
+    .with_mcp(mcp);
 
     // CORS — secure by default.
     // If RUNGU_CORS_ORIGINS is empty, only allow the APP_URL origin.
@@ -116,14 +127,16 @@ pub async fn serve(config: Config, pool: sqlx::AnyPool, is_sqlite: bool, listen:
         .merge(SwaggerUi::new("/swagger-ui").url("/api-docs/openapi.json", ApiDoc::openapi()))
         .route("/health", get(health_check))
         .merge(crate::embed::router())
-        // MCP over HTTP (#189) — root-mounted, Bearer-authed (same key as REST).
-        .merge(rungu_api::mcp_http::mcp_routes())
         .fallback(spa_handler)
         // Sentry layer: capture HTTP request context and errors.
         // No-op when SENTRY_DSN is not set.
         .layer(sentry_tower::SentryHttpLayer::with_transaction())
         .layer(cors)
         .layer(TraceLayer::new_for_http())
+        // MCP over HTTP (#189) and its OAuth discovery documents sit OUTSIDE the
+        // site-wide CORS layer: they answer their own preflights and allowed
+        // origins (claude.ai) — see `mcp_http`.
+        .merge(rungu_api::mcp_http::mcp_routes().layer(TraceLayer::new_for_http()))
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind(listen).await?;
