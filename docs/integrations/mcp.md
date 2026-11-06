@@ -124,7 +124,8 @@ What Rungu does for that flow:
 - An unauthenticated `POST /mcp` gets `401` with `WWW-Authenticate: Bearer resource_metadata="<origin>/.well-known/oauth-protected-resource/mcp"`.
 - `/.well-known/oauth-protected-resource[/mcp]` (RFC 9728) names the resource and the issuer. `/.well-known/oauth-authorization-server[/mcp]` and `/.well-known/openid-configuration` pass the issuer's own metadata through, so clients that look on the resource origin find it.
 - A token is accepted when its signature verifies against the issuer's JWKS and `iss` equals the issuer, `aud` contains the exact MCP URL, and `exp`/`nbf` hold. Sender-constrained tokens (`cnf`, DPoP) and opaque tokens are refused.
-- The person behind the token is found or created by email, exactly like a web login (the token's email, or the issuer's userinfo when the token has none). Their role comes from `ADMIN_EMAILS`, never from the token: everyone else is a `member`, so the admin-only tools stay closed to them.
+- The person behind the token is found or created by email, exactly like a web login (the token's email, or the issuer's userinfo when the token has none). The email must be marked `email_verified: true`, and the built-in `agent@rungu.local` / `mcp@rungu.local` addresses are refused. If your issuer omits `email_verified`, see `RUNGU_MCP_OAUTH_ALLOW_UNVERIFIED_EMAIL`. Their role comes from `ADMIN_EMAILS`, never from the token: everyone else is a `member`, so the admin-only tools stay closed to them.
+- A refused token gets `401` with `error="invalid_token"`; if the issuer itself can't be reached the answer is `503`, so a client keeps its token instead of signing in again.
 - Browser calls from `https://claude.ai` and `https://claude.com` get CORS headers and a preflight answer; any other foreign `Origin` is refused.
 - Every `/mcp` call is logged (method, user agent, protocol version, `Mcp-Method`, `Accept`, and the reason a token was refused). Tokens and bodies are never logged.
 

@@ -44,6 +44,8 @@ const JWKS_MIN_REFETCH: Duration = Duration::from_secs(30);
 /// call and a database write per request). The token is still verified every time.
 const ACTOR_TTL: Duration = Duration::from_secs(60);
 const MAX_CACHED_ACTORS: usize = 1024;
+/// After a failed discovery fetch, answer "unavailable" for this long.
+const DISCOVERY_BACKOFF: Duration = Duration::from_secs(10);
 
 /// Why a bearer token was refused. Logged by name, never echoed with the token.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -99,9 +101,13 @@ struct Discovery {
 #[derive(Default)]
 struct Cache {
     discovery: Option<(Instant, Discovery)>,
+    /// When discovery last failed; failures back off instead of retrying per request.
+    discovery_failed: Option<Instant>,
     jwks: Option<(Instant, JwkSet)>,
+    /// When the JWKS was last *attempted* (success or not).
     jwks_fetched: Option<Instant>,
-    actors: HashMap<String, (Instant, Actor)>,
+    /// Resolved actor per subject, with the email it was resolved for.
+    actors: HashMap<String, (Instant, Actor, String)>,
 }
 
 /// An OAuth issuer Rungu trusts for `/mcp`.
@@ -110,7 +116,11 @@ pub struct McpOAuth {
     resource: Url,
     http: reqwest::Client,
     admin_emails: Vec<String>,
+    /// Accept a token whose email carries no `email_verified` claim at all.
+    allow_unverified_email: bool,
     cache: Mutex<Cache>,
+    /// Serialises issuer refreshes so a burst of requests fetches once.
+    refresh: Mutex<()>,
 }
 
 /// What `/mcp` needs beyond the API key: the optional OAuth issuer and any
@@ -127,6 +137,8 @@ impl McpSettings {
     /// startup error: running with a half-configured issuer would silently
     /// fall back to API-key-only.
     pub fn from_env(app_url: &str, admin_emails: &[String], http: reqwest::Client) -> Result<Self, String> {
+        let flag =
+            |name: &str| matches!(std::env::var(name).ok().as_deref().map(str::trim), Some("1" | "true" | "yes"));
         let var = |name: &str| std::env::var(name).ok().map(|v| v.trim().to_string()).filter(|v| !v.is_empty());
         let extra_origins = var("RUNGU_MCP_ALLOWED_ORIGINS")
             .map(|v| {
@@ -138,7 +150,9 @@ impl McpSettings {
             Some(issuer) => {
                 let resource =
                     var("RUNGU_MCP_RESOURCE_URL").unwrap_or_else(|| format!("{}/mcp", app_url.trim_end_matches('/')));
-                Some(Arc::new(McpOAuth::new(&issuer, &resource, admin_emails.to_vec(), http)?))
+                let mut oauth = McpOAuth::new(&issuer, &resource, admin_emails.to_vec(), http)?;
+                oauth.allow_unverified_email = flag("RUNGU_MCP_OAUTH_ALLOW_UNVERIFIED_EMAIL");
+                Some(Arc::new(oauth))
             }
         };
         Ok(Self { oauth, extra_origins })
@@ -162,10 +176,21 @@ impl McpOAuth {
         require_https(&issuer_url, "RUNGU_MCP_OAUTH_ISSUER")?;
         let resource = Url::parse(resource).map_err(|e| format!("RUNGU_MCP_RESOURCE_URL is not a URL: {e}"))?;
         require_https(&resource, "RUNGU_MCP_RESOURCE_URL")?;
+        if resource.query().is_some() || resource.fragment().is_some() {
+            return Err("RUNGU_MCP_RESOURCE_URL must not have a query or fragment".into());
+        }
         if resource.path() != "/mcp" {
             return Err(format!("RUNGU_MCP_RESOURCE_URL must end in /mcp (got path '{}')", resource.path()));
         }
-        Ok(Self { issuer, resource, http, admin_emails, cache: Mutex::default() })
+        Ok(Self {
+            issuer,
+            resource,
+            http,
+            admin_emails,
+            allow_unverified_email: false,
+            cache: Mutex::default(),
+            refresh: Mutex::default(),
+        })
     }
 
     pub fn issuer(&self) -> &str {
@@ -183,8 +208,11 @@ impl McpOAuth {
     }
 
     /// The `WWW-Authenticate` value that starts a client's OAuth flow.
-    pub fn challenge(&self) -> String {
-        format!("Bearer resource_metadata=\"{}\"", self.metadata_url())
+    /// `invalid_token` (RFC 6750) tells a client its token was refused, as
+    /// opposed to missing.
+    pub fn challenge(&self, invalid_token: bool) -> String {
+        let error = if invalid_token { "error=\"invalid_token\", " } else { "" };
+        format!("Bearer {error}resource_metadata=\"{}\"", self.metadata_url())
     }
 
     /// RFC 9728 protected-resource metadata.
@@ -216,64 +244,139 @@ impl McpOAuth {
         if !response.status().is_success() {
             return Err(fail(url, format!("HTTP {}", response.status())));
         }
-        let bytes = response.bytes().await.map_err(|e| fail(url, e.to_string()))?;
-        if bytes.len() > MAX_DOC_BYTES {
-            return Err(fail(url, "response too large".into()));
+        let mut response = response;
+        let mut bytes: Vec<u8> = Vec::new();
+        while let Some(chunk) = response.chunk().await.map_err(|e| fail(url, e.to_string()))? {
+            bytes.extend_from_slice(&chunk);
+            if bytes.len() > MAX_DOC_BYTES {
+                return Err(fail(url, "response too large".into()));
+            }
         }
         serde_json::from_slice(&bytes).map_err(|e| fail(url, format!("not JSON: {e}")))
     }
 
     async fn discovery(&self) -> Result<Discovery, Reject> {
-        if let Some((at, d)) = &self.cache.lock().await.discovery
+        if let Some(d) = self.cached_discovery().await? {
+            return Ok(d);
+        }
+        let _one_at_a_time = self.refresh.lock().await;
+        // Someone may have refreshed while this request waited.
+        if let Some(d) = self.cached_discovery().await? {
+            return Ok(d);
+        }
+        let result = self.fetch_discovery().await;
+        let mut cache = self.cache.lock().await;
+        match &result {
+            Ok(d) => {
+                cache.discovery = Some((Instant::now(), d.clone()));
+                cache.discovery_failed = None;
+            }
+            Err(_) => cache.discovery_failed = Some(Instant::now()),
+        }
+        result
+    }
+
+    /// [`Self::discovery`] for callers that already hold the refresh lock.
+    async fn discovery_unlocked(&self) -> Result<Discovery, Reject> {
+        if let Some(d) = self.cached_discovery().await? {
+            return Ok(d);
+        }
+        let result = self.fetch_discovery().await;
+        let mut cache = self.cache.lock().await;
+        match &result {
+            Ok(d) => {
+                cache.discovery = Some((Instant::now(), d.clone()));
+                cache.discovery_failed = None;
+            }
+            Err(_) => cache.discovery_failed = Some(Instant::now()),
+        }
+        result
+    }
+
+    /// A fresh cached document, or `Err` while a recent failure is backing off.
+    async fn cached_discovery(&self) -> Result<Option<Discovery>, Reject> {
+        let cache = self.cache.lock().await;
+        if let Some((at, d)) = &cache.discovery
             && at.elapsed() < DISCOVERY_TTL
         {
-            return Ok(d.clone());
+            return Ok(Some(d.clone()));
         }
+        if cache.discovery_failed.is_some_and(|t| t.elapsed() < DISCOVERY_BACKOFF) {
+            return Err(Reject::IssuerUnavailable);
+        }
+        Ok(None)
+    }
+
+    async fn fetch_discovery(&self) -> Result<Discovery, Reject> {
         let raw = self.get_json(&format!("{}/.well-known/openid-configuration", self.issuer), None).await?;
         // OIDC Discovery: the document must name the issuer it was fetched for.
         if raw.get("issuer").and_then(Value::as_str).map(|i| i.trim_end_matches('/')) != Some(self.issuer.as_str()) {
             tracing::warn!("MCP OAuth: issuer metadata names a different issuer");
             return Err(Reject::IssuerUnavailable);
         }
-        let jwks_uri = raw.get("jwks_uri").and_then(Value::as_str).ok_or(Reject::IssuerUnavailable)?.to_string();
-        let userinfo_endpoint = raw.get("userinfo_endpoint").and_then(Value::as_str).map(str::to_string);
-        let d = Discovery { jwks_uri, userinfo_endpoint, raw };
-        self.cache.lock().await.discovery = Some((Instant::now(), d.clone()));
-        Ok(d)
+        // Keys and the userinfo call (which carries the bearer token) must be https.
+        let endpoint = |field: &str| {
+            raw.get(field)
+                .and_then(Value::as_str)
+                .filter(|u| Url::parse(u).is_ok_and(|u| require_https(&u, field).is_ok()))
+        };
+        let jwks_uri = endpoint("jwks_uri").ok_or(Reject::IssuerUnavailable)?.to_string();
+        let userinfo_endpoint = endpoint("userinfo_endpoint").map(str::to_string);
+        Ok(Discovery { jwks_uri, userinfo_endpoint, raw })
     }
 
     /// The decoding key for a token's `kid`, refetching the JWKS when the key
     /// is unknown (rotation) — but never more than once per [`JWKS_MIN_REFETCH`].
-    async fn key_for(&self, kid: Option<&str>) -> Result<(DecodingKey, jsonwebtoken::jwk::Jwk), Reject> {
-        for attempt in 0..2 {
-            {
-                let cache = self.cache.lock().await;
-                if let Some((at, set)) = &cache.jwks
-                    && at.elapsed() < JWKS_TTL
-                {
-                    let jwk = match kid {
-                        Some(kid) => set.find(kid),
-                        None if set.keys.len() == 1 => set.keys.first(),
-                        None => None,
-                    };
-                    if let Some(jwk) = jwk {
-                        let key = DecodingKey::from_jwk(jwk).map_err(|_| Reject::UnknownKey)?;
-                        return Ok((key, jwk.clone()));
-                    }
-                }
-                let recently = cache.jwks_fetched.is_some_and(|t| t.elapsed() < JWKS_MIN_REFETCH);
-                if attempt == 1 || recently {
-                    return Err(Reject::UnknownKey);
-                }
-            }
-            let uri = self.discovery().await?.jwks_uri;
-            let doc = self.get_json(&uri, None).await?;
-            let set: JwkSet = serde_json::from_value(doc).map_err(|_| Reject::IssuerUnavailable)?;
-            let mut cache = self.cache.lock().await;
-            cache.jwks = Some((Instant::now(), set));
-            cache.jwks_fetched = Some(Instant::now());
+    async fn key_for(&self, kid: Option<&str>) -> Result<DecodingKey, Reject> {
+        if let Some(key) = self.lookup_key(kid).await? {
+            return Ok(key);
         }
-        Err(Reject::UnknownKey)
+        let _one_at_a_time = self.refresh.lock().await;
+        // Another request may have refreshed the keys while this one waited.
+        if let Some(key) = self.lookup_key(kid).await? {
+            return Ok(key);
+        }
+        self.cache.lock().await.jwks_fetched = Some(Instant::now());
+        let uri = self.discovery_unlocked().await?.jwks_uri;
+        let doc = self.get_json(&uri, None).await?;
+        let set = parse_jwks(&doc).ok_or(Reject::IssuerUnavailable)?;
+        self.cache.lock().await.jwks = Some((Instant::now(), set));
+        self.lookup_key(kid).await?.ok_or(Reject::UnknownKey)
+    }
+
+    /// The key for `kid` from a fresh cached JWKS. `Err(UnknownKey)` when the
+    /// cache is fresh or was refetched too recently to try again; `Ok(None)`
+    /// when a refetch is allowed.
+    async fn lookup_key(&self, kid: Option<&str>) -> Result<Option<DecodingKey>, Reject> {
+        let cache = self.cache.lock().await;
+        if let Some((at, set)) = &cache.jwks
+            && at.elapsed() < JWKS_TTL
+        {
+            let jwk = match kid {
+                Some(kid) => set.find(kid),
+                None if set.keys.len() == 1 => set.keys.first(),
+                None => None,
+            };
+            if let Some(jwk) = jwk {
+                return DecodingKey::from_jwk(jwk).map(Some).map_err(|_| Reject::UnknownKey);
+            }
+        }
+        if cache.jwks_fetched.is_some_and(|t| t.elapsed() < JWKS_MIN_REFETCH) {
+            return Err(Reject::UnknownKey);
+        }
+        Ok(None)
+    }
+
+    /// An email must be marked verified. Only `false` used to fail, so an
+    /// issuer that lets people type any address and omits the claim would
+    /// have let them claim an admin's. Issuers that verify at signup but
+    /// don't emit the claim opt in with `RUNGU_MCP_OAUTH_ALLOW_UNVERIFIED_EMAIL`.
+    fn check_verified(&self, verified: Option<bool>) -> Result<(), Reject> {
+        match verified {
+            Some(true) => Ok(()),
+            None if self.allow_unverified_email => Ok(()),
+            _ => Err(Reject::UnverifiedEmail),
+        }
     }
 
     /// Verify an access token and resolve the Rungu user behind it.
@@ -285,10 +388,11 @@ impl McpOAuth {
         if !ALGORITHMS.contains(&header.alg) {
             return Err(Reject::UnsupportedAlgorithm);
         }
-        let (key, _) = self.key_for(header.kid.as_deref()).await?;
+        let key = self.key_for(header.kid.as_deref()).await?;
 
         let mut validation = Validation::new(header.alg);
-        validation.set_issuer(&[self.issuer.as_str()]);
+        // Some issuers (Auth0) put a trailing slash in `iss`; accept either form.
+        validation.set_issuer(&[self.issuer.as_str(), &format!("{}/", self.issuer)]);
         validation.set_audience(&[self.resource()]);
         validation.set_required_spec_claims(&["exp", "sub", "iss", "aud"]);
         validation.validate_nbf = true;
@@ -313,35 +417,41 @@ impl McpOAuth {
         }
         let sub = claims.sub.filter(|s| !s.is_empty()).ok_or(Reject::NoSubject)?;
 
-        if let Some((at, actor)) = self.cache.lock().await.actors.get(&sub)
+        // A claim the token itself makes about its email is judged on every
+        // request, before any cached identity is considered.
+        if claims.email.is_some() {
+            self.check_verified(claims.email_verified)?;
+        }
+        let claimed_email = claims.email.as_deref().map(|e| e.trim().to_lowercase());
+        if let Some((at, actor, email)) = self.cache.lock().await.actors.get(&sub)
             && at.elapsed() < ACTOR_TTL
+            && claimed_email.as_ref().is_none_or(|e| e == email)
         {
             return Ok(actor.clone());
         }
 
         // Gatehouse access tokens carry no email: ask the issuer who this is.
-        let (email, verified, name) = match claims.email {
-            Some(email) => (email, claims.email_verified, claims.name),
+        let (email, name) = match claims.email {
+            Some(email) => (email, claims.name),
             None => {
                 let endpoint = self.discovery().await?.userinfo_endpoint.ok_or(Reject::NoEmail)?;
                 let info = self.get_json(&endpoint, Some(token)).await?;
-                if info.get("sub").and_then(Value::as_str).is_some_and(|s| s != sub) {
+                // OIDC: userinfo must name the same subject as the token.
+                if info.get("sub").and_then(Value::as_str) != Some(sub.as_str()) {
                     return Err(Reject::Invalid("userinfo_subject_mismatch"));
                 }
                 let email = info.get("email").and_then(Value::as_str).ok_or(Reject::NoEmail)?.to_string();
-                (
-                    email,
-                    info.get("email_verified").and_then(Value::as_bool),
-                    info.get("name").and_then(Value::as_str).map(str::to_string),
-                )
+                self.check_verified(info.get("email_verified").and_then(Value::as_bool))?;
+                (email, info.get("name").and_then(Value::as_str).map(str::to_string))
             }
         };
-        if verified == Some(false) {
-            return Err(Reject::UnverifiedEmail);
-        }
         let email = email.trim().to_lowercase();
         if email.is_empty() {
             return Err(Reject::NoEmail);
+        }
+        // Built-in identities must never be reachable by naming their address.
+        if email == rungu_auth::middleware::AGENT_USER_EMAIL || email == "mcp@rungu.local" {
+            return Err(Reject::Invalid("reserved_email"));
         }
 
         let user = store.find_or_create_user(&email, name.as_deref(), None, &self.admin_emails).await.map_err(|e| {
@@ -352,14 +462,27 @@ impl McpOAuth {
 
         let mut cache = self.cache.lock().await;
         if cache.actors.len() >= MAX_CACHED_ACTORS {
-            cache.actors.retain(|_, (at, _)| at.elapsed() < ACTOR_TTL);
+            cache.actors.retain(|_, (at, _, _)| at.elapsed() < ACTOR_TTL);
             if cache.actors.len() >= MAX_CACHED_ACTORS {
                 cache.actors.clear();
             }
         }
-        cache.actors.insert(sub, (Instant::now(), actor.clone()));
+        cache.actors.insert(sub, (Instant::now(), actor.clone(), email));
         Ok(actor)
     }
+}
+
+/// The usable signing keys of a JWKS document. One key this library can't
+/// parse (an unusual type, say) must not take verification down for the rest,
+/// and keys not meant for signatures are skipped.
+fn parse_jwks(doc: &Value) -> Option<JwkSet> {
+    let keys = doc.get("keys")?.as_array()?;
+    let keys: Vec<_> = keys
+        .iter()
+        .filter(|k| k.get("use").and_then(Value::as_str).is_none_or(|u| u == "sig"))
+        .filter_map(|k| serde_json::from_value(k.clone()).ok())
+        .collect();
+    Some(JwkSet { keys })
 }
 
 /// HTTPS is required, except for loopback (local development and tests).
@@ -369,5 +492,24 @@ fn require_https(url: &Url, name: &str) -> Result<(), String> {
         Ok(())
     } else {
         Err(format!("{name} must be an https:// URL"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn one_unusable_key_does_not_break_the_rest() {
+        let doc = json!({ "keys": [
+            { "kty": "weird", "kid": "bad" },
+            { "kty": "EC", "crv": "P-256", "kid": "enc-key", "use": "enc", "x": "AA", "y": "AA" },
+            { "kty": "EC", "crv": "P-256", "kid": "good", "use": "sig", "x": "AA", "y": "AA" },
+        ]});
+        let set = parse_jwks(&doc).unwrap();
+        let kids: Vec<_> = set.keys.iter().filter_map(|k| k.common.key_id.as_deref()).collect();
+        assert_eq!(kids, ["good"]);
+        assert!(parse_jwks(&json!({ "nope": 1 })).is_none());
     }
 }

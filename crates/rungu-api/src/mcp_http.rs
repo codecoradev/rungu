@@ -61,10 +61,12 @@ fn with_cors(mut response: Response, origin: Option<&str>) -> Response {
     response
 }
 
-fn unauthorized(state: &crate::AppState, message: &str) -> Response {
+/// 401 with the challenge that starts (or restarts) a client's OAuth flow.
+/// `invalid_token` is set when a token was presented and refused.
+fn unauthorized(state: &crate::AppState, message: &str, invalid_token: bool) -> Response {
     let mut response = (StatusCode::UNAUTHORIZED, Json(serde_json::json!({ "error": message }))).into_response();
     let challenge = match &state.mcp.oauth {
-        Some(oauth) => oauth.challenge(),
+        Some(oauth) => oauth.challenge(invalid_token),
         None => "Bearer".to_string(),
     };
     if let Ok(value) = HeaderValue::from_str(&challenge) {
@@ -80,7 +82,7 @@ async fn authenticate(
 ) -> Result<(rungu_core::Actor, &'static str), (Response, &'static str)> {
     let Some(presented) = bearer else {
         return Err((
-            unauthorized(state, "Missing Authorization: Bearer <access token or RUNGU_API_KEY>"),
+            unauthorized(state, "Missing Authorization: Bearer <access token or RUNGU_API_KEY>", false),
             "missing_token",
         ));
     };
@@ -90,16 +92,20 @@ async fn authenticate(
     if let Some(oauth) = &state.mcp.oauth {
         return match oauth.authenticate(presented, &state.store).await {
             Ok(actor) => Ok((actor, "oauth")),
-            Err(reason) => {
-                let message = match reason {
-                    Reject::IssuerUnavailable => "Could not verify the access token right now",
-                    _ => "Invalid access token",
-                };
-                Err((unauthorized(state, message), reason.as_str()))
-            }
+            // The issuer being down is not the client's fault: 503, so it keeps
+            // its token instead of discarding it and restarting OAuth.
+            Err(Reject::IssuerUnavailable) => Err((
+                (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    Json(serde_json::json!({ "error": "Could not verify the access token right now" })),
+                )
+                    .into_response(),
+                Reject::IssuerUnavailable.as_str(),
+            )),
+            Err(reason) => Err((unauthorized(state, "Invalid access token", true), reason.as_str())),
         };
     }
-    Err((unauthorized(state, "Invalid API key"), "invalid_api_key"))
+    Err((unauthorized(state, "Invalid API key", true), "invalid_api_key"))
 }
 
 /// POST /mcp — one JSON-RPC request per HTTP call (stateless). Runs on the
@@ -122,8 +128,9 @@ pub async fn mcp_http(State(state): State<crate::AppState>, headers: HeaderMap, 
 async fn handle_post(state: &crate::AppState, headers: &HeaderMap, body: &[u8]) -> Response {
     // Auth: the API key (constant-time compare) or an OAuth access token.
     let bearer = header_str(headers, "authorization")
-        .and_then(|v| v.strip_prefix("Bearer ").or_else(|| v.strip_prefix("bearer ")))
-        .map(str::trim)
+        .and_then(|v| v.split_once(' '))
+        .filter(|(scheme, _)| scheme.eq_ignore_ascii_case("bearer"))
+        .map(|(_, token)| token.trim())
         .filter(|s| !s.is_empty());
 
     let (actor, auth) = match authenticate(state, bearer).await {

@@ -79,7 +79,7 @@ async fn start_issuer() -> Issuer {
                 if headers.get("authorization").is_none() {
                     return (StatusCode::UNAUTHORIZED, axum::Json(json!({}))).into_response_pair();
                 }
-                (StatusCode::OK, axum::Json(json!({ "sub": "user-1", "email": "Alice@Example.test", "name": "Alice" })))
+                (StatusCode::OK, axum::Json(json!({ "sub": "user-1", "email": "Alice@Example.test", "email_verified": true, "name": "Alice" })))
                     .into_response_pair()
             }),
         );
@@ -410,4 +410,107 @@ fn misconfiguration_is_rejected_at_startup() {
     assert!(new("https://issuer.example", "https://rungu.example/elsewhere").unwrap().contains("/mcp"));
     assert!(new("not a url", "https://rungu.example/mcp").is_some());
     assert!(new("https://issuer.example/api/auth/", "https://rungu.example/mcp").is_none());
+}
+
+/// Sign a token that names an email itself, for `sub`.
+fn email_token(issuer: &Issuer, sub: &str, email: &str, verified: Option<bool>) -> String {
+    let mut claims = good_claims(issuer);
+    claims["sub"] = json!(sub);
+    claims["email"] = json!(email);
+    if let Some(v) = verified {
+        claims["email_verified"] = json!(v);
+    }
+    token_with(issuer, &issuer.key.der, "k1", claims)
+}
+
+#[tokio::test]
+async fn an_email_must_be_marked_verified() {
+    let issuer = start_issuer().await;
+    let (app, _) = app_for(Some(&issuer.url)).await;
+
+    // No claim at all is not "verified": an issuer that lets anyone type an
+    // address and omits the flag must not let them claim an admin's.
+    let unmarked = email_token(&issuer, "s1", ADMIN, None);
+    assert_eq!(mcp_call(&app, &unmarked, "tools/list", json!({})).await.status, StatusCode::UNAUTHORIZED);
+    let marked = email_token(&issuer, "s1", ADMIN, Some(true));
+    assert_eq!(mcp_call(&app, &marked, "tools/list", json!({})).await.status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn built_in_identities_cannot_be_claimed_by_email() {
+    let issuer = start_issuer().await;
+    let (app, _) = app_for(Some(&issuer.url)).await;
+    for email in ["agent@rungu.local", "mcp@rungu.local", "Agent@Rungu.Local"] {
+        let token = email_token(&issuer, "s-agent", email, Some(true));
+        assert_eq!(mcp_call(&app, &token, "tools/list", json!({})).await.status, StatusCode::UNAUTHORIZED, "{email}");
+    }
+}
+
+#[tokio::test]
+async fn the_cached_identity_never_overrides_what_a_token_says() {
+    let issuer = start_issuer().await;
+    let (app, store) = app_for(Some(&issuer.url)).await;
+
+    // First token resolves `sub-x` as a plain member and is cached.
+    let first = email_token(&issuer, "sub-x", "member@example.test", Some(true));
+    assert_eq!(mcp_call(&app, &first, "tools/list", json!({})).await.status, StatusCode::OK);
+
+    // Same subject within the cache window: a token that now says "unverified"
+    // is refused, not served from the cache…
+    let unverified = email_token(&issuer, "sub-x", "member@example.test", Some(false));
+    assert_eq!(mcp_call(&app, &unverified, "tools/list", json!({})).await.status, StatusCode::UNAUTHORIZED);
+
+    // …and one that names a different email acts as that person.
+    let other = email_token(&issuer, "sub-x", ADMIN, Some(true));
+    let made = mcp_call(
+        &app,
+        &other,
+        "tools/call",
+        json!({ "name": "create_project", "arguments": { "name": "Admin Only" } }),
+    )
+    .await;
+    assert_eq!(made.json["result"]["isError"], false, "{}", made.json);
+    let boss = store.find_or_create_user(ADMIN, None, None, &[]).await.unwrap();
+    assert_eq!(boss.role, rungu_proto::UserRole::Admin);
+}
+
+#[tokio::test]
+async fn an_issuer_with_a_trailing_slash_in_iss_works() {
+    let issuer = start_issuer().await;
+    let (app, _) = app_for(Some(&issuer.url)).await;
+    let mut claims = good_claims(&issuer);
+    claims["iss"] = json!(format!("{}/", issuer.url));
+    claims["email"] = json!("slash@example.test");
+    claims["email_verified"] = json!(true);
+    let token = token_with(&issuer, &issuer.key.der, "k1", claims);
+    assert_eq!(mcp_call(&app, &token, "tools/list", json!({})).await.status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn an_unreachable_issuer_is_a_503_not_a_reason_to_log_in_again() {
+    let (app, _) = app_for(Some("http://127.0.0.1:9")).await;
+    let key = test_key("k1");
+    let fake = Issuer { url: "http://127.0.0.1:9".into(), key, jwks_hits: Arc::new(AtomicUsize::new(0)) };
+    let token = good_token(&fake);
+    let r = mcp_call(&app, &token, "tools/list", json!({})).await;
+    assert_eq!(r.status, StatusCode::SERVICE_UNAVAILABLE);
+    assert!(r.headers.get("www-authenticate").is_none(), "no challenge: the token isn't at fault");
+    // The API key doesn't depend on the issuer.
+    assert_eq!(mcp_call(&app, API_KEY, "tools/list", json!({})).await.status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn a_refused_token_says_invalid_token_and_the_scheme_is_case_insensitive() {
+    let issuer = start_issuer().await;
+    let (app, _) = app_for(Some(&issuer.url)).await;
+
+    let r = mcp_call(&app, "opaque-token", "tools/list", json!({})).await;
+    assert!(r.headers["www-authenticate"].to_str().unwrap().contains("error=\"invalid_token\""));
+    let r = send(&app, "POST", "/mcp", &[("content-type", "application/json")], "{}").await;
+    assert!(!r.headers["www-authenticate"].to_str().unwrap().contains("invalid_token"), "missing != invalid");
+
+    let body = json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/list" }).to_string();
+    let auth = format!("BEARER {API_KEY}");
+    let r = send(&app, "POST", "/mcp", &[("authorization", &auth), ("content-type", "application/json")], &body).await;
+    assert_eq!(r.status, StatusCode::OK);
 }
