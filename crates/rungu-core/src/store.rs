@@ -907,14 +907,6 @@ impl Store {
 
     /// Delete a comment.
     /// Delete a comment and decrement the post's comment_count in a transaction.
-    /// Find posts similar to the given post (same project, different id),
-    /// ranked by FTS on the post's title words, excluding itself (#206).
-    /// Best-effort dedup helper — a thin wrapper over `list_posts` search.
-    pub async fn find_similar_posts(&self, post_id: &str, limit: i64) -> Result<Vec<PostDetail>> {
-        let post = self.get_post(post_id, None).await?.ok_or_else(|| anyhow::anyhow!("Post not found"))?;
-        self.find_similar_by_title(&post.post.project_id, &post.post.title, Some(post_id), limit).await
-    }
-
     /// Find posts in a project whose title or description share keywords with
     /// `title`, most-voted first. Backs both the post-detail "Similar posts"
     /// block and the as-you-type duplicate check in the New Post form.

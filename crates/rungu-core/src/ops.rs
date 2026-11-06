@@ -182,9 +182,15 @@ impl Operations {
         Self { store, storage, events }
     }
 
-    /// Read access for query paths, which stay on the store directly.
+    /// Raw store access, for reads that have no [`BoardQuery`] method yet.
     pub fn store(&self) -> &Store {
         &self.store
+    }
+
+    /// The read side of a board: posts, roadmap, changelog, search, similar
+    /// posts. Shares this module's store (and its project cache).
+    pub fn queries(&self) -> crate::BoardQuery {
+        crate::BoardQuery::new(self.store.clone())
     }
 
     async fn existing_post(&self, post_id: &str) -> OpResult<Post> {

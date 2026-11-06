@@ -44,20 +44,21 @@ Add to your MCP configuration:
 |------|-------------|
 | `list_projects` | List all feedback projects |
 | `get_project` | Get project detail by slug |
-| `list_posts` | List posts with filters (status, category, sort) |
+| `list_posts` | List posts with filters (`status`, `category`, `sort`, `q`) and paging (`page`, `limit`, max 100). Same rules and results as `GET /api/projects/{slug}/posts` |
 | `get_post` | Get post detail with comments |
 | `create_post` | Submit a new feedback post |
 | `update_post_status` | Change post status (open → planned → done) |
 | `update_post_category` | Change post category (bug, feature, question, feedback) |
 | `delete_post` | Delete a post by ID |
 | `vote_post` | Toggle vote on a post |
-| `search_posts` | Full-text search across posts |
-| `get_roadmap` | Posts grouped by lifecycle status (planned, in_progress, done) |
+| `search_posts` | Full-text search across posts, newest first (`q` required; `page`, `limit`) |
+| `get_roadmap` | Posts grouped by lifecycle status (planned, in_progress, done), most voted first (`limit` per bucket, default 10, max 50) |
+| `get_changelog` | Shipped (done) posts, most recently updated first (`since` RFC 3339, `page`, `limit`) |
 | `list_comments` | Get comments for a post |
 | `add_comment` | Add comment to a post |
 | `delete_comment` | Delete a comment by ID |
 | `get_stats` | Project stats (total posts, by status, by category) |
-| `get_trending` | Top voted posts in last 7 days |
+| `get_trending` | Posts gaining votes fastest over the last 7 days (`limit`, default 10) |
 | `get_analytics` | Event totals + daily trend (views, votes, comments) — privacy-first aggregates |
 | `get_top_posts` | Top posts by views with vote/view conversion (AI prioritization) |
 | `list_attachments` | List image attachments for a post |

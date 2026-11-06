@@ -52,8 +52,7 @@ pub async fn test_webhook(
     CurrentUser(user): CurrentUser,
 ) -> Result<impl IntoResponse, ApiError> {
     ApiError::require_admin(&user)?;
-    let project =
-        state.store.get_project_by_slug(&slug).await?.ok_or_else(|| ApiError::not_found("Project not found"))?;
+    let project = state.ops.queries().project(&slug).await?;
 
     let webhook = state.store.get_webhook(&id).await?.ok_or_else(|| ApiError::not_found("Webhook not found"))?;
     if webhook.project_id != project.id {
@@ -136,8 +135,7 @@ pub async fn list_webhooks(
     CurrentUser(user): CurrentUser,
 ) -> Result<impl IntoResponse, ApiError> {
     ApiError::require_admin(&user)?;
-    let project =
-        state.store.get_project_by_slug(&slug).await?.ok_or_else(|| ApiError::not_found("Project not found"))?;
+    let project = state.ops.queries().project(&slug).await?;
     let webhooks = state.store.list_webhooks(&project.id).await?;
     Ok(Json(serde_json::json!({ "data": webhooks })))
 }
@@ -193,8 +191,7 @@ pub async fn get_webhook(
     CurrentUser(user): CurrentUser,
 ) -> Result<impl IntoResponse, ApiError> {
     ApiError::require_admin(&user)?;
-    let project =
-        state.store.get_project_by_slug(&slug).await?.ok_or_else(|| ApiError::not_found("Project not found"))?;
+    let project = state.ops.queries().project(&slug).await?;
     let webhook = state.store.get_webhook(&id).await?.ok_or_else(|| ApiError::not_found("Webhook not found"))?;
 
     if webhook.project_id != project.id {
@@ -287,8 +284,7 @@ pub async fn list_deliveries(
     Query(query): Query<DeliveryQuery>,
 ) -> Result<impl IntoResponse, ApiError> {
     ApiError::require_admin(&user)?;
-    let project =
-        state.store.get_project_by_slug(&slug).await?.ok_or_else(|| ApiError::not_found("Project not found"))?;
+    let project = state.ops.queries().project(&slug).await?;
 
     let webhook = state.store.get_webhook(&id).await?.ok_or_else(|| ApiError::not_found("Webhook not found"))?;
     if webhook.project_id != project.id {

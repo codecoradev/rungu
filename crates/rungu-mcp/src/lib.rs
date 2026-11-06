@@ -28,8 +28,9 @@
 use std::io::{BufRead, Write};
 
 use anyhow::Result;
-use rungu_core::ops::{NewPost, NewProject, NewWebhook, PostChanges, parse_category, parse_sort};
-use rungu_core::{Actor, OpError, Operations, Store};
+use rungu_core::ops::{NewPost, NewProject, NewWebhook, PostChanges};
+use rungu_core::query::{BoardFilters, PageRequest, PostPage};
+use rungu_core::{Actor, BoardQuery, OpError, Operations, Store};
 use rungu_proto::*;
 use serde_json::{Value, json};
 
@@ -131,13 +132,29 @@ fn get_optional_u64(params: &Value, key: &str) -> Option<u64> {
     params.get(key).and_then(|v| v.as_u64())
 }
 
-fn parse_status(s: &str) -> Result<PostStatus, String> {
-    rungu_core::ops::parse_status(s)
-        .ok_or_else(|| format!("Invalid status: {s}. Must be one of: open, planned, in_progress, done, declined"))
+fn queries(store: &Store) -> BoardQuery {
+    BoardQuery::new(store.clone())
 }
 
-fn parse_category_filter(s: &str) -> Result<PostCategory, String> {
-    parse_category(s).ok_or_else(|| format!("Invalid category: {s}. Must be one of: feedback, bug, feature, question"))
+/// `page` (1-based) and `limit` (page size); the query module clamps both.
+fn page_request(params: &Value) -> PageRequest {
+    let to_i64 = |n: u64| n.min(i64::MAX as u64) as i64;
+    PageRequest {
+        page: get_optional_u64(params, "page").map(to_i64),
+        per_page: get_optional_u64(params, "limit").map(to_i64),
+    }
+}
+
+/// The MCP shape of a page of posts: `{ data, total, page, per_page, total_pages }`.
+fn post_page(posts: PostPage) -> Value {
+    let total_pages = posts.total_pages();
+    json!({
+        "data": posts.posts,
+        "total": posts.total,
+        "page": posts.page,
+        "per_page": posts.per_page,
+        "total_pages": total_pages,
+    })
 }
 
 /// Operation refusals become the JSON-RPC error message verbatim.
@@ -164,48 +181,22 @@ async fn list_projects(store: &Store) -> Result<Value, String> {
     Ok(json!({ "data": projects }))
 }
 
-/// Get a single project by slug.
 async fn get_project(params: &Value, store: &Store) -> Result<Value, String> {
-    let slug = get_str(params, "slug")?;
-    let project = store
-        .get_project_by_slug(slug)
-        .await
-        .map_err(|e| format!("Failed to get project: {e}"))?
-        .ok_or_else(|| format!("Project not found: {slug}"))?;
+    let project = queries(store).project(get_str(params, "slug")?).await.map_err(op_err)?;
     Ok(json!({ "data": project }))
 }
 
-/// List posts in a project with optional filters.
+/// List posts in a project with optional filters (same rules as REST).
 async fn list_posts(params: &Value, store: &Store) -> Result<Value, String> {
-    let slug = get_str(params, "slug")?;
-    let project = store
-        .get_project_by_slug(slug)
-        .await
-        .map_err(|e| format!("Failed to get project: {e}"))?
-        .ok_or_else(|| format!("Project not found: {slug}"))?;
-
-    let sort = parse_sort(get_optional_str(params, "sort"));
-    let status = get_optional_str(params, "status").map(parse_status).transpose()?;
-    let category = get_optional_str(params, "category").map(parse_category_filter).transpose()?;
-    let query = get_optional_str(params, "q");
-    let limit = get_optional_u64(params, "limit").unwrap_or(20).clamp(1, 100) as i64;
-
-    let (posts, total) = store
-        .list_posts(ListPostsParams {
-            project_id: &project.id,
-            sort,
-            status,
-            category,
-            query,
-            since: None,
-            user_id: None,
-            offset: 0,
-            limit,
-        })
-        .await
-        .map_err(|e| format!("Failed to list posts: {e}"))?;
-
-    Ok(json!({ "data": posts, "total": total }))
+    let filters = BoardFilters {
+        sort: get_optional_str(params, "sort"),
+        status: get_optional_str(params, "status"),
+        category: get_optional_str(params, "category"),
+        q: get_optional_str(params, "q"),
+    };
+    let (_, posts) =
+        queries(store).board(get_str(params, "slug")?, filters, page_request(params), None).await.map_err(op_err)?;
+    Ok(post_page(posts))
 }
 
 /// Get a single post by ID.
@@ -248,65 +239,22 @@ async fn vote_post(params: &Value, ops: &Operations) -> Result<Value, String> {
     Ok(json!({ "data": { "voted": outcome.voted, "vote_count": outcome.vote_count } }))
 }
 
-/// Search posts by query string.
+/// Full-text search, newest first.
 async fn search_posts(params: &Value, store: &Store) -> Result<Value, String> {
-    let slug = get_str(params, "slug")?;
-    let query = get_str(params, "q")?;
-    let limit = get_optional_u64(params, "limit").unwrap_or(20).clamp(1, 100) as i64;
-
-    let project = store
-        .get_project_by_slug(slug)
+    let posts = queries(store)
+        .search(get_str(params, "slug")?, get_str(params, "q")?, page_request(params))
         .await
-        .map_err(|e| format!("Failed to get project: {e}"))?
-        .ok_or_else(|| format!("Project not found: {slug}"))?;
-
-    let (posts, total) = store
-        .list_posts(ListPostsParams {
-            project_id: &project.id,
-            sort: PostSort::Newest,
-            status: None,
-            category: None,
-            query: Some(query),
-            since: None,
-            user_id: None,
-            offset: 0,
-            limit,
-        })
-        .await
-        .map_err(|e| format!("Failed to search posts: {e}"))?;
-
-    Ok(json!({ "data": posts, "total": total }))
+        .map_err(op_err)?;
+    Ok(post_page(posts))
 }
 
-/// Get the changelog for a project — done posts, most recently shipped first.
-///
-/// Useful for AI agents summarizing "what shipped recently" in a project.
+/// Shipped posts, most recently updated first. Optional `since` (RFC 3339).
 async fn get_changelog(params: &Value, store: &Store) -> Result<Value, String> {
-    let slug = get_str(params, "slug")?;
-    let limit = get_optional_u64(params, "limit").unwrap_or(20).clamp(1, 100) as i64;
-
-    let project = store
-        .get_project_by_slug(slug)
+    let posts = queries(store)
+        .changelog(get_str(params, "slug")?, get_optional_str(params, "since"), page_request(params))
         .await
-        .map_err(|e| format!("Failed to get project: {e}"))?
-        .ok_or_else(|| format!("Project not found: {slug}"))?;
-
-    let (posts, total) = store
-        .list_posts(ListPostsParams {
-            project_id: &project.id,
-            sort: PostSort::RecentlyUpdated,
-            status: Some(PostStatus::Done),
-            category: None,
-            query: None,
-            since: None,
-            user_id: None,
-            offset: 0,
-            limit,
-        })
-        .await
-        .map_err(|e| format!("Failed to get changelog: {e}"))?;
-
-    Ok(json!({ "data": posts, "total": total }))
+        .map_err(op_err)?;
+    Ok(post_page(posts))
 }
 
 /// List comments for a post.
@@ -330,11 +278,7 @@ async fn add_comment(params: &Value, ops: &Operations) -> Result<Value, String> 
 /// Get statistics for a project (counts by status).
 async fn get_stats(params: &Value, store: &Store) -> Result<Value, String> {
     let slug = get_str(params, "slug")?;
-    let project = store
-        .get_project_by_slug(slug)
-        .await
-        .map_err(|e| format!("Failed to get project: {e}"))?
-        .ok_or_else(|| format!("Project not found: {slug}"))?;
+    let project = queries(store).project(slug).await.map_err(op_err)?;
 
     let stats = store.project_stats(&project.id).await.map_err(|e| format!("Failed to compute stats: {e}"))?;
     let count = |status: &str| stats.by_status.get(status).copied().unwrap_or(0);
@@ -350,34 +294,11 @@ async fn get_stats(params: &Value, store: &Store) -> Result<Value, String> {
     }))
 }
 
-/// Get trending posts (sorted by most votes).
+/// Posts gaining votes fastest (7-day velocity).
 async fn get_trending(params: &Value, store: &Store) -> Result<Value, String> {
-    let slug = get_str(params, "slug")?;
-    let limit = get_optional_u64(params, "limit").unwrap_or(10).clamp(1, 100) as i64;
-
-    let project = store
-        .get_project_by_slug(slug)
-        .await
-        .map_err(|e| format!("Failed to get project: {e}"))?
-        .ok_or_else(|| format!("Project not found: {slug}"))?;
-
-    let (posts, total) = store
-        .list_posts(ListPostsParams {
-            project_id: &project.id,
-            // Real trending (#203): 7-day vote velocity, tie-broken by totals.
-            sort: PostSort::Trending,
-            status: None,
-            category: None,
-            query: None,
-            since: None,
-            user_id: None,
-            offset: 0,
-            limit,
-        })
-        .await
-        .map_err(|e| format!("Failed to get trending posts: {e}"))?;
-
-    Ok(json!({ "data": posts, "total": total }))
+    let limit = get_optional_u64(params, "limit").map(|n| n.min(i64::MAX as u64) as i64);
+    let posts = queries(store).trending(get_str(params, "slug")?, limit).await.map_err(op_err)?;
+    Ok(post_page(posts))
 }
 
 /// Aggregate analytics for a project (#186) — event totals + daily trend.
@@ -386,11 +307,7 @@ async fn get_analytics(params: &Value, store: &Store) -> Result<Value, String> {
     let slug = get_str(params, "slug")?;
     let days = get_optional_u64(params, "days").unwrap_or(30).clamp(0, 365) as u32;
 
-    let project = store
-        .get_project_by_slug(slug)
-        .await
-        .map_err(|e| format!("Failed to get project: {e}"))?
-        .ok_or_else(|| format!("Project not found: {slug}"))?;
+    let project = queries(store).project(slug).await.map_err(op_err)?;
 
     let totals =
         store.analytics_totals(&project.id, days).await.map_err(|e| format!("Failed to get analytics: {e}"))?;
@@ -419,11 +336,7 @@ async fn get_top_posts(params: &Value, store: &Store) -> Result<Value, String> {
     let days = get_optional_u64(params, "days").unwrap_or(30).clamp(0, 365) as u32;
     let limit = get_optional_u64(params, "limit").unwrap_or(10).clamp(1, 50) as i64;
 
-    let project = store
-        .get_project_by_slug(slug)
-        .await
-        .map_err(|e| format!("Failed to get project: {e}"))?
-        .ok_or_else(|| format!("Project not found: {slug}"))?;
+    let project = queries(store).project(slug).await.map_err(op_err)?;
 
     let top = store
         .analytics_top_posts(&project.id, days, limit)
@@ -474,11 +387,7 @@ async fn delete_project(params: &Value, ops: &Operations) -> Result<Value, Strin
 /// List webhooks for a project (admin parity; secrets are NOT included).
 async fn list_webhooks(params: &Value, store: &Store) -> Result<Value, String> {
     let slug = get_str(params, "slug")?;
-    let project = store
-        .get_project_by_slug(slug)
-        .await
-        .map_err(|e| format!("Failed to get project: {e}"))?
-        .ok_or_else(|| format!("Project not found: {slug}"))?;
+    let project = queries(store).project(slug).await.map_err(op_err)?;
     let webhooks = store.list_webhooks(&project.id).await.map_err(|e| format!("Failed to list webhooks: {e}"))?;
     Ok(json!({ "data": webhooks, "total": webhooks.len() }))
 }
@@ -571,58 +480,21 @@ async fn update_post_category(params: &Value, ops: &Operations) -> Result<Value,
     Ok(json!({ "updated": true, "id": id, "category": category_str }))
 }
 
-/// Get a project roadmap — posts grouped by lifecycle status (planned, in_progress, done).
-///
-/// Mirrors the REST `GET /projects/{slug}/roadmap` endpoint.
+/// The roadmap: planned, in progress and done, most voted first.
 async fn get_roadmap(params: &Value, store: &Store) -> Result<Value, String> {
-    let slug = get_str(params, "slug")?;
-    let per_bucket = get_optional_u64(params, "limit").unwrap_or(10).clamp(1, 50) as i64;
-
-    let project = store
-        .get_project_by_slug(slug)
-        .await
-        .map_err(|e| format!("Failed to get project: {e}"))?
-        .ok_or_else(|| format!("Project not found: {slug}"))?;
-
-    let planned = fetch_roadmap_bucket(store, &project.id, PostStatus::Planned, per_bucket).await?;
-    let in_progress = fetch_roadmap_bucket(store, &project.id, PostStatus::InProgress, per_bucket).await?;
-    let done = fetch_roadmap_bucket(store, &project.id, PostStatus::Done, per_bucket).await?;
-
+    let per_bucket = get_optional_u64(params, "limit").map(|n| n.min(i64::MAX as u64) as i64);
+    let roadmap = queries(store).roadmap(get_str(params, "slug")?, per_bucket).await.map_err(op_err)?;
     Ok(json!({
         "data": {
-            "planned": planned.0,
-            "planned_total": planned.1,
-            "in_progress": in_progress.0,
-            "in_progress_total": in_progress.1,
-            "done": done.0,
-            "done_total": done.1,
-            "limit": per_bucket,
+            "planned": roadmap.planned.posts,
+            "planned_total": roadmap.planned.total,
+            "in_progress": roadmap.in_progress.posts,
+            "in_progress_total": roadmap.in_progress.total,
+            "done": roadmap.done.posts,
+            "done_total": roadmap.done.total,
+            "limit": roadmap.limit,
         }
     }))
-}
-
-/// Helper: fetch a single roadmap bucket (top-N most-voted posts for a status).
-async fn fetch_roadmap_bucket(
-    store: &Store,
-    project_id: &str,
-    status: PostStatus,
-    limit: i64,
-) -> Result<(Vec<PostDetail>, i64), String> {
-    let (posts, total) = store
-        .list_posts(ListPostsParams {
-            project_id,
-            sort: PostSort::MostVotes,
-            status: Some(status),
-            category: None,
-            query: None,
-            since: None,
-            user_id: None,
-            offset: 0,
-            limit,
-        })
-        .await
-        .map_err(|e| format!("Failed to fetch roadmap bucket: {e}"))?;
-    Ok((posts, total))
 }
 
 /// Delete an attachment by ID.
@@ -764,17 +636,5 @@ mod tests {
         assert_eq!(stats["result"]["total_posts"], 3);
         assert_eq!(stats["result"]["open"], 3);
         assert_eq!(stats["result"]["done"], 0);
-    }
-
-    #[test]
-    fn test_parse_status() {
-        assert!(parse_status("in_progress").is_ok());
-        assert!(parse_status("invalid").is_err());
-    }
-
-    #[test]
-    fn test_parse_category_filter_is_strict() {
-        assert!(matches!(parse_category_filter("bug"), Ok(PostCategory::Bug)));
-        assert!(parse_category_filter("unknown").is_err());
     }
 }

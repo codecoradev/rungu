@@ -8,12 +8,14 @@ use sqlx::AnyPool;
 
 pub mod events;
 pub mod ops;
+pub mod query;
 pub mod storage;
 pub mod store;
 pub mod validation;
 
 pub use events::{DomainEvent, EventBus, EventSink, RecordingSink};
 pub use ops::{Actor, OpError, OpResult, Operations};
+pub use query::BoardQuery;
 pub use rungu_proto::ListAllPostsParams;
 pub use storage::{
     ALLOWED_MIME_TYPES, FsStorage, MAX_UPLOAD_SIZE, NoopStorage, Storage, create_storage, storage_key, verify_image,

@@ -11,6 +11,13 @@
 
 ### Changed
 
+- **One read path for boards** (#247). Listing, search, trending, roadmap,
+  changelog and similar posts go through a shared `BoardQuery` module in
+  `rungu-core`, so REST and MCP apply the same paging limits, filter
+  parsing and project lookup. MCP list tools now accept `page` (and
+  `get_changelog` accepts `since`), and return `page`, `per_page` and
+  `total_pages` alongside `data` and `total`. Invalid filter values say
+  which values are allowed.
 - **Project, webhook and attachment-upload writes go through the shared
   `Operations` module** (#246), so REST, MCP stdio and MCP over HTTP share
   one implementation and one set of tests. Slug and webhook URL rules moved
@@ -47,6 +54,8 @@
 
 ### Fixed
 
+- `GET /api/posts/{id}/similar` for an unknown post returns 404 instead of
+  a 500 (#247).
 - **MCP admin tools enforce the same rules as the REST API** (#246).
   `create_project` validates names and slugs (it built slugs with a bare
   lowercase-and-replace and skipped validation), `create_webhook` applies
