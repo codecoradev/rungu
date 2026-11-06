@@ -102,7 +102,7 @@ let created_at = parse_ts(row.get("created_at"));
 created_at: now.parse().unwrap(),  // BANNED in production code
 ```
 
-Helper location: `crates/rungu-core/src/store.rs`
+Helper location: `crates/rungu-core/src/store/` (one file per domain)
 
 ---
 
