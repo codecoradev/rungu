@@ -117,6 +117,9 @@
 
 ### Fixed
 
+- `/mcp` OAuth: a token the issuer refuses at userinfo (a banned or revoked
+  person) is now answered `401 invalid_token` instead of `503`, so the client
+  signs in again instead of retrying (#253).
 - MCP tools reject arguments whose type contradicts the schema (a string for
   an integer, a negative page) instead of silently using the default (#253).
 - MCP no longer returns raw internal error text (database messages) to
