@@ -41,6 +41,7 @@ pub fn router() -> Router<AppState> {
         .route("/posts/{id}", axum::routing::get(get_post).patch(update_post).delete(delete_post))
         .route("/posts/{id}/official-response", axum::routing::get(get_official_response).put(set_official_response))
         .route("/posts/{id}/similar", axum::routing::get(get_similar_posts))
+        .route("/projects/{slug}/similar", axum::routing::get(get_similar_by_title))
 }
 
 // ── Handlers ───────────────────────────────────────────────────────────
@@ -483,6 +484,39 @@ pub async fn get_similar_posts(
     Path(id): Path<String>,
 ) -> Result<impl IntoResponse, ApiError> {
     let similar = state.store.find_similar_posts(&id, 3).await?;
+    Ok(Json(serde_json::json!({ "data": similar })))
+}
+
+/// Query for the as-you-type duplicate check.
+#[derive(Debug, Deserialize, IntoParams)]
+pub struct SimilarQuery {
+    /// Draft post title to match against existing posts.
+    pub title: String,
+}
+
+/// Public list of up to 3 existing posts that look like a draft title, so the
+/// New Post form can suggest voting on an existing post instead of filing a
+/// duplicate. Uses the same keyword match as `/api/posts/{id}/similar`.
+#[utoipa::path(
+    get,
+    path = "/api/projects/{slug}/similar",
+    params(SimilarQuery),
+    responses(
+        (status = 200, description = "Up to 3 posts similar to the draft title", body = serde_json::Value),
+        (status = 404, description = "Project not found", body = serde_json::Value),
+    ),
+    tag = "posts",
+)]
+pub async fn get_similar_by_title(
+    State(state): State<AppState>,
+    Path(slug): Path<String>,
+    Query(query): Query<SimilarQuery>,
+) -> Result<impl IntoResponse, ApiError> {
+    let project =
+        state.store.get_project_by_slug(&slug).await?.ok_or_else(|| ApiError::not_found("Project not found"))?;
+    // Titles are capped at 200 chars on create; ignore anything longer.
+    let title: String = query.title.chars().take(200).collect();
+    let similar = state.store.find_similar_by_title(&project.id, &title, None, 3).await?;
     Ok(Json(serde_json::json!({ "data": similar })))
 }
 

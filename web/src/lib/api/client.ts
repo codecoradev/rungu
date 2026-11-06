@@ -116,6 +116,12 @@ export const api = {
     getSimilarPosts: (postId: string) =>
         request<DataResponse<PostDetail[]>>(`/api/posts/${seg(postId)}/similar`).then((r) => r.data),
 
+    /** Existing posts that look like a draft title (as-you-type duplicate check). */
+    getSimilarByTitle: (slug: string, title: string) =>
+        request<DataResponse<PostDetail[]>>(
+            `/api/projects/${seg(slug)}/similar?title=${encodeURIComponent(title)}`,
+        ).then((r) => r.data),
+
     createProject: (body: { name: string; slug?: string; description?: string }) =>
         request<DataResponse<Project>>('/api/projects', {
             method: 'POST',

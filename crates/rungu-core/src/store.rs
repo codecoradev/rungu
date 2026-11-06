@@ -119,6 +119,32 @@ fn category_to_str(c: PostCategory) -> &'static str {
     }
 }
 
+/// Filler words common in feedback titles that say nothing about the topic
+/// ("Please add support for ..."). Only words of 4+ characters matter, since
+/// shorter ones are dropped anyway.
+const SIMILARITY_STOPWORDS: &[&str] = &[
+    "please", "would", "could", "should", "there", "their", "them", "they", "this", "that", "these", "those", "with",
+    "without", "from", "into", "have", "having", "when", "what", "which", "where", "while", "will", "just", "like",
+    "also", "some", "more", "very", "really", "able", "allow", "allows", "being", "been", "does", "make", "need",
+    "want", "support", "supports", "feature", "option", "issue", "thing", "things", "using",
+];
+
+/// Keywords used to find posts similar to `title`: words of 4+ characters,
+/// lowercased, minus filler words, deduplicated, longest four first.
+fn similarity_tokens(title: &str) -> Vec<String> {
+    let mut seen = std::collections::HashSet::new();
+    let mut tokens: Vec<String> = title
+        .split_whitespace()
+        .map(|t| t.trim_matches(|c: char| !c.is_alphanumeric()).to_lowercase())
+        .filter(|t| t.chars().count() >= 4 && !SIMILARITY_STOPWORDS.contains(&t.as_str()))
+        .filter(|t| seen.insert(t.clone()))
+        .collect();
+    // Stable sort: equal-length words keep their title order.
+    tokens.sort_by_key(|t| std::cmp::Reverse(t.chars().count()));
+    tokens.truncate(4);
+    tokens
+}
+
 /// Sanitize a user-supplied search term into a safe FTS5 MATCH expression.
 ///
 /// FTS5 query syntax ("AND", "OR", "NEAR", `*`, `^`, `"..."`, column filters)
@@ -874,43 +900,59 @@ impl Store {
     /// Best-effort dedup helper — a thin wrapper over `list_posts` search.
     pub async fn find_similar_posts(&self, post_id: &str, limit: i64) -> Result<Vec<PostDetail>> {
         let post = self.get_post(post_id, None).await?.ok_or_else(|| anyhow::anyhow!("Post not found"))?;
+        self.find_similar_by_title(&post.post.project_id, &post.post.title, Some(post_id), limit).await
+    }
 
+    /// Find posts in a project whose title or description share keywords with
+    /// `title`, most-voted first. Backs both the post-detail "Similar posts"
+    /// block and the as-you-type duplicate check in the New Post form.
+    /// `exclude_id` drops one post (the post being viewed) from the results.
+    pub async fn find_similar_by_title(
+        &self,
+        project_id: &str,
+        title: &str,
+        exclude_id: Option<&str>,
+        limit: i64,
+    ) -> Result<Vec<PostDetail>> {
         // Deliberately LIKE-based, not FTS5: sqlx's AnyDriver fails to prepare
         // the FTS5 count query when the MATCH expression contains OR groups
-        // (reproduced live, #206). OR-of-prefix-tokens is the right semantic
-        // for dedup ("similar"), and LIKE covers both dialects identically.
-        // Use the 3 longest title tokens (≥4 chars) as OR-ed LIKE patterns —
-        // a single keyword misses short-title duplicates ("Dark mode please").
+        // (reproduced live, #206). OR-of-keywords is the right semantic for
+        // dedup ("similar"), and LIKE covers both dialects identically.
+        // Candidates match any keyword; they are ranked by how many keywords
+        // they share (a title hit counts double), then by votes.
         let mut results = Vec::new();
-        let mut tokens: Vec<String> = post
-            .post
-            .title
-            .split_whitespace()
-            .map(|t| t.trim_matches(|c: char| !c.is_alphanumeric()).to_string())
-            .filter(|t| t.chars().count() >= 4)
-            .collect();
-        tokens.sort_by_key(|t| std::cmp::Reverse(t.chars().count()));
-        tokens.truncate(3);
-        tokens.dedup();
+        let tokens = similarity_tokens(title);
         if !tokens.is_empty() {
-            let like_clause = tokens
+            let op = if self.is_sqlite { "LIKE" } else { "ILIKE" };
+            let match_clause = tokens
                 .iter()
-                .map(|_| "(p.title LIKE ? OR p.description LIKE ?)".to_string())
+                .map(|_| format!("(p.title {op} ? OR p.description {op} ?)"))
                 .collect::<Vec<_>>()
                 .join(" OR ");
-            let op = if self.is_sqlite { "LIKE" } else { "ILIKE" };
-            let like_clause = like_clause.replace("LIKE", op);
+            let score = tokens
+                .iter()
+                .map(|_| {
+                    format!(
+                        "(CASE WHEN p.title {op} ? THEN 2 ELSE 0 END + CASE WHEN p.description {op} ? THEN 1 ELSE 0 END)"
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(" + ");
             let sql = format!(
                 "SELECT p.*, u.id as user_id, u.name as user_name, u.avatar_url as user_avatar \
                  FROM posts p \
                  LEFT JOIN users u ON p.created_by = u.id \
-                 WHERE p.project_id = ? AND p.id != ? AND ({like_clause}) \
-                 ORDER BY p.vote_count DESC, p.created_at DESC LIMIT ?"
+                 WHERE p.project_id = ? AND p.id != ? AND ({match_clause}) \
+                 ORDER BY ({score}) DESC, p.vote_count DESC, p.created_at DESC LIMIT ?"
             );
-            let mut q = sqlx::query(&sql).bind(&post.post.project_id).bind(post_id);
-            for t in &tokens {
-                let like = format!("%{t}%");
-                q = q.bind(like.clone()).bind(like);
+            // Post ids are UUIDs, never empty, so "" excludes nothing.
+            let mut q = sqlx::query(&sql).bind(project_id).bind(exclude_id.unwrap_or(""));
+            // Placeholders in SQL order: WHERE pairs, then ORDER BY pairs.
+            for _pass in 0..2 {
+                for t in &tokens {
+                    let like = format!("%{t}%");
+                    q = q.bind(like.clone()).bind(like);
+                }
             }
             let rows = q.bind(limit).fetch_all(&self.pool).await.context("Failed to find similar posts")?;
             for row in rows {
@@ -930,7 +972,7 @@ impl Store {
                 results.push(PostDetail {
                     post: rungu_proto::Post {
                         id,
-                        project_id: post.post.project_id.clone(),
+                        project_id: project_id.to_string(),
                         title,
                         description: description.unwrap_or_default(),
                         category,
@@ -1661,5 +1703,33 @@ fn map_webhook_delivery(row: &AnyRow) -> WebhookDelivery {
         last_error: row.try_get("last_error").unwrap_or_default(),
         created_at: row.get::<String, _>("created_at"),
         delivered_at: row.try_get::<String, _>("delivered_at").ok(),
+    }
+}
+
+#[cfg(test)]
+mod similarity_tests {
+    use super::similarity_tokens;
+
+    #[test]
+    fn drops_filler_and_short_words() {
+        assert_eq!(similarity_tokens("Please add support for dark mode"), vec!["dark", "mode"]);
+    }
+
+    #[test]
+    fn lowercases_dedups_and_strips_punctuation() {
+        assert_eq!(similarity_tokens("Export, export EXPORT to CSV!"), vec!["export"]);
+    }
+
+    #[test]
+    fn keeps_the_four_longest_words_in_title_order_on_ties() {
+        assert_eq!(
+            similarity_tokens("webhook retries timeout signature payload"),
+            vec!["signature", "webhook", "retries", "timeout"]
+        );
+    }
+
+    #[test]
+    fn empty_when_nothing_meaningful_remains() {
+        assert!(similarity_tokens("a b c please").is_empty());
     }
 }

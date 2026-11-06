@@ -2,6 +2,34 @@
 
 ## [Unreleased]
 
+### Added
+
+- **Duplicate check while writing a post** — after a pause in typing, the
+  New Post form lists up to three existing posts that share keywords with
+  the draft title, linking to each, so people can vote instead of filing a
+  duplicate. Backed by the new public `GET /api/projects/{slug}/similar?title=`.
+
+### Changed
+
+- **Better "similar posts" matching** (post detail and the new duplicate
+  check) — filler words like "please" and "support" are ignored, up to four
+  keywords are used, and results are ranked by how many keywords they share
+  (title matches count double) before votes.
+- **Admin Decline confirmation is an accessible alert dialog** — focus
+  starts on Cancel, Tab stays inside, Esc closes it, and focus returns to
+  the Decline button. Outside clicks no longer dismiss it.
+
+### Fixed
+
+- **Keyboard shortcuts only swallow a key when they act** — Enter with no
+  post focused, or `c` while signed out, now keeps its normal behaviour.
+- Enter keeps its native action on more control types (image-map links,
+  menu checkbox/radio items, tree items, grid cells).
+- `docs/production-deploy.md` describes which routes each rate limiter
+  covers, and which one to raise when users see 429s.
+
+## [Unreleased]
+
 ### Changed
 
 - **One board navigation everywhere** — Roadmap and Changelog now show the

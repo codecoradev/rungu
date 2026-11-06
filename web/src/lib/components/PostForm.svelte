@@ -5,6 +5,9 @@
     import * as Card from '$lib/components/ui/card';
     import type { PostCategory } from '$lib/api/types';
     import { cn } from '$lib/utils';
+    import { api } from '$lib/api/client';
+    import type { PostDetail } from '$lib/api/types';
+    import ChevronUp from '@lucide/svelte/icons/chevron-up';
 
     let {
         slug,
@@ -22,6 +25,31 @@
     let category = $state<PostCategory>('feedback');
     let loading = $state(false);
     let error = $state('');
+
+    // As-you-type duplicate check: after a pause in typing, look up existing
+    // posts that share title keywords, so the author can vote on one instead
+    // of filing a duplicate. Best-effort: failures just show nothing.
+    let similar = $state<PostDetail[]>([]);
+    let similarFor = '';
+    $effect(() => {
+        const draft = title.trim();
+        // The server matches on words of 4+ characters; skip until one exists.
+        if (!draft.split(/\s+/).some((w) => w.length >= 4)) {
+            similar = [];
+            similarFor = '';
+            return;
+        }
+        const timer = setTimeout(async () => {
+            similarFor = draft;
+            try {
+                const found = await api.getSimilarByTitle(slug, draft);
+                if (similarFor === draft) similar = found; // ignore stale replies
+            } catch {
+                if (similarFor === draft) similar = [];
+            }
+        }, 400);
+        return () => clearTimeout(timer);
+    });
 
     const categories: { value: PostCategory; label: string }[] = [
         { value: 'feedback', label: 'Feedback' },
@@ -70,6 +98,32 @@
             <p class="mt-1 text-right text-xs text-muted-foreground" aria-live="polite">
                 {title.length}/200
             </p>
+            <div aria-live="polite">
+                {#if similar.length > 0}
+                    <div class="mt-1 rounded-lg border border-border bg-muted/40 p-3">
+                        <p class="text-xs font-medium text-muted-foreground">
+                            Similar posts already exist. Vote on one instead?
+                        </p>
+                        <ul class="mt-1 flex flex-col">
+                            {#each similar as post (post.id)}
+                                <li>
+                                    <a
+                                        href={`/board/${slug}/post/${post.id}`}
+                                        class="flex min-h-11 items-center justify-between gap-3 rounded-md px-2 text-sm hover:bg-muted"
+                                    >
+                                        <span class="min-w-0 truncate" title={post.title}>{post.title}</span>
+                                        <span class="flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
+                                            <ChevronUp class="size-3.5" aria-hidden="true" />
+                                            {post.vote_count}
+                                            <span class="sr-only">votes</span>
+                                        </span>
+                                    </a>
+                                </li>
+                            {/each}
+                        </ul>
+                    </div>
+                {/if}
+            </div>
         </div>
 
         <div>
