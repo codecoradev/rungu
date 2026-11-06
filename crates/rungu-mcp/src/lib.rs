@@ -1,29 +1,35 @@
 //! # rungu-mcp
 //!
-//! MCP server — stdio transport, AI agent tools.
+//! MCP server — AI agent tools over JSON-RPC 2.0.
 //!
-//! Implements JSON-RPC 2.0 over stdin/stdout for Model Context Protocol.
+//! [`handle_message`] is transport-independent: it takes one JSON-RPC message
+//! and the [`Actor`] the transport authenticated. Two transports use it:
 //!
-//! ## ⚠️ Security model — local trusted subprocess ONLY
+//! - **stdio** ([`run_server`], `rungu mcp`): a local subprocess of a trusted
+//!   agent, running as the built-in admin ([`local_admin_actor`]).
+//! - **HTTP** (`POST /mcp`, in `rungu-api`): Bearer API key, acting as the
+//!   `ai-agent` identity that key has on the REST API.
 //!
-//! This server runs **without authentication**. It is designed to be spawned as
-//! a local subprocess of an AI agent (Claude Code, Cursor, Windsurf) on a
-//! trusted single-user machine, with direct access to the SQLite database.
+//! ## ⚠️ Security model
 //!
-//! This means:
-//! - Any process that can spawn this binary can read and write all feedback data.
-//! - There is **no row-level authorization** and **no user impersonation check**.
-//! - Mutating tools (`create_post`, `update_post_status`, `update_post_category`,
-//!   `delete_post`, `vote_post`, `add_comment`, `delete_comment`, `delete_attachment`)
-//!   execute as the built-in `mcp@rungu.local` system user with the admin
-//!   role, through the same [`Operations`] module as the REST API — so
-//!   validation, storage cleanup, webhooks, and analytics behave identically.
-//! - The HTTP API's OAuth/session/role model does **not** apply here.
+//! Neither transport has per-user authorization: both act as an admin. Whoever
+//! can spawn `rungu mcp`, or holds `RUNGU_API_KEY`, can read and write all
+//! feedback data. Mutating tools execute through the same [`Operations`] module
+//! as the REST API — so validation, storage cleanup, webhooks, and analytics
+//! behave identically — and the actor is chosen by the transport, never inside
+//! this crate.
 //!
-//! Never expose this server over the network, never share the database file
-//! with untrusted users, and be aware that prompt-injection payloads can
-//! instruct the host agent to call these tools. See
-//! `docs/integrations/mcp.md#trust-boundary--security` for the full guidance.
+//! Never expose `rungu mcp` over a network, never share the database file with
+//! untrusted users, keep `RUNGU_API_KEY` secret, and be aware that
+//! prompt-injection payloads can instruct the host agent to call these tools.
+//! See `docs/integrations/mcp.md#trust-boundary--security` for the full
+//! guidance.
+//!
+//! ## Errors
+//!
+//! Failed calls return a JSON-RPC error whose code says why ([`McpError`]):
+//! `-32602` invalid params, `-32003` forbidden, `-32004` not found, `-32009`
+//! conflict, `-32601` unknown method, `-32603` internal.
 
 use std::io::{BufRead, Write};
 
@@ -38,7 +44,11 @@ use serde_json::{Value, json};
 const MAX_INPUT_LEN: usize = 1_048_576;
 
 /// Process a single JSON-RPC message and return the response string.
-pub async fn handle_message(input: &str, ops: &Operations) -> String {
+///
+/// `actor` is who the transport authenticated: mutating tools act as that
+/// actor, so authorization is decided by the transport and enforced by
+/// [`Operations`], never hard-coded here.
+pub async fn handle_message(input: &str, ops: &Operations, actor: &Actor) -> String {
     if input.len() > MAX_INPUT_LEN {
         return serde_json::to_string(&json!({
             "jsonrpc": "2.0",
@@ -67,61 +77,59 @@ pub async fn handle_message(input: &str, ops: &Operations) -> String {
     // JSON-RPC notifications (no "id") get NO response — replying corrupts
     // protocol-conformant client streams. Side effects still run.
     if id.is_none() {
-        let _ = handle_request(&method, &params, ops).await;
+        let _ = handle_request(&method, &params, ops, actor).await;
         return String::new();
     }
 
-    let result = handle_request(&method, &params, ops).await;
+    let result = handle_request(&method, &params, ops, actor).await;
 
     match result {
         Ok(val) => json!({ "jsonrpc": "2.0", "result": val, "id": id }).to_string(),
-        // Unknown tool/method is -32601 (Method not found); -32603 stays for
-        // handler-internal failures.
-        Err(msg) if msg.starts_with("Unknown") => {
-            json!({ "jsonrpc": "2.0", "error": {"code": -32601, "message": msg}, "id": id }).to_string()
-        }
-        Err(msg) => json!({ "jsonrpc": "2.0", "error": {"code": -32603, "message": msg}, "id": id }).to_string(),
+        Err(e) => e.to_json(id).to_string(),
     }
 }
 
 /// Route a method to its handler with parsed params.
-async fn handle_request(method: &str, params: &Value, ops: &Operations) -> Result<Value, String> {
+async fn handle_request(method: &str, params: &Value, ops: &Operations, actor: &Actor) -> Result<Value, McpError> {
     let store = ops.store();
     match method {
         "list_projects" => list_projects(store).await,
         "get_project" => get_project(params, store).await,
         "list_posts" => list_posts(params, store).await,
         "get_post" => get_post(params, store).await,
-        "create_post" => create_post(params, ops).await,
-        "update_post_status" => update_post_status(params, ops).await,
-        "vote_post" => vote_post(params, ops).await,
+        "create_post" => create_post(params, ops, actor).await,
+        "update_post_status" => update_post_status(params, ops, actor).await,
+        "vote_post" => vote_post(params, ops, actor).await,
         "search_posts" => search_posts(params, store).await,
         "get_changelog" => get_changelog(params, store).await,
         "list_comments" => list_comments(params, store).await,
-        "add_comment" => add_comment(params, ops).await,
-        "delete_comment" => delete_comment(params, ops).await,
+        "add_comment" => add_comment(params, ops, actor).await,
+        "delete_comment" => delete_comment(params, ops, actor).await,
         "get_stats" => get_stats(params, store).await,
         "get_trending" => get_trending(params, store).await,
         "get_analytics" => get_analytics(params, store).await,
         "get_top_posts" => get_top_posts(params, store).await,
-        "create_project" => create_project(params, ops).await,
-        "delete_project" => delete_project(params, ops).await,
+        "create_project" => create_project(params, ops, actor).await,
+        "delete_project" => delete_project(params, ops, actor).await,
         "list_webhooks" => list_webhooks(params, store).await,
-        "create_webhook" => create_webhook(params, ops).await,
-        "delete_webhook" => delete_webhook(params, ops).await,
+        "create_webhook" => create_webhook(params, ops, actor).await,
+        "delete_webhook" => delete_webhook(params, ops, actor).await,
         "list_attachments" => list_attachments(params, store).await,
-        "delete_post" => delete_post(params, ops).await,
-        "update_post_category" => update_post_category(params, ops).await,
+        "delete_post" => delete_post(params, ops, actor).await,
+        "update_post_category" => update_post_category(params, ops, actor).await,
         "get_roadmap" => get_roadmap(params, store).await,
-        "delete_attachment" => delete_attachment(params, ops).await,
-        _ => Err(format!("Unknown method: {method}")),
+        "delete_attachment" => delete_attachment(params, ops, actor).await,
+        _ => Err(McpError::method_not_found(format!("Unknown method: {method}"))),
     }
 }
 
 // ── Param extraction helpers ───────────────────────────────────────────
 
-fn get_str<'a>(params: &'a Value, key: &str) -> Result<&'a str, String> {
-    params.get(key).and_then(|v| v.as_str()).ok_or_else(|| format!("Missing required parameter: {key}"))
+fn get_str<'a>(params: &'a Value, key: &str) -> Result<&'a str, McpError> {
+    params
+        .get(key)
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| McpError::invalid_params(format!("Missing required parameter: {key}")))
 }
 
 fn get_optional_str<'a>(params: &'a Value, key: &str) -> Option<&'a str> {
@@ -157,37 +165,98 @@ fn post_page(posts: PostPage) -> Value {
     })
 }
 
-/// Operation refusals become the JSON-RPC error message verbatim.
-fn op_err(e: OpError) -> String {
-    e.to_string()
+/// A failed tool call, as a JSON-RPC error.
+///
+/// Codes follow JSON-RPC where it has one (`-32602` invalid params, `-32601`
+/// method not found, `-32603` internal) and use the implementation-defined
+/// server-error range for the refusals clients most need to tell apart.
+/// They mirror the REST statuses: 403 → `-32003`, 404 → `-32004`,
+/// 409 → `-32009`. `data.kind` repeats the reason as a stable string.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct McpError {
+    pub code: i64,
+    pub kind: &'static str,
+    pub message: String,
 }
 
-/// Get or create the MCP system user for operations that need a user_id.
-///
-/// MCP runs as a trusted local admin (see the module docs).
-async fn mcp_actor(store: &Store) -> Result<Actor, String> {
-    let user = store
-        .find_or_create_user("mcp@rungu.local", Some("MCP Bot"), None, &[])
-        .await
-        .map_err(|e| format!("Failed to get/create MCP user: {e}"))?;
+impl McpError {
+    pub const INVALID_PARAMS: i64 = -32602;
+    pub const METHOD_NOT_FOUND: i64 = -32601;
+    pub const INTERNAL: i64 = -32603;
+    pub const FORBIDDEN: i64 = -32003;
+    pub const NOT_FOUND: i64 = -32004;
+    pub const CONFLICT: i64 = -32009;
+
+    fn new(code: i64, kind: &'static str, message: impl Into<String>) -> Self {
+        Self { code, kind, message: message.into() }
+    }
+
+    fn invalid_params(message: impl Into<String>) -> Self {
+        Self::new(Self::INVALID_PARAMS, "invalid_params", message)
+    }
+
+    fn method_not_found(message: impl Into<String>) -> Self {
+        Self::new(Self::METHOD_NOT_FOUND, "method_not_found", message)
+    }
+
+    fn to_json(&self, id: Option<Value>) -> Value {
+        json!({
+            "jsonrpc": "2.0",
+            "error": { "code": self.code, "message": self.message, "data": { "kind": self.kind } },
+            "id": id,
+        })
+    }
+}
+
+/// Operation refusals keep their message and gain a code that says why.
+impl From<OpError> for McpError {
+    fn from(e: OpError) -> Self {
+        let message = e.to_string();
+        match e {
+            OpError::Invalid(_) => Self::invalid_params(message),
+            OpError::NotFound(_) => Self::new(Self::NOT_FOUND, "not_found", message),
+            OpError::Forbidden(_) => Self::new(Self::FORBIDDEN, "forbidden", message),
+            OpError::Conflict(_) => Self::new(Self::CONFLICT, "conflict", message),
+            OpError::Internal(_) => Self::new(Self::INTERNAL, "internal", message),
+        }
+    }
+}
+
+/// Handler failures that carry only a message are internal errors.
+impl From<String> for McpError {
+    fn from(message: String) -> Self {
+        Self::new(Self::INTERNAL, "internal", message)
+    }
+}
+
+fn op_err(e: OpError) -> McpError {
+    e.into()
+}
+
+/// The identity `rungu mcp` (stdio) runs tools as: the built-in
+/// `mcp@rungu.local` user with the admin role. Stdio is a local subprocess
+/// of a trusted agent (see the module docs), so it is deliberately an admin.
+/// Resolved once at startup; other transports pass the actor they authenticated.
+pub async fn local_admin_actor(store: &Store) -> Result<Actor> {
+    let user = store.find_or_create_user("mcp@rungu.local", Some("MCP Bot"), None, &[]).await?;
     Ok(Actor { id: user.id, role: UserRole::Admin })
 }
 
 // ── Tool implementations ───────────────────────────────────────────────
 
 /// List all projects.
-async fn list_projects(store: &Store) -> Result<Value, String> {
+async fn list_projects(store: &Store) -> Result<Value, McpError> {
     let projects = store.list_projects().await.map_err(|e| format!("Failed to list projects: {e}"))?;
     Ok(json!({ "data": projects }))
 }
 
-async fn get_project(params: &Value, store: &Store) -> Result<Value, String> {
+async fn get_project(params: &Value, store: &Store) -> Result<Value, McpError> {
     let project = queries(store).project(get_str(params, "slug")?).await.map_err(op_err)?;
     Ok(json!({ "data": project }))
 }
 
 /// List posts in a project with optional filters (same rules as REST).
-async fn list_posts(params: &Value, store: &Store) -> Result<Value, String> {
+async fn list_posts(params: &Value, store: &Store) -> Result<Value, McpError> {
     let filters = BoardFilters {
         sort: get_optional_str(params, "sort"),
         status: get_optional_str(params, "status"),
@@ -200,7 +269,7 @@ async fn list_posts(params: &Value, store: &Store) -> Result<Value, String> {
 }
 
 /// Get a single post by ID.
-async fn get_post(params: &Value, store: &Store) -> Result<Value, String> {
+async fn get_post(params: &Value, store: &Store) -> Result<Value, McpError> {
     let id = get_str(params, "id")?;
     let post = store
         .get_post(id, None)
@@ -211,36 +280,33 @@ async fn get_post(params: &Value, store: &Store) -> Result<Value, String> {
 }
 
 /// Create a new post.
-async fn create_post(params: &Value, ops: &Operations) -> Result<Value, String> {
+async fn create_post(params: &Value, ops: &Operations, actor: &Actor) -> Result<Value, McpError> {
     let input = NewPost {
         title: get_str(params, "title")?,
         description: get_optional_str(params, "description").unwrap_or(""),
         category: get_optional_str(params, "category"),
     };
-    let actor = mcp_actor(ops.store()).await?;
-    let post = ops.create_post(&actor, get_str(params, "slug")?, input).await.map_err(op_err)?;
+    let post = ops.create_post(actor, get_str(params, "slug")?, input).await.map_err(op_err)?;
     Ok(json!({ "data": post }))
 }
 
 /// Update a post's status.
-async fn update_post_status(params: &Value, ops: &Operations) -> Result<Value, String> {
+async fn update_post_status(params: &Value, ops: &Operations, actor: &Actor) -> Result<Value, McpError> {
     let id = get_str(params, "id")?;
     let status_str = get_str(params, "status")?;
-    let actor = mcp_actor(ops.store()).await?;
-    ops.update_post(&actor, id, PostChanges { status: Some(status_str), category: None }).await.map_err(op_err)?;
+    ops.update_post(actor, id, PostChanges { status: Some(status_str), category: None }).await.map_err(op_err)?;
     Ok(json!({ "updated": true, "id": id, "status": status_str }))
 }
 
 /// Toggle vote on a post.
-async fn vote_post(params: &Value, ops: &Operations) -> Result<Value, String> {
+async fn vote_post(params: &Value, ops: &Operations, actor: &Actor) -> Result<Value, McpError> {
     let id = get_str(params, "id")?;
-    let actor = mcp_actor(ops.store()).await?;
-    let outcome = ops.toggle_vote(&actor, id).await.map_err(op_err)?;
+    let outcome = ops.toggle_vote(actor, id).await.map_err(op_err)?;
     Ok(json!({ "data": { "voted": outcome.voted, "vote_count": outcome.vote_count } }))
 }
 
 /// Full-text search, newest first.
-async fn search_posts(params: &Value, store: &Store) -> Result<Value, String> {
+async fn search_posts(params: &Value, store: &Store) -> Result<Value, McpError> {
     let posts = queries(store)
         .search(get_str(params, "slug")?, get_str(params, "q")?, page_request(params))
         .await
@@ -249,7 +315,7 @@ async fn search_posts(params: &Value, store: &Store) -> Result<Value, String> {
 }
 
 /// Shipped posts, most recently updated first. Optional `since` (RFC 3339).
-async fn get_changelog(params: &Value, store: &Store) -> Result<Value, String> {
+async fn get_changelog(params: &Value, store: &Store) -> Result<Value, McpError> {
     let posts = queries(store)
         .changelog(get_str(params, "slug")?, get_optional_str(params, "since"), page_request(params))
         .await
@@ -258,7 +324,7 @@ async fn get_changelog(params: &Value, store: &Store) -> Result<Value, String> {
 }
 
 /// List comments for a post.
-async fn list_comments(params: &Value, store: &Store) -> Result<Value, String> {
+async fn list_comments(params: &Value, store: &Store) -> Result<Value, McpError> {
     let post_id = get_str(params, "post_id")?;
     let comments = store.list_comments(post_id).await.map_err(|e| format!("Failed to list comments: {e}"))?;
 
@@ -266,17 +332,16 @@ async fn list_comments(params: &Value, store: &Store) -> Result<Value, String> {
 }
 
 /// Add a comment to a post.
-async fn add_comment(params: &Value, ops: &Operations) -> Result<Value, String> {
+async fn add_comment(params: &Value, ops: &Operations, actor: &Actor) -> Result<Value, McpError> {
     let post_id = get_str(params, "post_id")?;
     let content = get_str(params, "content")?;
     let parent_id = get_optional_str(params, "parent_id");
-    let actor = mcp_actor(ops.store()).await?;
-    let comment = ops.create_comment(&actor, post_id, content, parent_id).await.map_err(op_err)?;
+    let comment = ops.create_comment(actor, post_id, content, parent_id).await.map_err(op_err)?;
     Ok(json!({ "data": comment }))
 }
 
 /// Get statistics for a project (counts by status).
-async fn get_stats(params: &Value, store: &Store) -> Result<Value, String> {
+async fn get_stats(params: &Value, store: &Store) -> Result<Value, McpError> {
     let slug = get_str(params, "slug")?;
     let project = queries(store).project(slug).await.map_err(op_err)?;
 
@@ -295,7 +360,7 @@ async fn get_stats(params: &Value, store: &Store) -> Result<Value, String> {
 }
 
 /// Posts gaining votes fastest (7-day velocity).
-async fn get_trending(params: &Value, store: &Store) -> Result<Value, String> {
+async fn get_trending(params: &Value, store: &Store) -> Result<Value, McpError> {
     let limit = get_optional_u64(params, "limit").map(|n| n.min(i64::MAX as u64) as i64);
     let posts = queries(store).trending(get_str(params, "slug")?, limit).await.map_err(op_err)?;
     Ok(post_page(posts))
@@ -303,7 +368,7 @@ async fn get_trending(params: &Value, store: &Store) -> Result<Value, String> {
 
 /// Aggregate analytics for a project (#186) — event totals + daily trend.
 /// Privacy-first: counts only, no IP / user data exists in the source table.
-async fn get_analytics(params: &Value, store: &Store) -> Result<Value, String> {
+async fn get_analytics(params: &Value, store: &Store) -> Result<Value, McpError> {
     let slug = get_str(params, "slug")?;
     let days = get_optional_u64(params, "days").unwrap_or(30).clamp(0, 365) as u32;
 
@@ -331,7 +396,7 @@ async fn get_analytics(params: &Value, store: &Store) -> Result<Value, String> {
 
 /// Top posts by views (#186) — with vote counts and vote/view conversion,
 /// ready for AI-assisted prioritization ("which requests get attention but no votes?").
-async fn get_top_posts(params: &Value, store: &Store) -> Result<Value, String> {
+async fn get_top_posts(params: &Value, store: &Store) -> Result<Value, McpError> {
     let slug = get_str(params, "slug")?;
     let days = get_optional_u64(params, "days").unwrap_or(30).clamp(0, 365) as u32;
     let limit = get_optional_u64(params, "limit").unwrap_or(10).clamp(1, 50) as i64;
@@ -363,29 +428,27 @@ async fn get_top_posts(params: &Value, store: &Store) -> Result<Value, String> {
 }
 
 /// Create a project (admin parity — same rules as REST POST /api/projects).
-async fn create_project(params: &Value, ops: &Operations) -> Result<Value, String> {
-    let actor = mcp_actor(ops.store()).await?;
+async fn create_project(params: &Value, ops: &Operations, actor: &Actor) -> Result<Value, McpError> {
     let input = NewProject {
         name: get_str(params, "name")?,
         // An empty slug means "derive it from the name", as before.
         slug: get_optional_str(params, "slug").filter(|s| !s.is_empty()),
         description: get_optional_str(params, "description"),
     };
-    let project = ops.create_project(&actor, input).await.map_err(op_err)?;
+    let project = ops.create_project(actor, input).await.map_err(op_err)?;
     Ok(json!({ "data": project }))
 }
 
 /// Delete a project and everything in it, attachment files included
 /// (admin parity — irreversible).
-async fn delete_project(params: &Value, ops: &Operations) -> Result<Value, String> {
-    let actor = mcp_actor(ops.store()).await?;
+async fn delete_project(params: &Value, ops: &Operations, actor: &Actor) -> Result<Value, McpError> {
     let slug = get_str(params, "slug")?;
-    let project = ops.delete_project(&actor, slug).await.map_err(op_err)?;
+    let project = ops.delete_project(actor, slug).await.map_err(op_err)?;
     Ok(json!({ "deleted": true, "id": project.id, "slug": slug }))
 }
 
 /// List webhooks for a project (admin parity; secrets are NOT included).
-async fn list_webhooks(params: &Value, store: &Store) -> Result<Value, String> {
+async fn list_webhooks(params: &Value, store: &Store) -> Result<Value, McpError> {
     let slug = get_str(params, "slug")?;
     let project = queries(store).project(slug).await.map_err(op_err)?;
     let webhooks = store.list_webhooks(&project.id).await.map_err(|e| format!("Failed to list webhooks: {e}"))?;
@@ -395,30 +458,29 @@ async fn list_webhooks(params: &Value, store: &Store) -> Result<Value, String> {
 /// Create a webhook subscription (admin parity — same URL rules as REST).
 /// Auto-generates a signing secret when `secret` is omitted; the secret is
 /// returned exactly once here.
-async fn create_webhook(params: &Value, ops: &Operations) -> Result<Value, String> {
-    let actor = mcp_actor(ops.store()).await?;
+async fn create_webhook(params: &Value, ops: &Operations, actor: &Actor) -> Result<Value, McpError> {
     let slug = get_str(params, "slug")?;
     let input = NewWebhook {
         url: get_str(params, "url")?,
         events: get_optional_str(params, "events"),
         secret: get_optional_str(params, "secret"),
     };
-    let created = ops.create_webhook(&actor, slug, input).await.map_err(op_err)?;
+    let created = ops.create_webhook(actor, slug, input).await.map_err(op_err)?;
     Ok(json!({ "data": created.webhook, "signing_secret": created.secret }))
 }
 
 /// Delete a webhook (admin parity). An unknown id is an error; with the
 /// optional `slug`, the webhook must also belong to that project.
-async fn delete_webhook(params: &Value, ops: &Operations) -> Result<Value, String> {
-    let actor = mcp_actor(ops.store()).await?;
+async fn delete_webhook(params: &Value, ops: &Operations, actor: &Actor) -> Result<Value, McpError> {
     let id = get_str(params, "id")?;
     let slug = get_optional_str(params, "slug").filter(|s| !s.is_empty());
-    ops.delete_webhook(&actor, id, slug).await.map_err(op_err)?;
+    ops.delete_webhook(actor, id, slug).await.map_err(op_err)?;
     Ok(json!({ "deleted": true, "id": id }))
 }
 
 /// Run the MCP server, reading JSON-RPC from stdin and writing to stdout.
 pub async fn run_server(ops: Operations) -> Result<()> {
+    let actor = local_admin_actor(ops.store()).await?;
     let stdin = std::io::stdin();
     let stdout = std::io::stdout();
     let mut stdout = stdout.lock();
@@ -452,7 +514,7 @@ pub async fn run_server(ops: Operations) -> Result<()> {
             continue;
         }
 
-        let response = handle_message(&line, &ops).await;
+        let response = handle_message(&line, &ops, &actor).await;
         if let Err(e) = writeln!(stdout, "{response}") {
             tracing::error!("Failed to write MCP response: {e}");
             break;
@@ -464,24 +526,22 @@ pub async fn run_server(ops: Operations) -> Result<()> {
 }
 
 /// Delete a post by ID.
-async fn delete_post(params: &Value, ops: &Operations) -> Result<Value, String> {
+async fn delete_post(params: &Value, ops: &Operations, actor: &Actor) -> Result<Value, McpError> {
     let id = get_str(params, "id")?;
-    let actor = mcp_actor(ops.store()).await?;
-    ops.delete_post(&actor, id).await.map_err(op_err)?;
+    ops.delete_post(actor, id).await.map_err(op_err)?;
     Ok(json!({ "deleted": true, "id": id }))
 }
 
 /// Update a post's category.
-async fn update_post_category(params: &Value, ops: &Operations) -> Result<Value, String> {
+async fn update_post_category(params: &Value, ops: &Operations, actor: &Actor) -> Result<Value, McpError> {
     let id = get_str(params, "id")?;
     let category_str = get_str(params, "category")?;
-    let actor = mcp_actor(ops.store()).await?;
-    ops.update_post(&actor, id, PostChanges { status: None, category: Some(category_str) }).await.map_err(op_err)?;
+    ops.update_post(actor, id, PostChanges { status: None, category: Some(category_str) }).await.map_err(op_err)?;
     Ok(json!({ "updated": true, "id": id, "category": category_str }))
 }
 
 /// The roadmap: planned, in progress and done, most voted first.
-async fn get_roadmap(params: &Value, store: &Store) -> Result<Value, String> {
+async fn get_roadmap(params: &Value, store: &Store) -> Result<Value, McpError> {
     let per_bucket = get_optional_u64(params, "limit").map(|n| n.min(i64::MAX as u64) as i64);
     let roadmap = queries(store).roadmap(get_str(params, "slug")?, per_bucket).await.map_err(op_err)?;
     Ok(json!({
@@ -498,23 +558,21 @@ async fn get_roadmap(params: &Value, store: &Store) -> Result<Value, String> {
 }
 
 /// Delete an attachment by ID.
-async fn delete_attachment(params: &Value, ops: &Operations) -> Result<Value, String> {
+async fn delete_attachment(params: &Value, ops: &Operations, actor: &Actor) -> Result<Value, McpError> {
     let attachment_id = get_str(params, "id")?;
-    let actor = mcp_actor(ops.store()).await?;
-    ops.delete_attachment(&actor, attachment_id).await.map_err(op_err)?;
+    ops.delete_attachment(actor, attachment_id).await.map_err(op_err)?;
     Ok(json!({ "deleted": true, "id": attachment_id }))
 }
 
 /// Delete a comment by ID.
-async fn delete_comment(params: &Value, ops: &Operations) -> Result<Value, String> {
+async fn delete_comment(params: &Value, ops: &Operations, actor: &Actor) -> Result<Value, McpError> {
     let comment_id = get_str(params, "comment_id")?;
-    let actor = mcp_actor(ops.store()).await?;
-    ops.delete_comment(&actor, comment_id).await.map_err(op_err)?;
+    ops.delete_comment(actor, comment_id).await.map_err(op_err)?;
     Ok(json!({ "deleted": true, "comment_id": comment_id }))
 }
 
 /// List attachments for a post.
-async fn list_attachments(params: &Value, store: &Store) -> Result<Value, String> {
+async fn list_attachments(params: &Value, store: &Store) -> Result<Value, McpError> {
     let post_id = get_str(params, "post_id")?;
     // Verify post exists (consistent with REST API behavior)
     store
@@ -539,9 +597,18 @@ mod tests {
         Operations::new(store, std::sync::Arc::new(storage), rungu_core::EventBus::default())
     }
 
-    async fn call(ops: &Operations, method: &str, params: Value) -> Value {
+    /// The stdio identity: the built-in local admin.
+    async fn admin(ops: &Operations) -> Actor {
+        local_admin_actor(ops.store()).await.unwrap()
+    }
+
+    async fn call_as(ops: &Operations, actor: &Actor, method: &str, params: Value) -> Value {
         let input = json!({ "jsonrpc": "2.0", "method": method, "params": params, "id": 1 }).to_string();
-        serde_json::from_str(&handle_message(&input, ops).await).unwrap()
+        serde_json::from_str(&handle_message(&input, ops, actor).await).unwrap()
+    }
+
+    async fn call(ops: &Operations, method: &str, params: Value) -> Value {
+        call_as(ops, &admin(ops).await, method, params).await
     }
 
     /// #246: the admin tools now go through `Operations`, so they enforce the
@@ -568,10 +635,71 @@ mod tests {
         assert_eq!(call(&ops, "delete_webhook", json!({ "id": id })).await["result"]["deleted"], true);
     }
 
+    /// #248: authorization comes from the transport's actor, so a non-admin
+    /// actor is refused by `Operations` instead of being treated as admin.
+    #[tokio::test]
+    async fn tools_act_as_the_actor_the_transport_passes() {
+        let ops = test_ops().await;
+        let member = ops.store().find_or_create_user("member@x.test", None, None, &[]).await.unwrap();
+        let member = Actor { id: member.id, role: UserRole::Member };
+
+        let refused = call_as(&ops, &member, "create_project", json!({ "name": "Nope" })).await;
+        assert_eq!(refused["error"]["code"], McpError::FORBIDDEN);
+        assert_eq!(refused["error"]["data"]["kind"], "forbidden");
+        assert!(ops.store().list_projects().await.unwrap().is_empty());
+
+        // The same call as the stdio admin goes through.
+        let made = call(&ops, "create_project", json!({ "name": "Yes" })).await;
+        assert_eq!(made["result"]["data"]["slug"], "yes");
+
+        // A member may act on their own posts, and the post carries their id.
+        let post = call_as(&ops, &member, "create_post", json!({ "slug": "yes", "title": "Mine" })).await;
+        assert_eq!(post["result"]["data"]["created_by"], member.id);
+        let id = post["result"]["data"]["id"].clone();
+        let other = ops.store().find_or_create_user("other@x.test", None, None, &[]).await.unwrap();
+        let other = Actor { id: other.id, role: UserRole::Member };
+        let denied = call_as(&ops, &other, "delete_post", json!({ "id": id })).await;
+        assert_eq!(denied["error"]["code"], McpError::FORBIDDEN);
+    }
+
+    /// #248: each kind of failure has its own code, so clients can tell a
+    /// typo from a missing thing from a server fault.
+    #[tokio::test]
+    async fn errors_carry_a_code_per_kind() {
+        let ops = test_ops().await;
+        call(&ops, "create_project", json!({ "name": "Acme" })).await;
+
+        let code = |v: &Value| {
+            (v["error"]["code"].as_i64().unwrap(), v["error"]["data"]["kind"].as_str().unwrap().to_string())
+        };
+        let missing_param = call(&ops, "get_project", json!({})).await;
+        assert_eq!(code(&missing_param), (McpError::INVALID_PARAMS, "invalid_params".into()));
+        let invalid = call(&ops, "list_posts", json!({ "slug": "acme", "status": "opennn" })).await;
+        assert_eq!(code(&invalid), (McpError::INVALID_PARAMS, "invalid_params".into()));
+        let not_found = call(&ops, "get_project", json!({ "slug": "nope" })).await;
+        assert_eq!(code(&not_found), (McpError::NOT_FOUND, "not_found".into()));
+        let conflict = call(&ops, "create_project", json!({ "name": "Again", "slug": "acme" })).await;
+        assert_eq!(code(&conflict), (McpError::CONFLICT, "conflict".into()));
+        let unknown = call(&ops, "no_such_tool", json!({})).await;
+        assert_eq!(code(&unknown), (McpError::METHOD_NOT_FOUND, "method_not_found".into()));
+
+        // The message is unchanged by the code.
+        assert!(not_found["error"]["message"].as_str().unwrap().contains("not found"));
+    }
+
+    /// Blank search is an error, not "the whole board" (shared with REST via BoardQuery).
+    #[tokio::test]
+    async fn search_posts_requires_a_query() {
+        let ops = test_ops().await;
+        call(&ops, "create_project", json!({ "name": "Acme" })).await;
+        let blank = call(&ops, "search_posts", json!({ "slug": "acme", "q": "   " })).await;
+        assert_eq!(blank["error"]["code"], McpError::INVALID_PARAMS);
+    }
+
     #[tokio::test]
     async fn test_handle_message_invalid_json() {
         let ops = test_ops().await;
-        let response = handle_message("not json", &ops).await;
+        let response = handle_message("not json", &ops, &admin(&ops).await).await;
         let parsed: Value = serde_json::from_str(&response).unwrap();
         assert_eq!(parsed["error"]["code"], -32700);
     }
@@ -589,7 +717,7 @@ mod tests {
     async fn test_handle_message_too_large() {
         let ops = test_ops().await;
         let huge = "x".repeat(MAX_INPUT_LEN + 1);
-        let response = handle_message(&huge, &ops).await;
+        let response = handle_message(&huge, &ops, &admin(&ops).await).await;
         let parsed: Value = serde_json::from_str(&response).unwrap();
         assert_eq!(parsed["error"]["code"], -32600);
     }

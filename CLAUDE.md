@@ -13,7 +13,7 @@ Rungu is a lightweight, self-hosted feedback board written in Rust with an embed
 - **Multi-provider OAuth** — Google, GitHub, Keycloak (ENV-driven)
 - **Email-based identity dedup** — same email = same user across providers
 - **JWT session tokens** — signed by APP_SECRET, HttpOnly cookie
-- **MCP:** stdio transport only (no TCP) — process isolation replaces auth
+- **MCP:** two transports over one dispatcher (`rungu-mcp`): stdio for a local trusted subprocess, and `POST /mcp` over HTTP with the `RUNGU_API_KEY` Bearer key. The transport decides the acting identity; `Operations` enforces the rules
 - **REST API:** JSON, CORS, trace logging
 
 ## Crate Naming
@@ -24,7 +24,7 @@ Rungu is a lightweight, self-hosted feedback board written in Rust with an embed
 | `rungu-core` | Storage trait, config, business logic, SQLite queries |
 | `rungu-auth` | Multi-provider OAuth (Google/GitHub/Keycloak), JWT session, middleware |
 | `rungu-api` | REST API routes (Axum handlers) |
-| `rungu-mcp` | MCP server via stdio (JSON-RPC 2.0) |
+| `rungu-mcp` | MCP tools (JSON-RPC 2.0), served over stdio and by `rungu-api` at `/mcp` |
 | `rungud` | Daemon binary (CLI: `rungu`) |
 
 ## Rust Style
@@ -63,7 +63,7 @@ Rungu is a lightweight, self-hosted feedback board written in Rust with an embed
 | Multi-provider OAuth via ENV | Decided |
 | JWT session (not OAuth tokens) | Decided |
 | No username, email-only | Decided |
-| MCP stdio only (no TCP) | Decided |
+| MCP over stdio and HTTP (`/mcp`, API key); actor comes from the transport | Decided |
 | SQLite single-writer | Decided |
 | Apache-2.0 license | Decided |
 

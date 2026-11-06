@@ -219,6 +219,81 @@ async fn test_mcp_http_envelope_and_auth() {
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 }
 
+/// #248: the transport decides who is acting. Over `/mcp` a valid key is the
+/// same `ai-agent` identity REST gives it, so rows carry that author (not a
+/// separate `mcp@rungu.local` user), and failures carry a code per kind.
+#[tokio::test]
+async fn test_mcp_http_acts_as_the_api_key_agent_and_codes_errors() {
+    let pool = open_pool("sqlite::memory:").await.unwrap();
+    run_migrations(&pool, "sqlite::memory:").await.unwrap();
+    let store = Store::new_with_kind(pool, true);
+    store.create_project("Test App", "test-app", "").await.unwrap();
+    let agent = store
+        .find_or_create_user(
+            rungu_auth::middleware::AGENT_USER_EMAIL,
+            Some(rungu_auth::middleware::AGENT_USER_NAME),
+            None,
+            &[rungu_auth::middleware::AGENT_USER_EMAIL.to_string()],
+        )
+        .await
+        .unwrap();
+
+    let config = AuthConfig {
+        app_secret: "test-secret".to_string(),
+        app_url: "http://localhost:3000".to_string(),
+        secure_cookie: false,
+        admin_emails: vec![],
+        api_key: Some(KEY.to_string()),
+        google: None,
+        github: None,
+        keycloak: None,
+    };
+    let state = AppState::new(
+        store.clone(),
+        config,
+        reqwest::Client::new(),
+        std::sync::Arc::from(rungu_core::FsStorage::new(std::env::temp_dir().join("rungu-test-apikey-agent")).unwrap()),
+        rungu_api::meta::InstanceBranding::default(),
+        std::sync::Arc::new(rungu_api::meta::LicenseStatus::new()),
+        std::sync::Arc::new(Some(agent.id.clone())),
+    );
+    let app = axum::Router::new().merge(rungu_api::mcp_http::mcp_routes().with_state(state));
+
+    let call = |body: &'static str| {
+        let app = app.clone();
+        async move {
+            let response = app
+                .oneshot(
+                    Request::builder()
+                        .method("POST")
+                        .uri("/mcp")
+                        .header("authorization", format!("Bearer {KEY}"))
+                        .header("content-type", "application/json")
+                        .body(Body::from(body))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK, "JSON-RPC errors ride on HTTP 200");
+            let bytes = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+            serde_json::from_slice::<serde_json::Value>(&bytes).unwrap()
+        }
+    };
+
+    let created =
+        call(r#"{"jsonrpc":"2.0","id":1,"method":"create_post","params":{"slug":"test-app","title":"From an agent"}}"#)
+            .await;
+    assert_eq!(created["result"]["data"]["created_by"], agent.id, "authored by the API key's agent identity");
+
+    let not_found = call(r#"{"jsonrpc":"2.0","id":2,"method":"get_project","params":{"slug":"nope"}}"#).await;
+    assert_eq!(not_found["error"]["code"], -32004);
+    assert_eq!(not_found["error"]["data"]["kind"], "not_found");
+
+    let bad =
+        call(r#"{"jsonrpc":"2.0","id":3,"method":"create_project","params":{"name":"X","slug":"Bad Slug"}}"#).await;
+    assert_eq!(bad["error"]["code"], -32602);
+}
+
 #[test]
 fn test_constant_time_compare_rejects_wrong_lengths() {
     // Indirect: the helper is private; behavior is covered by the 401 tests

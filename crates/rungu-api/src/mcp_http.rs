@@ -7,6 +7,10 @@
 //! transport remains the local default — this route simply reuses
 //! `rungu_mcp::handle_message` over a second transport, with zero duplicated
 //! tool logic.
+//!
+//! The transport decides who is acting: a valid API key is the same
+//! `ai-agent` identity the REST API gives that key, so rows an agent creates
+//! over `/mcp` and over REST carry the same author.
 
 use axum::Json;
 use axum::extract::State;
@@ -14,6 +18,15 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::IntoResponse;
 use axum::routing::post;
 use rungu_mcp::handle_message;
+
+/// The actor behind a valid API key: the bootstrapped `ai-agent` user with the
+/// admin role (the same identity the REST Bearer path uses).
+fn api_key_actor(state: &crate::AppState) -> rungu_core::Actor {
+    rungu_core::Actor {
+        id: state.agent_user_id.as_deref().unwrap_or(rungu_auth::middleware::AGENT_USER_EMAIL).to_string(),
+        role: rungu_proto::UserRole::Admin,
+    }
+}
 
 /// POST /mcp — one JSON-RPC request per HTTP call (stateless). Runs on the
 /// server's shared `Operations`, so it shares the project cache and event
@@ -62,7 +75,7 @@ pub async fn mcp_http(
             .into_response();
     };
 
-    let response = handle_message(input, &state.ops).await;
+    let response = handle_message(input, &state.ops, &api_key_actor(&state)).await;
     (StatusCode::OK, [(axum::http::header::CONTENT_TYPE, "application/json")], response).into_response()
 }
 

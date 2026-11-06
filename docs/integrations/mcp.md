@@ -1,10 +1,8 @@
 # MCP Server
 
-> ⚠️ **Experimental** — tool handlers currently return stub data. Full implementation tracked in [#28](https://github.com/codecoradev/rungu/issues/28).
-
-> 🔴 **Security: local trusted environments only.**
+> 🔴 **Security: MCP acts as an admin, on both transports.**
 >
-> The MCP server runs **without authentication** and calls the storage layer directly. It is designed exclusively for use as a local subprocess of an AI agent you control (e.g. Claude Code, Cursor) on a trusted machine. **Never expose the MCP server over the network or to a shared/multi-user environment** — any process that can reach the database file (or invoke the subprocess) can read and write all feedback data, impersonate any user, and bypass every application-level authorization check. See [Trust Boundary](#trust-boundary--security) below.
+> Over **stdio** the server runs without authentication as a built-in admin user, so use it only as a local subprocess of an AI agent you control (Claude Code, Cursor) on a trusted machine. Over **HTTP** (`POST /mcp`) anyone holding `RUNGU_API_KEY` can call every tool as an admin: keep the key secret and serve it over HTTPS. Neither transport applies the web app's per-user roles. See [Trust Boundary](#trust-boundary--security) below.
 
 Rungu includes a built-in MCP (Model Context Protocol) server that lets AI agents query and manage feedback directly.
 
@@ -86,7 +84,30 @@ In Claude Code:
 
 ## Transport
 
-The MCP server uses **stdio** transport (stdin/stdout). No HTTP server needed — it runs as a subprocess of the AI agent. Only JSON-RPC is written to stdout; logs go to stderr.
+Both transports run the same 26 tools through the same dispatcher. The transport decides who is acting.
+
+| | stdio (`rungu mcp`) | HTTP (`POST /mcp`) |
+|---|---|---|
+| Runs as | a subprocess of the agent | the Rungu server |
+| Auth | none (local trust) | `Authorization: Bearer <RUNGU_API_KEY>` |
+| Acts as | built-in `mcp@rungu.local` admin | the `ai-agent` admin user the key has on the REST API |
+
+stdio uses stdin/stdout: only JSON-RPC is written to stdout and logs go to stderr. HTTP is stateless, one JSON-RPC request per call; see [Configuration](../configuration.md) for the client config.
+
+## Errors
+
+A failed call returns a JSON-RPC error. The code says why, and `error.data.kind` repeats it as a string:
+
+| Code | `kind` | Meaning |
+|---|---|---|
+| `-32602` | `invalid_params` | Missing or invalid parameter, or input that fails validation |
+| `-32003` | `forbidden` | The acting identity isn't allowed to do this |
+| `-32004` | `not_found` | The project, post, comment or webhook doesn't exist |
+| `-32009` | `conflict` | Clashes with existing data, e.g. a project slug that's taken |
+| `-32601` | `method_not_found` | Unknown tool name |
+| `-32603` | `internal` | Server fault |
+
+The codes mirror the REST statuses (400, 403, 404, 409). The `message` is the same text the REST API returns.
 
 Mutating tools fire the same webhooks and analytics as the web app. When stdin closes, `rungu mcp` waits up to 45 seconds for in-flight webhook deliveries before exiting.
 
@@ -96,9 +117,10 @@ Mutating tools fire the same webhooks and analytics as the web app. When stdin c
 
 ## Trust Boundary & Security
 
-The MCP server intentionally has **no authentication**. This is safe only because of a strict trust assumption:
+The stdio server intentionally has **no authentication**, and both transports act as an admin. This is safe only because of a strict trust assumption:
 
-- **The MCP subprocess inherits the privileges of whatever launches it.** Any agent, editor plugin, or script that can spawn `rungu mcp` can read and mutate the entire SQLite database.
+- **The stdio subprocess inherits the privileges of whatever launches it.** Any agent, editor plugin, or script that can spawn `rungu mcp` can read and mutate the entire SQLite database.
+- **`POST /mcp` is as powerful as the API key.** A valid `RUNGU_API_KEY` runs every tool as the `ai-agent` admin. Treat the key like a root credential: rotate it by changing the env and restarting, and never put it in a client you don't control.
 - **There is no row-level authorization.** `create_post`, `update_post_status`, `update_post_category`, `delete_post`, `vote_post`, `add_comment`, `delete_comment`, and `delete_attachment` execute as a built-in MCP user with full write access. They go through the same domain operations as the REST API, so input validation, attachment-file cleanup, webhooks, and analytics apply identically — but the admin role means ownership checks always pass.
 
 ### Safe deployments
@@ -109,8 +131,8 @@ The MCP server intentionally has **no authentication**. This is safe only becaus
 - Audit the prompts you send to the agent — prompt injection from untrusted content (web pages, issues, emails) can instruct the agent to mutate data via MCP.
 
 ❌ Don't:
-- Expose the MCP server (or the SQLite file) on a shared host, CI runner, or container reachable by other users.
-- Wire MCP into a production deployment alongside the HTTP server.
+- Expose `rungu mcp` (or the SQLite file) on a shared host, CI runner, or container reachable by other users.
+- Serve `/mcp` over plain HTTP, or share `RUNGU_API_KEY` with people who shouldn't have admin.
 - Assume the OAuth/role model from the HTTP API applies to MCP calls — it does not.
 
 ### Future hardening

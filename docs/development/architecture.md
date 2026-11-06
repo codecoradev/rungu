@@ -32,7 +32,7 @@ rungu/
 ├── rungu-core/      Storage + business logic (SQLite/sqlx)
 ├── rungu-auth/      Multi-provider OAuth + JWT session
 ├── rungu-api/       REST API routes (Axum handlers)
-├── rungu-mcp/       MCP server (stdio JSON-RPC 2.0)
+├── rungu-mcp/       MCP tools (JSON-RPC 2.0; stdio and /mcp over HTTP)
 └── rungud/          Binary entrypoint (CLI + server)
 ```
 
@@ -54,11 +54,11 @@ OAuth providers (Google, GitHub, Keycloak), JWT session issuance and validation,
 
 ### rungu-api
 
-Axum route handlers. Mutations decode the request, call `state.ops`, and map `OpError` to an HTTP status; reads query `state.store` directly. Also hosts the webhook and analytics event sinks.
+Axum route handlers. Mutations decode the request, call `state.ops`, and map `OpError` to an HTTP status; board reads call `state.ops.queries()` (`BoardQuery`). Also hosts the webhook and analytics event sinks, and the `/mcp` HTTP transport.
 
 ### rungu-mcp
 
-MCP server over stdio. 12 tools for AI agent integration. **No auth — local trusted subprocess only** (see [MCP trust boundary](../integrations/mcp.md#trust-boundary--security)). Mutating tools call the shared `Operations` as the `mcp@rungu.local` admin actor; read tools query the store.
+MCP tools for AI agents: 26 tools, one transport-independent dispatcher (`handle_message(input, ops, actor)`). Two transports use it: stdio (`rungu mcp`, a local trusted subprocess running as the built-in `mcp@rungu.local` admin) and `POST /mcp` (in `rungu-api`, Bearer `RUNGU_API_KEY`, acting as the `ai-agent` identity). The transport picks the actor; mutating tools call the shared `Operations` and read tools call `BoardQuery`, so REST and MCP apply the same rules. Failures return JSON-RPC errors with a code per kind. See [MCP trust boundary](../integrations/mcp.md#trust-boundary--security).
 
 ### rungud
 

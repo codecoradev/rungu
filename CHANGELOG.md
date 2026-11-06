@@ -11,6 +11,22 @@
 
 ### Changed
 
+- **MCP tools run as the identity the transport authenticated** (#248).
+  `handle_message` now takes the acting `Actor` instead of every tool
+  hard-coding an admin. `rungu mcp` (stdio) still runs as the built-in
+  `mcp@rungu.local` admin, resolved once at startup. `POST /mcp` acts as the
+  `ai-agent` user the API key has on the REST API, so rows an agent creates
+  over `/mcp` and over REST carry the same author.
+- **MCP errors carry a code per kind** (#248): `-32602` invalid params,
+  `-32003` forbidden, `-32004` not found, `-32009` conflict, `-32601`
+  unknown tool, `-32603` internal, with `error.data.kind` as a string. They
+  used to be `-32603` for everything. Messages are unchanged apart from the
+  wording changes noted under #247.
+- MCP `search_posts` with a blank `q` returns an error (`-32602`) instead
+  of the whole board.
+- MCP and architecture docs describe both transports and the real tool
+  count (26). The design decision "MCP stdio only" is replaced by "stdio and
+  HTTP, actor from the transport".
 - **One read path for boards** (#247). Listing, search, trending, roadmap,
   changelog and similar posts go through a shared `BoardQuery` module in
   `rungu-core`, so REST and MCP apply the same paging limits, filter
