@@ -4,7 +4,7 @@ use axum::middleware::from_fn_with_state;
 use axum::{Router, routing::get};
 use rungu_api::AppState;
 use rungu_api::openapi::ApiDoc;
-use rungu_api::{api_routes, auth_routes};
+use rungu_api::{api_routes, auth_flow_routes, auth_session_routes};
 // In-memory rate limiting — no external crate (governor was MSRV-incompatible).
 use crate::ratelimit::{RateLimiter, rate_limit_middleware};
 use tower_http::cors::Any;
@@ -108,33 +108,39 @@ pub async fn serve(config: Config, pool: sqlx::AnyPool, is_sqlite: bool, listen:
     };
 
     // ── Rate limiters ───────────────────────────────────────────────────
-    // Two independent per-IP limiters: a strict one for `/auth/*` (OAuth
-    // login/callback abuse) and a looser one for `/api/*`. Both are `0`-able
-    // via env to disable. Each limiter also spawns a pruner task so the IP
-    // map can't grow unbounded.
-    let api_routes = if config.rate_limit_per_min > 0 {
+    // Two independent per-IP limiters: a strict one for the OAuth flow
+    // (`/auth/{provider}/login|callback` abuse) and a looser one for `/api/*`
+    // plus the session routes (`/auth/me`, `/auth/providers`, `/auth/logout`)
+    // that the SPA hits on ordinary page loads. Both are `0`-able via env to
+    // disable. Each limiter also spawns a pruner task so the IP map can't
+    // grow unbounded.
+    let (api_routes, auth_session_routes) = if config.rate_limit_per_min > 0 {
         let limiter = RateLimiter::new(config.rate_limit_per_min, Duration::from_secs(60), config.trust_proxy);
         limiter.spawn_pruner();
         tracing::info!("API rate limit: {} req/min per IP", config.rate_limit_per_min);
-        api_routes().layer(from_fn_with_state(limiter, rate_limit_middleware))
+        (
+            api_routes().layer(from_fn_with_state(limiter.clone(), rate_limit_middleware)),
+            auth_session_routes().layer(from_fn_with_state(limiter, rate_limit_middleware)),
+        )
     } else {
         tracing::info!("API rate limit: disabled (RUNGU_RATE_LIMIT_PER_MIN=0)");
-        api_routes()
+        (api_routes(), auth_session_routes())
     };
 
-    let auth_routes = if config.auth_rate_limit_per_min > 0 {
+    let auth_flow_routes = if config.auth_rate_limit_per_min > 0 {
         let limiter = RateLimiter::new(config.auth_rate_limit_per_min, Duration::from_secs(60), config.trust_proxy);
         limiter.spawn_pruner();
         tracing::info!("Auth rate limit: {} req/min per IP", config.auth_rate_limit_per_min);
-        auth_routes().layer(from_fn_with_state(limiter, rate_limit_middleware))
+        auth_flow_routes().layer(from_fn_with_state(limiter, rate_limit_middleware))
     } else {
         tracing::info!("Auth rate limit: disabled (RUNGU_AUTH_RATE_LIMIT_PER_MIN=0)");
-        auth_routes()
+        auth_flow_routes()
     };
 
     let app = Router::new()
         .nest("/api", api_routes)
-        .merge(auth_routes)
+        .merge(auth_flow_routes)
+        .merge(auth_session_routes)
         .merge(SwaggerUi::new("/swagger-ui").url("/api-docs/openapi.json", ApiDoc::openapi()))
         .route("/health", get(health_check))
         .merge(crate::embed::router())

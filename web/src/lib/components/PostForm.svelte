@@ -63,6 +63,7 @@
 
             <div>
                 <Input
+                    id="post-form-title"
                     bind:value={title}
                     placeholder="What's your feedback?"
                     maxlength={200}

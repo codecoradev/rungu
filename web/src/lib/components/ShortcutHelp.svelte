@@ -3,9 +3,11 @@
      * Keyboard-shortcut help overlay. Auto-generated from the shortcut registry
      * so the visible help can never drift from the actual bindings.
      *
-     * Triggered globally by `?` (see +layout.svelte). Closes on `Esc`,
-     * outside-click, or the close button.
+     * Triggered globally by `?` (see +layout.svelte). Built on the bits-ui
+     * Dialog: focus moves in and is trapped, Esc / outside-click / the close
+     * button dismiss it, and focus returns to whatever opened it.
      */
+    import { Dialog } from 'bits-ui';
     import { shortcutsByScope, type ShortcutDef } from '$lib/shortcuts';
     import { Button } from '$lib/components/ui/button';
 
@@ -17,38 +19,21 @@
         board: 'Board',
         'post-detail': 'Post detail',
     };
-
-    function close() {
-        open = false;
-    }
-
-    function onWindowClick(e: MouseEvent) {
-        // Close on click outside the dialog panel.
-        const target = e.target as HTMLElement | null;
-        if (target?.closest('[data-shortcut-help-panel]')) return;
-        close();
-    }
 </script>
 
-<svelte:window onclick={onWindowClick} onkeydown={(e) => e.key === 'Escape' && close()} />
-
-{#if open}
-    <!-- svelte-ignore a11y_click_events_have_key_events,a11y_no_static_element_interactions -->
-    <div
-        class="fixed inset-0 z-50 flex items-start justify-center bg-background/80 p-4 backdrop-blur-sm sm:pt-20"
-        role="dialog"
-        aria-modal="true"
-        aria-label="Keyboard shortcuts"
-    >
-        <div
-            data-shortcut-help-panel
-            class="w-full max-w-lg rounded-xl border border-border bg-card shadow-lg"
+<Dialog.Root bind:open>
+    <Dialog.Portal>
+        <Dialog.Overlay class="fixed inset-0 z-50 bg-background/80 backdrop-blur-sm" />
+        <Dialog.Content
+            class="fixed inset-x-4 top-4 z-50 mx-auto max-h-[calc(100vh-2rem)] max-w-lg overflow-y-auto rounded-xl border border-border bg-card shadow-lg outline-none sm:top-20"
         >
             <div class="flex items-center justify-between border-b border-border px-5 py-3">
-                <h2 class="text-sm font-semibold">Keyboard shortcuts</h2>
-                <Button variant="ghost" size="icon-sm" onclick={close} aria-label="Close">
-                    ✕
-                </Button>
+                <Dialog.Title class="text-sm font-semibold">Keyboard shortcuts</Dialog.Title>
+                <Dialog.Close>
+                    {#snippet child({ props })}
+                        <Button {...props} variant="ghost" size="icon-sm" aria-label="Close">✕</Button>
+                    {/snippet}
+                </Dialog.Close>
             </div>
 
             <div class="divide-y divide-border">
@@ -86,6 +71,6 @@
             <div class="border-t border-border px-5 py-3 text-xs text-muted-foreground">
                 Shortcuts are disabled while typing. Every action is also available via the visible UI.
             </div>
-        </div>
-    </div>
-{/if}
+        </Dialog.Content>
+    </Dialog.Portal>
+</Dialog.Root>

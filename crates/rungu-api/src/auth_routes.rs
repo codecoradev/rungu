@@ -48,12 +48,30 @@ const REDIRECT_MAX_AGE_SECS: i64 = 5 * 60;
 
 // ── Route builder ───────────────────────────────────────────────────────
 
-/// Build auth routes.
+/// Build all auth routes (flow + session).
 pub fn auth_routes() -> Router<AppState> {
+    auth_flow_routes().merge(auth_session_routes())
+}
+
+/// OAuth flow routes (login redirect + provider callback).
+///
+/// These are the abuse-prone endpoints and belong behind the strict
+/// `RUNGU_AUTH_RATE_LIMIT_PER_MIN` limiter.
+pub fn auth_flow_routes() -> Router<AppState> {
     Router::new()
-        .route("/auth/providers", axum::routing::get(list_providers))
         .route("/auth/{provider}/login", axum::routing::get(login))
         .route("/auth/{provider}/callback", axum::routing::get(callback))
+}
+
+/// Session routes the SPA calls on ordinary page loads.
+///
+/// `/auth/me` runs on nearly every navigation, so it must share the general
+/// API budget: behind the strict auth limiter a signed-in user browsing
+/// quickly (or an office behind one NAT IP) hit 429 and the UI showed them
+/// as logged out.
+pub fn auth_session_routes() -> Router<AppState> {
+    Router::new()
+        .route("/auth/providers", axum::routing::get(list_providers))
         .route("/auth/logout", axum::routing::post(logout))
         .route("/auth/me", axum::routing::get(me))
 }

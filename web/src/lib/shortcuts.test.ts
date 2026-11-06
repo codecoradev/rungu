@@ -3,6 +3,7 @@ import {
     REGISTRY,
     resolveShortcut,
     isInputFocused,
+    isInteractiveFocused,
     shortcutsByScope,
     normalizeKey,
 } from '$lib/shortcuts';
@@ -83,6 +84,63 @@ describe('resolveShortcut', () => {
         const a = resolveShortcut(new KeyboardEvent('keydown', { key: 'Escape' }), scopes);
         // KeyboardEvent normalizes 'Esc' to 'Escape'; the resolver should still match.
         expect(a?.def.key).toBe('Esc');
+    });
+});
+
+describe('native activation and modals', () => {
+    const scopes = ['global', 'board'] as const;
+    const enter = () => new KeyboardEvent('keydown', { key: 'Enter' });
+
+    beforeEach(() => {
+        (document.activeElement as HTMLElement | null)?.blur?.();
+        document.body.innerHTML = '';
+    });
+
+    it('resolves Enter as "open focused post" when nothing is focused', () => {
+        expect(resolveShortcut(enter(), scopes)?.def.key).toBe('Enter');
+    });
+
+    it('leaves Enter alone on a focused link, so the link still navigates', () => {
+        const a = document.createElement('a');
+        a.href = '/board/demo/post/1';
+        document.body.appendChild(a);
+        a.focus();
+        expect(isInteractiveFocused()).toBe(true);
+        expect(resolveShortcut(enter(), scopes)).toBeUndefined();
+    });
+
+    it('leaves Enter alone on a focused button and tab', () => {
+        const button = document.createElement('button');
+        const tab = document.createElement('div');
+        tab.setAttribute('role', 'tab');
+        tab.tabIndex = 0;
+        document.body.append(button, tab);
+        button.focus();
+        expect(resolveShortcut(enter(), scopes)).toBeUndefined();
+        tab.focus();
+        expect(resolveShortcut(enter(), scopes)).toBeUndefined();
+    });
+
+    it('still resolves letter shortcuts on a focused link', () => {
+        const a = document.createElement('a');
+        a.href = '#';
+        document.body.appendChild(a);
+        a.focus();
+        expect(resolveShortcut(new KeyboardEvent('keydown', { key: 'j' }), scopes)?.def.key).toBe('j');
+    });
+
+    it('ignores page shortcuts while focus is inside a modal, keeps global ones', () => {
+        const dialog = document.createElement('div');
+        dialog.setAttribute('role', 'dialog');
+        dialog.setAttribute('aria-modal', 'true');
+        const button = document.createElement('button');
+        dialog.appendChild(button);
+        document.body.appendChild(dialog);
+        button.focus();
+        expect(resolveShortcut(new KeyboardEvent('keydown', { key: 'j' }), scopes)).toBeUndefined();
+        expect(resolveShortcut(new KeyboardEvent('keydown', { key: 'Enter' }), scopes)).toBeUndefined();
+        expect(resolveShortcut(new KeyboardEvent('keydown', { key: '?' }), scopes)?.def.key).toBe('?');
+        expect(resolveShortcut(new KeyboardEvent('keydown', { key: 'Escape' }), scopes)?.def.key).toBe('Esc');
     });
 });
 
