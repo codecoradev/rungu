@@ -67,6 +67,10 @@ Add to your MCP configuration:
 | `create_webhook` | Create a webhook subscription (admin; secret returned once). Same URL rules as the REST API |
 | `delete_webhook` | Delete a webhook subscription by `id` (admin). Optional `slug` also checks the webhook belongs to that project |
 
+`tools/list` returns every tool with its description, parameter schema and `readOnlyHint` / `destructiveHint` annotations. It is generated from the same catalog that dispatches calls, so it always matches what the server can do.
+
+REST endpoints without a tool (file upload, browser login, email links, and a few not yet exposed) are listed in `REST_ONLY` in `crates/rungu-mcp/src/tools.rs`, each with the reason.
+
 ## Example Usage
 
 In Claude Code:

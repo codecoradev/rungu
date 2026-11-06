@@ -31,6 +31,10 @@
 //! `-32602` invalid params, `-32003` forbidden, `-32004` not found, `-32009`
 //! conflict, `-32601` unknown method, `-32603` internal.
 
+mod tools;
+
+pub use tools::{Access, Effect, Kind, Param, REST_ONLY, RestRoute, TOOLS, Tool, find, tools_list};
+
 use std::io::{BufRead, Write};
 
 use anyhow::{Context, Result};
@@ -89,37 +93,16 @@ pub async fn handle_message(input: &str, ops: &Operations, actor: &Actor) -> Str
     }
 }
 
-/// Route a method to its handler with parsed params.
+/// Route a method to its tool. Tools are looked up in [`TOOLS`], so a tool
+/// that isn't declared there can't be called; `tools/list` is generated from
+/// the same table.
 async fn handle_request(method: &str, params: &Value, ops: &Operations, actor: &Actor) -> Result<Value, McpError> {
-    let store = ops.store();
-    match method {
-        "list_projects" => list_projects(store).await,
-        "get_project" => get_project(params, store).await,
-        "list_posts" => list_posts(params, store).await,
-        "get_post" => get_post(params, store).await,
-        "create_post" => create_post(params, ops, actor).await,
-        "update_post_status" => update_post_status(params, ops, actor).await,
-        "vote_post" => vote_post(params, ops, actor).await,
-        "search_posts" => search_posts(params, store).await,
-        "get_changelog" => get_changelog(params, store).await,
-        "list_comments" => list_comments(params, store).await,
-        "add_comment" => add_comment(params, ops, actor).await,
-        "delete_comment" => delete_comment(params, ops, actor).await,
-        "get_stats" => get_stats(params, store).await,
-        "get_trending" => get_trending(params, store).await,
-        "get_analytics" => get_analytics(params, store).await,
-        "get_top_posts" => get_top_posts(params, store).await,
-        "create_project" => create_project(params, ops, actor).await,
-        "delete_project" => delete_project(params, ops, actor).await,
-        "list_webhooks" => list_webhooks(params, store).await,
-        "create_webhook" => create_webhook(params, ops, actor).await,
-        "delete_webhook" => delete_webhook(params, ops, actor).await,
-        "list_attachments" => list_attachments(params, store).await,
-        "delete_post" => delete_post(params, ops, actor).await,
-        "update_post_category" => update_post_category(params, ops, actor).await,
-        "get_roadmap" => get_roadmap(params, store).await,
-        "delete_attachment" => delete_attachment(params, ops, actor).await,
-        _ => Err(McpError::method_not_found(format!("Unknown method: {method}"))),
+    if method == "tools/list" {
+        return Ok(tools_list());
+    }
+    match find(method) {
+        Some(tool) => tool.call(params, ops, actor).await,
+        None => Err(McpError::method_not_found(format!("Unknown method: {method}"))),
     }
 }
 
@@ -715,6 +698,46 @@ mod tests {
         call(&ops, "create_project", json!({ "name": "Acme" })).await;
         let blank = call(&ops, "search_posts", json!({ "slug": "acme", "q": "   " })).await;
         assert_eq!(blank["error"]["code"], McpError::INVALID_PARAMS);
+    }
+
+    /// #249: admin-only tools refuse a non-admin actor before running, reads
+    /// included (they used to read the store without looking at the actor).
+    #[tokio::test]
+    async fn admin_only_tools_refuse_member_actors() {
+        let ops = test_ops().await;
+        call(&ops, "create_project", json!({ "name": "Acme" })).await;
+        let member = ops.store().find_or_create_user("member@x.test", None, None, &[]).await.unwrap();
+        let member = Actor { id: member.id, role: UserRole::Member };
+
+        for tool in TOOLS.iter().filter(|t| t.access == Access::Admin) {
+            let params = json!({ "slug": "acme", "id": "x", "name": "n", "url": "https://example.com/h" });
+            let refused = call_as(&ops, &member, tool.name, params.clone()).await;
+            assert_eq!(refused["error"]["code"], McpError::FORBIDDEN, "{} must refuse a member", tool.name);
+            assert_ne!(
+                call(&ops, tool.name, params).await["error"]["code"],
+                McpError::FORBIDDEN,
+                "{} for an admin",
+                tool.name
+            );
+        }
+        // Public tools stay open to any actor.
+        let listed = call_as(&ops, &member, "list_projects", json!({})).await;
+        assert!(listed["result"]["data"].is_array());
+    }
+
+    /// `tools/list` is generated from the catalog and callable like any method.
+    #[tokio::test]
+    async fn tools_list_returns_the_catalog() {
+        let ops = test_ops().await;
+        let listed = call(&ops, "tools/list", json!({})).await;
+        let tools = listed["result"]["tools"].as_array().unwrap();
+        assert_eq!(tools.len(), TOOLS.len());
+        assert!(tools.iter().all(|t| t["inputSchema"]["type"] == "object" && t["description"].is_string()));
+        // Every listed name is callable: none comes back as an unknown method.
+        for tool in tools {
+            let reply = call(&ops, tool["name"].as_str().unwrap(), json!({})).await;
+            assert_ne!(reply["error"]["code"], McpError::METHOD_NOT_FOUND, "{}", tool["name"]);
+        }
     }
 
     /// A JSON-RPC notification (no id) runs the call but gets no response.

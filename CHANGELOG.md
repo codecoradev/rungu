@@ -4,6 +4,17 @@
 
 ### Added
 
+- **MCP `tools/list`** (#249) returns every tool with its description,
+  parameter schema and `readOnlyHint` / `destructiveHint` annotations,
+  generated from the tool catalog.
+- **REST and MCP parity checks** (#249). A new `parity_test` runs the same
+  scenarios through the REST router and through MCP on one database and
+  requires the same outcome (ok, invalid, forbidden, not found, conflict),
+  and fails CI if a REST operation has neither an MCP tool nor a
+  `REST_ONLY` entry with a reason, or if a tool's declared access disagrees
+  with the route's security. Tests also fail if the docs miss a tool or give
+  the wrong tool count. "Adding a capability" in
+  `docs/development/architecture.md` explains the steps.
 - **Duplicate check while writing a post** — after a pause in typing, the
   New Post form lists up to three existing posts that share keywords with
   the draft title, linking to each, so people can vote instead of filing a
@@ -11,6 +22,10 @@
 
 ### Changed
 
+- **MCP tools are declared once** (#249). Name, summary, parameters, access
+  level, effect, the REST route they mirror and the handler live in one
+  `Tool` entry in `rungu-mcp`. Dispatch looks tools up there, so there is no
+  second list to keep in step.
 - **MCP tools run as the identity the transport authenticated** (#248).
   `handle_message` now takes the acting `Actor` instead of every tool
   hard-coding an admin. `rungu mcp` (stdio) still runs as the built-in
@@ -77,6 +92,14 @@
 
 ### Fixed
 
+- **MCP admin-only tools refuse non-admin actors** (#249). `list_webhooks`,
+  `get_stats`, `get_analytics` and `get_top_posts` are admin-only on REST
+  but read the store without checking who was calling, so any actor could
+  use them over MCP. The access level declared for each tool is now enforced
+  before it runs. Today's MCP transports act as admin, so nothing changes
+  for them; it matters once MCP acts as other users.
+- The OpenAPI document marks `DELETE /api/attachments/{id}` as requiring a
+  session, as the handler already did.
 - `GET /api/posts/{id}/similar` for an unknown post returns 404 instead of
   a 500 (#247).
 - **MCP admin tools enforce the same rules as the REST API** (#246).
