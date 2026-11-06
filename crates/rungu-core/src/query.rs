@@ -8,10 +8,10 @@
 //! authorization step; the optional viewer only fills `user_voted`.
 
 use chrono::{DateTime, Utc};
-use rungu_proto::{ListPostsParams, PostDetail, PostSort, PostStatus, Project};
+use rungu_proto::{ListPostsParams, PostDetail, PostPermissions, PostSort, PostStatus, PostView, Project};
 
 use crate::Store;
-use crate::ops::{OpError, OpResult, parse_category, parse_sort, parse_status};
+use crate::ops::{Actor, OpError, OpResult, parse_category, parse_sort, parse_status};
 
 /// Posts per page when the caller doesn't say.
 pub const DEFAULT_PER_PAGE: i64 = 20;
@@ -98,6 +98,19 @@ impl BoardQuery {
     /// The project behind a slug.
     pub async fn project(&self, slug: &str) -> OpResult<Project> {
         self.store.get_project_by_slug(slug).await?.ok_or_else(|| OpError::NotFound("Project not found".into()))
+    }
+
+    /// One post as `viewer` sees it: `user_voted` is the viewer's own vote, and
+    /// `permissions` says what the viewer may do with it. A visitor who is not
+    /// signed in (`None`) gets no permissions and no vote.
+    pub async fn post(&self, post_id: &str, viewer: Option<&Actor>) -> OpResult<PostView> {
+        let detail = self
+            .store
+            .get_post(post_id, viewer.map(|a| a.id.as_str()))
+            .await?
+            .ok_or_else(|| OpError::NotFound("Post not found".into()))?;
+        let permissions = viewer.map_or_else(PostPermissions::default, |a| a.post_permissions(&detail.post.created_by));
+        Ok(PostView { detail, permissions })
     }
 
     /// A page of a board's posts, filtered and sorted. Returns the project

@@ -44,7 +44,7 @@ Cookie: session=<JWT token>
 |--------|------|------|-------------|
 | GET | `/projects/{slug}/posts` | No | List posts (sort, filter, search, paginate) |
 | POST | `/projects/{slug}/posts` | Member | Create post |
-| GET | `/posts/{id}` | No | Post detail + comments |
+| GET | `/posts/{id}` | No | Post detail, plus `permissions` (`can_edit`, `can_moderate`) for the caller; both `false` when not signed in |
 | PATCH | `/posts/{id}` | Admin | Update status/category |
 | DELETE | `/posts/{id}` | Admin/Creator | Delete post |
 

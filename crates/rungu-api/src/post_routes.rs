@@ -8,7 +8,7 @@ use rungu_auth::CurrentUser;
 use rungu_core::Actor;
 use rungu_core::ops::{NewPost, PostChanges};
 use rungu_core::query::{BoardFilters, PageRequest, PostPage};
-use rungu_proto::{CreatePostBody, PostDetail, UpdatePostBody};
+use rungu_proto::{CreatePostBody, PostView, UpdatePostBody};
 use serde::Deserialize;
 use utoipa::{IntoParams, ToSchema};
 
@@ -127,7 +127,7 @@ pub async fn create_post(
         ("id" = String, Path, description = "Post ID"),
     ),
     responses(
-        (status = 200, description = "Post detail", body = PostDetail),
+        (status = 200, description = "Post detail, with what the viewer may do with it", body = PostView),
         (status = 404, description = "Post not found", body = serde_json::Value),
     ),
     tag = "posts",
@@ -137,12 +137,12 @@ pub async fn get_post(
     Path(id): Path<String>,
     user: rungu_auth::OptionalCurrentUser,
 ) -> Result<impl IntoResponse, ApiError> {
-    let user_id = user.user.as_ref().map(|cu| cu.id.as_str());
+    let viewer = user.user.as_ref().map(Actor::from);
 
-    let post = state.store.get_post(&id, user_id).await?.ok_or_else(|| ApiError::not_found("Post not found"))?;
+    let post = state.ops.queries().post(&id, viewer.as_ref()).await?;
 
     // Analytics: post view (#186).
-    crate::analytics::capture(&state.store, &post.post.project_id, Some(&post.post.id), "post_view");
+    crate::analytics::capture(&state.store, &post.detail.post.project_id, Some(&post.detail.post.id), "post_view");
 
     Ok(Json(serde_json::json!({ "data": post })))
 }

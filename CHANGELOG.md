@@ -4,6 +4,14 @@
 
 ### Added
 
+- **Per-viewer permissions on a post** (#264). `GET /api/posts/{id}` and the MCP
+  `get_post` tool return `permissions: { can_edit, can_moderate }` for the
+  caller: `can_edit` for the author or an admin (change status or category,
+  delete, manage attachments), `can_moderate` for admins (pin the official
+  response, delete any comment). Core computes them from the same rule that
+  enforces them, a test checks the two agree, and clients no longer copy the
+  rule. Both are `false` for a visitor who is not signed in. `get_post` also
+  now reports the acting identity's own vote in `user_voted`.
 - **OAuth for `/mcp`** (#253). With `RUNGU_MCP_OAUTH_ISSUER` set, `/mcp`
   accepts access tokens from that issuer, so Claude connectors can sign in as
   a person. Rungu stays a resource server: it answers `401` with

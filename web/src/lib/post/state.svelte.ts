@@ -8,11 +8,11 @@
 // the load, so the URL changed but the old post stayed on screen).
 
 import { ApiError } from '$lib/api/client';
-import type { Comment, CurrentUser, PostCategory, PostDetail, PostStatus } from '$lib/api/types';
+import type { Comment, PostCategory, PostDetail, PostStatus, PostView } from '$lib/api/types';
 
 /** The part of the REST client the post page uses. */
 export interface PostApi {
-    getPost(id: string): Promise<PostDetail>;
+    getPost(id: string): Promise<PostView>;
     listComments(postId: string): Promise<Comment[]>;
     getOfficialResponse(postId: string): Promise<Comment | null>;
     getSimilarPosts(postId: string): Promise<PostDetail[]>;
@@ -27,17 +27,6 @@ export interface PostApi {
 export interface Notifier {
     success(message: string): void;
     error(message: string): void;
-}
-
-/**
- * Who may change a post's status and category, and manage its attachments:
- * an admin or the post's author. This mirrors `Actor::require_owner_or_admin`
- * in rungu-core, which is what actually enforces it — the client copy only
- * decides which controls to show. Kept in this one place.
- */
-export function canModerate(user: CurrentUser | null, post: Pick<PostDetail, 'created_by'> | null): boolean {
-    if (!user || !post) return false;
-    return user.role === 'admin' || user.id === post.created_by;
 }
 
 /**
@@ -60,8 +49,17 @@ export function collectDescendants(list: Comment[], rootId: string): Set<string>
     return ids;
 }
 
-export function createPostState(api: PostApi, deps: { user: () => CurrentUser | null; notify: Notifier }) {
-    let post = $state<PostDetail | null>(null);
+/**
+ * An edit's response is a plain post without the viewer's permissions (an edit
+ * changes neither who the author is nor who is signed in), so keep the ones we
+ * already have.
+ */
+function withPermissions(updated: PostDetail, current: PostView): PostView {
+    return { ...updated, permissions: current.permissions };
+}
+
+export function createPostState(api: PostApi, deps: { notify: Notifier }) {
+    let post = $state<PostView | null>(null);
     let comments = $state<Comment[]>([]);
     let official = $state<Comment | null>(null);
     let similar = $state<PostDetail[]>([]);
@@ -171,7 +169,7 @@ export function createPostState(api: PostApi, deps: { user: () => CurrentUser | 
         try {
             const updated = await api.updatePostStatus(post.id, status);
             if (mine !== generation) return true;
-            post = updated;
+            post = withPermissions(updated, post);
             deps.notify.success(`Status updated: ${status.replace('_', ' ')} ✓`);
             return true;
         } catch {
@@ -186,7 +184,7 @@ export function createPostState(api: PostApi, deps: { user: () => CurrentUser | 
         try {
             const updated = await api.updatePostCategory(post.id, category);
             if (mine !== generation) return true;
-            post = updated;
+            post = withPermissions(updated, post);
             deps.notify.success(`Category updated: ${category} ✓`);
             return true;
         } catch {
@@ -237,12 +235,13 @@ export function createPostState(api: PostApi, deps: { user: () => CurrentUser | 
         get officialBusy() {
             return officialBusy;
         },
-        get isAdmin() {
-            return deps.user()?.role === 'admin';
+        /** The author or an admin: status, category, attachments. From the server. */
+        get canEdit() {
+            return post?.permissions.can_edit ?? false;
         },
-        /** Whether the signed-in person may edit status/category and attachments. */
+        /** An admin: pin the official response, delete any comment. From the server. */
         get canModerate() {
-            return canModerate(deps.user(), post);
+            return post?.permissions.can_moderate ?? false;
         },
         startReply(parentId: string) {
             replyTo = parentId;

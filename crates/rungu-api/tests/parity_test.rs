@@ -388,6 +388,25 @@ async fn scenario_posts(w: &World) {
         .await;
     assert_eq!(r.body["data"]["id"], m.body["data"]["id"]);
     assert_eq!(r.body["data"]["title"], m.body["data"]["title"]);
+
+    // What the viewer may do with the post is part of the read, and both
+    // transports report the same flags for the same person (#264).
+    for (role, can_edit, can_moderate) in [(&w.owner, true, false), (&w.admin, true, true), (&w.stranger, false, false)]
+    {
+        let (r, m) = w
+            .both(
+                role,
+                "post permissions",
+                ("GET", &format!("/api/posts/{rest_id}"), None),
+                ("get_post", json!({ "id": rest_id })),
+                Ok,
+            )
+            .await;
+        let expected = json!({ "can_edit": can_edit, "can_moderate": can_moderate });
+        assert_eq!(r.body["data"]["permissions"], expected, "REST, {:?}", role.actor.role);
+        assert_eq!(m.body["data"]["permissions"], expected, "MCP, {:?}", role.actor.role);
+    }
+
     w.both(&w.owner, "unknown post", ("GET", "/api/posts/nope", None), ("get_post", json!({ "id": "nope" })), NotFound)
         .await;
     let (r, m) = w

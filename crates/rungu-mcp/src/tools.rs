@@ -35,6 +35,8 @@ type ToolFuture<'a> = Pin<Box<dyn Future<Output = Result<Value, McpError>> + Sen
 enum Handler {
     /// Reads through the store; needs no identity.
     Read(for<'a> fn(&'a Value, &'a Store) -> ToolFuture<'a>),
+    /// Reads through the store, but the answer depends on who is asking.
+    ReadAs(for<'a> fn(&'a Value, &'a Store, &'a Actor) -> ToolFuture<'a>),
     /// Goes through [`Operations`] as the actor the transport authenticated.
     Write(for<'a> fn(&'a Value, &'a Operations, &'a Actor) -> ToolFuture<'a>),
 }
@@ -47,6 +49,11 @@ macro_rules! read {
 macro_rules! read_no_params {
     ($f:ident) => {
         Handler::Read(|_, s| Box::pin($f(s)))
+    };
+}
+macro_rules! read_as {
+    ($f:ident) => {
+        Handler::ReadAs(|p, s, a| Box::pin($f(p, s, a)))
     };
 }
 macro_rules! write {
@@ -144,6 +151,7 @@ impl Tool {
         }
         match &self.handler {
             Handler::Read(f) => f(params, ops.store()),
+            Handler::ReadAs(f) => f(params, ops.store(), actor),
             Handler::Write(f) => f(params, ops, actor),
         }
     }
@@ -258,7 +266,7 @@ pub static TOOLS: &[Tool] = &[
         access: Access::Public,
         effect: Effect::Read,
         rest: rest("GET", "/api/posts/{id}"),
-        handler: read!(get_post),
+        handler: read_as!(get_post),
     },
     Tool {
         name: "create_post",

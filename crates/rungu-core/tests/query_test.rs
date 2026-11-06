@@ -3,8 +3,8 @@
 //! rules are tested once, here.
 
 use rungu_core::query::{BoardFilters, MAX_PER_PAGE, MAX_ROADMAP_BUCKET, PageRequest};
-use rungu_core::{BoardQuery, OpError, Store, open_pool, run_migrations};
-use rungu_proto::{PostCategory, PostStatus};
+use rungu_core::{Actor, BoardQuery, OpError, Store, open_pool, run_migrations};
+use rungu_proto::{PostCategory, PostPermissions, PostStatus, UserRole};
 
 struct Fixture {
     store: Store,
@@ -184,4 +184,38 @@ async fn similar_posts_exclude_the_post_itself() {
 
     let drafts = f.queries.similar_to_title("acme", "Please add dark mode").await.unwrap();
     assert_eq!(drafts.len(), 2);
+}
+
+#[tokio::test]
+async fn a_post_reports_what_its_viewer_may_do_with_it() {
+    let f = Fixture::new().await;
+    let post_id = f.post("Dark mode", PostCategory::Feature, PostStatus::Open).await;
+    let stranger = f.store.find_or_create_user("stranger@x.test", None, None, &[]).await.unwrap();
+
+    let author = Actor { id: f.user_id.clone(), role: UserRole::Member };
+    let other = Actor { id: stranger.id.clone(), role: UserRole::Member };
+    let admin = Actor { id: stranger.id.clone(), role: UserRole::Admin };
+    let can = |can_edit, can_moderate| PostPermissions { can_edit, can_moderate };
+
+    let cases = [
+        ("a visitor who is not signed in", None, can(false, false)),
+        ("the author", Some(&author), can(true, false)),
+        ("another member", Some(&other), can(false, false)),
+        ("an admin", Some(&admin), can(true, true)),
+    ];
+    for (who, viewer, expected) in cases {
+        let view = f.queries.post(&post_id, viewer).await.unwrap();
+        assert_eq!(view.permissions, expected, "{who}");
+        assert_eq!(view.detail.post.id, post_id);
+    }
+
+    // The viewer's own vote is filled in, as on the board.
+    f.vote(&post_id, 1).await;
+    let voter = f.store.find_or_create_user("v0@x.test", None, None, &[]).await.unwrap();
+    let voter = Actor { id: voter.id, role: UserRole::Member };
+    assert!(f.queries.post(&post_id, Some(&voter)).await.unwrap().detail.user_voted);
+    assert!(!f.queries.post(&post_id, Some(&author)).await.unwrap().detail.user_voted);
+
+    assert!(matches!(f.queries.post("missing", Some(&author)).await, Err(OpError::NotFound(_))));
+    assert!(matches!(f.queries.post("missing", None).await, Err(OpError::NotFound(_))));
 }

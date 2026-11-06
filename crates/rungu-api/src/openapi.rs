@@ -72,6 +72,8 @@ use utoipa::OpenApi;
     components(schemas(
         rungu_proto::Post,
         rungu_proto::PostDetail,
+        rungu_proto::PostView,
+        rungu_proto::PostPermissions,
         rungu_proto::Project,
         rungu_proto::Comment,
         rungu_proto::CommentDetail,

@@ -43,7 +43,7 @@ Add to your MCP configuration:
 | `list_projects` | List all feedback projects |
 | `get_project` | Get project detail by slug |
 | `list_posts` | List posts with filters (`status`, `category`, `sort`, `q`) and paging (`page`, `limit`, max 100). Same rules and results as `GET /api/projects/{slug}/posts` |
-| `get_post` | Get post detail with comments |
+| `get_post` | Get post detail, plus `permissions` (`can_edit`, `can_moderate`) for the acting identity |
 | `create_post` | Submit a new feedback post |
 | `update_post_status` | Change post status (open → planned → done) |
 | `update_post_category` | Change post category (bug, feature, question, feedback) |

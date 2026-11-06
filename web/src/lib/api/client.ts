@@ -7,6 +7,7 @@ import type {
     PaginatedResponse,
     Post,
     PostDetail,
+    PostView,
     PostCategory,
     PostStatus,
     Project,
@@ -176,7 +177,7 @@ export const api = {
     },
 
     getPost: (id: string) =>
-        request<DataResponse<PostDetail>>(`/api/posts/${seg(id)}`).then((r) => r.data),
+        request<DataResponse<PostView>>(`/api/posts/${seg(id)}`).then((r) => r.data),
 
     createPost: (slug: string, body: { title: string; description?: string; category?: PostCategory }) =>
         request<DataResponse<Post>>(`/api/projects/${seg(slug)}/posts`, {

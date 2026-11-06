@@ -1,14 +1,22 @@
 import { describe, expect, it, vi } from 'vitest';
 import { ApiError } from '$lib/api/client';
-import type { Comment, CurrentUser, PostDetail } from '$lib/api/types';
-import { canModerate, collectDescendants, createPostState, type PostApi } from './state.svelte';
+import type { Comment, PostDetail, PostPermissions, PostView } from '$lib/api/types';
+import { collectDescendants, createPostState, type PostApi } from './state.svelte';
 
-const post = (id: string, extra: Partial<PostDetail> = {}) =>
-    ({ id, title: `Post ${id}`, status: 'open', category: 'feedback', created_by: 'author', user_voted: false, vote_count: 0, ...extra }) as PostDetail;
+const none: PostPermissions = { can_edit: false, can_moderate: false };
+const post = (id: string, extra: Partial<PostView> = {}) =>
+    ({
+        id,
+        title: `Post ${id}`,
+        status: 'open',
+        category: 'feedback',
+        created_by: 'author',
+        user_voted: false,
+        vote_count: 0,
+        permissions: none,
+        ...extra,
+    }) as PostView;
 const comment = (id: string, parent_id?: string) => ({ id, content: `c${id}`, parent_id }) as Comment;
-const member = { id: 'm1', role: 'member' } as CurrentUser;
-const admin = { id: 'a1', role: 'admin' } as CurrentUser;
-const author = { id: 'author', role: 'member' } as CurrentUser;
 
 function deferred<T>() {
     let resolve!: (v: T) => void;
@@ -37,22 +45,12 @@ function fakeApi(overrides: Partial<PostApi> = {}) {
     } as unknown as PostApi & Record<keyof PostApi, ReturnType<typeof vi.fn>>;
 }
 
-function setup(apiOverrides: Partial<PostApi> = {}, user: CurrentUser | null = member) {
+function setup(apiOverrides: Partial<PostApi> = {}) {
     const api = fakeApi(apiOverrides);
     const notify = { success: vi.fn(), error: vi.fn() };
-    const state = createPostState(api, { user: () => user, notify });
+    const state = createPostState(api, { notify });
     return { api, notify, state };
 }
-
-describe('canModerate', () => {
-    it('is the owner-or-admin rule', () => {
-        expect(canModerate(admin, post('p'))).toBe(true);
-        expect(canModerate(author, post('p'))).toBe(true);
-        expect(canModerate(member, post('p'))).toBe(false);
-        expect(canModerate(null, post('p'))).toBe(false);
-        expect(canModerate(admin, null)).toBe(false);
-    });
-});
 
 describe('collectDescendants', () => {
     it('finds replies at any depth, and nothing else', () => {
@@ -253,7 +251,7 @@ describe('moderation', () => {
     });
 
     it('pins and unpins the official response', async () => {
-        const { state, notify } = setup({}, admin);
+        const { state, notify } = setup();
         await state.load('p1');
         await state.setOfficialResponse('c1');
         expect(state.official?.id).toBe('c1');
@@ -264,18 +262,43 @@ describe('moderation', () => {
         expect(state.officialBusy).toBe(false);
     });
 
-    it('exposes who may moderate', async () => {
-        for (const [user, expected] of [
-            [admin, true],
-            [author, true],
-            [member, false],
-            [null, false],
-        ] as const) {
-            const { state } = setup({}, user);
+    it('shows controls from the permissions the server sent, not from a copy of the rule', async () => {
+        const cases: [string, PostPermissions][] = [
+            ['visitor or stranger', none],
+            ['author', { can_edit: true, can_moderate: false }],
+            ['admin', { can_edit: true, can_moderate: true }],
+        ];
+        for (const [who, permissions] of cases) {
+            const { state } = setup({ getPost: vi.fn(async (id: string) => post(id, { permissions })) });
+            expect(state.canEdit, `${who} before load`).toBe(false);
             await state.load('p1');
-            expect(state.canModerate).toBe(expected);
-            expect(state.isAdmin).toBe(user?.role === 'admin');
+            expect(state.canEdit, who).toBe(permissions.can_edit);
+            expect(state.canModerate, who).toBe(permissions.can_moderate);
         }
+    });
+
+    it('keeps the permissions after an edit (the edit response does not carry them)', async () => {
+        const permissions = { can_edit: true, can_moderate: true };
+        const { state } = setup({ getPost: vi.fn(async (id: string) => post(id, { permissions })) });
+        await state.load('p1');
+        await state.changeStatus('planned');
+        expect(state.post?.status).toBe('planned');
+        expect(state.canEdit && state.canModerate).toBe(true);
+        await state.changeCategory('bug');
+        expect(state.post?.category).toBe('bug');
+        expect(state.canEdit && state.canModerate).toBe(true);
+    });
+
+    it('opening another post uses that post\'s permissions', async () => {
+        const perms: Record<string, PostPermissions> = {
+            mine: { can_edit: true, can_moderate: false },
+            theirs: none,
+        };
+        const { state } = setup({ getPost: vi.fn(async (id: string) => post(id, { permissions: perms[id] })) });
+        await state.load('mine');
+        expect(state.canEdit).toBe(true);
+        await state.load('theirs');
+        expect(state.canEdit).toBe(false);
     });
 
     it('applies the vote the rail reports', async () => {
