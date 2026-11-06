@@ -1,5 +1,27 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+
+- **Signed-in users no longer appear logged out while browsing** — `/auth/me`,
+  `/auth/providers` and `/auth/logout` moved from the strict auth limiter
+  (`RUNGU_AUTH_RATE_LIMIT_PER_MIN`, 30/min) to the general API limiter.
+  The UI calls `/auth/me` on every page load, so about 30 navigations a
+  minute from one IP (or one office NAT) returned 429 and the header showed
+  "Login". The strict limiter now covers only the OAuth login and callback.
+- **Enter works on links and buttons on the board page** — the `Enter`
+  shortcut ("open focused post") swallowed the key everywhere, so keyboard
+  users could not open a post or switch tabs. It now applies only when no
+  link, button or tab has focus.
+- **New Post and keyboard-help dialogs manage focus** — built on the bits-ui
+  Dialog: focus moves into the dialog (the title field for New Post), Tab
+  stays inside, Esc or a backdrop click closes it, and focus returns to the
+  button that opened it. Page shortcuts no longer act behind an open dialog.
+- **Mobile board toolbar sticks to the top of the screen** — it used a
+  `top-14` offset under a nav that does not stick, so scrolled posts showed
+  through a gap above it.
+
 ## [0.7.0] - 2026-10-29
 
 ### Added

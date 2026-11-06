@@ -16,6 +16,7 @@
     import { toastError } from '$lib/toast.svelte';
     import { LoaderCircle, Plus, X } from '@lucide/svelte';
     import CircleAlert from '@lucide/svelte/icons/circle-alert';
+    import { Dialog } from 'bits-ui';
 
     let { params } = $props();
     let slug = $derived(params.slug);
@@ -56,7 +57,6 @@
     let counts = $state<{ by_status: Record<string, number>; by_category: Record<string, number> } | null>(null);
     let searchQuery = $state('');
     let showForm = $state(false);
-    let dialogEl: HTMLDivElement | null = $state(null);
     let authed = $state(false);
     // Mobile toolbar: filter panel visibility (see mobile toolbar markup).
     let showFilters = $state(false);
@@ -283,9 +283,6 @@
     <title>{(project?.name ?? 'Board') + ' — ' + branding.value.brandName}</title>
 </svelte:head>
 
-<!-- Dialog Esc handling must be window-level: focus may sit inside inputs. -->
-<svelte:window onkeydown={(e) => { if (e.key === 'Escape' && showForm) showForm = false; }} />
-
 {#if loading && !project}
     <div class="space-y-4">
         {#each Array(3) as _}
@@ -353,8 +350,10 @@
 
     <!-- Mobile action toolbar: sticky, replaces the desktop sidebar below lg.
          Navigation lives in the view tabs; this row carries New Post + Filters
-         only. Tap targets >= 44px (mobile-ux HIG minimum). -->
-    <div class="sticky top-14 z-20 -mx-4 mb-4 border-b bg-background/95 px-4 py-2 backdrop-blur supports-[backdrop-filter]:bg-background/80 lg:hidden">
+         only. Tap targets >= 44px (mobile-ux HIG minimum). Sticks at top-0:
+         the site nav is not sticky, so any offset left a gap that showed
+         scrolled content above the toolbar. -->
+    <div class="sticky top-0 z-20 -mx-4 mb-4 border-b bg-background/95 px-4 py-2 backdrop-blur supports-[backdrop-filter]:bg-background/80 lg:hidden">
         <div class="flex items-center gap-2 overflow-x-auto">
             {#if authed}
                 <Button
@@ -427,33 +426,34 @@
         {/if}
     </div>
 
-    {#if showForm}
-        <!-- Post form as modal dialog (#feedback): overlay + centered card,
-             Esc / backdrop click to dismiss. Mobile toolbar now just toggles it. -->
-        <div
-            class="fixed inset-0 z-50 flex items-end justify-center bg-background/80 p-0 backdrop-blur-sm sm:items-center sm:p-4"
-            role="presentation"
-            onclick={(e) => {
-                if (e.target === e.currentTarget) showForm = false;
-            }}
-        >
-            <div
-                bind:this={dialogEl}
-                role="dialog"
-                aria-modal="true"
-                aria-label="New post"
-                class="max-h-[92vh] w-full max-w-lg overflow-y-auto rounded-t-xl border bg-background p-4 shadow-lg sm:rounded-xl"
+    <!-- New Post dialog (bits-ui): focus moves into the form, Tab is trapped
+         inside, Esc / backdrop click close it, focus returns to the opener,
+         and the page behind stops scrolling. Bottom sheet below sm. -->
+    <Dialog.Root bind:open={showForm}>
+        <Dialog.Portal>
+            <Dialog.Overlay class="fixed inset-0 z-50 bg-background/80 backdrop-blur-sm" />
+            <Dialog.Content
+                class="fixed inset-x-0 bottom-0 z-50 max-h-[92vh] w-full overflow-y-auto rounded-t-xl border bg-background p-4 shadow-lg outline-none sm:inset-x-auto sm:bottom-auto sm:left-1/2 sm:top-1/2 sm:max-w-lg sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-xl"
+                onOpenAutoFocus={(e) => {
+                    // Land on the title field, not the close button.
+                    e.preventDefault();
+                    document.getElementById('post-form-title')?.focus();
+                }}
             >
                 <div class="mb-3 flex items-center justify-between">
-                    <span class="text-base font-semibold">New Post</span>
-                    <Button variant="ghost" size="icon-sm" aria-label="Close" onclick={() => (showForm = false)}>
-                        <X class="size-4" aria-hidden="true" />
-                    </Button>
+                    <Dialog.Title class="text-base font-semibold">New Post</Dialog.Title>
+                    <Dialog.Close>
+                        {#snippet child({ props })}
+                            <Button {...props} variant="ghost" size="icon-sm" class="max-sm:size-11" aria-label="Close">
+                                <X class="size-4" aria-hidden="true" />
+                            </Button>
+                        {/snippet}
+                    </Dialog.Close>
                 </div>
                 <PostForm {slug} onsubmit={handleCreatePost} showTitle={false} />
-            </div>
-        </div>
-    {/if}
+            </Dialog.Content>
+        </Dialog.Portal>
+    </Dialog.Root>
 
     <div class="grid gap-6 lg:grid-cols-[minmax(0,1fr)_280px]">
         <!-- Main -->

@@ -78,6 +78,41 @@ export function isInputFocused(): boolean {
     return false;
 }
 
+/** Selector for elements whose native Enter behaviour must never be hijacked. */
+const INTERACTIVE_SELECTOR = [
+    'a[href]',
+    'button',
+    'summary',
+    '[role="button"]',
+    '[role="link"]',
+    '[role="tab"]',
+    '[role="menuitem"]',
+    '[role="option"]',
+    '[role="checkbox"]',
+    '[role="radio"]',
+    '[role="switch"]',
+].join(',');
+
+/**
+ * Returns true when focus sits on a control that activates on Enter
+ * (link, button, tab, ...). Enter there must keep its native meaning, or
+ * keyboard users cannot follow links or press buttons.
+ */
+export function isInteractiveFocused(): boolean {
+    if (typeof document === 'undefined') return false;
+    const el = document.activeElement;
+    if (!el || el === document.body) return false;
+    return el.matches(INTERACTIVE_SELECTOR);
+}
+
+/** Returns true when focus is inside an open modal dialog. */
+export function isModalFocused(): boolean {
+    if (typeof document === 'undefined') return false;
+    const el = document.activeElement;
+    if (!el || el === document.body) return false;
+    return el.closest('[aria-modal="true"]') !== null;
+}
+
 export interface ResolvedShortcut {
     def: ShortcutDef;
 }
@@ -92,6 +127,8 @@ export interface ResolvedShortcut {
  * Notes:
  * - When an input has focus, returns `undefined` unless the key resolves to
  *   the global Escape binding (so Esc still closes modals from within a field).
+ * - Enter on a focused link/button/tab is left to the browser, and nothing
+ *   but global shortcuts resolve while focus is inside an open modal dialog.
  * - Ignores events involving Ctrl/Meta/Alt to avoid clobbering browser/AT
  *   shortcuts (e.g. Ctrl+c copy, Cmd+k).
  */
@@ -108,6 +145,10 @@ export function resolveShortcut(
 
     const inputFocused = isInputFocused();
     if (inputFocused && key !== 'esc') return undefined;
+    // Enter on a link/button/tab is native activation, not a shortcut.
+    if (key === 'enter' && isInteractiveFocused()) return undefined;
+    // A modal owns the keyboard: page-scoped shortcuts must not act behind it.
+    const modalFocused = isModalFocused();
 
     // Prefer the most specific scope. Order: post-detail > board > global.
     const priority: Record<ShortcutDef['scope'], number> = {
@@ -117,6 +158,7 @@ export function resolveShortcut(
     };
     const scoped = scopes.slice().sort((a, b) => priority[b] - priority[a]);
     for (const scope of scoped) {
+        if (modalFocused && scope !== 'global') continue;
         const def = matches.find((m) => m.scope === scope);
         if (def) return { def };
     }
