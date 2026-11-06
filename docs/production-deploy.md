@@ -336,8 +336,8 @@ All variables are documented in detail in [Configuration](/configuration). Below
 | Variable | Default | Notes |
 |----------|---------|-------|
 | `RUNGU_CORS_ORIGINS` | _(APP_URL only)_ | Comma-separated extra origins. Leave unset to allow only `APP_URL`. Never use `*` in production. |
-| `RUNGU_RATE_LIMIT_PER_MIN` | `300` | Max API requests/min per IP. `0` disables. |
-| `RUNGU_AUTH_RATE_LIMIT_PER_MIN` | `30` | Max auth requests/min per IP. `0` disables. |
+| `RUNGU_RATE_LIMIT_PER_MIN` | `300` | Max requests/min per IP to `/api/*` and the session routes (`/auth/me`, `/auth/providers`, `/auth/logout`). `0` disables. |
+| `RUNGU_AUTH_RATE_LIMIT_PER_MIN` | `30` | Max OAuth login and callback requests/min per IP (`/auth/{provider}/login`, `/auth/{provider}/callback`). `0` disables. |
 | `RUNGU_TRUST_PROXY` | `false` | Set to `true` behind Traefik so rate limiting uses the real client IP from `X-Forwarded-For`. |
 
 ### OAuth Providers
@@ -679,7 +679,7 @@ docker compose up -d
 
 **Symptom:** API returns `429 Too Many Requests` for legitimate users.
 
-**Fix:** Increase the limits in `.env`:
+**Fix:** Increase the limit for the routes that return 429 in `.env`. Page loads (including the signed-in check, `/auth/me`) count against `RUNGU_RATE_LIMIT_PER_MIN`; only the OAuth login and callback count against `RUNGU_AUTH_RATE_LIMIT_PER_MIN`:
 
 ```env
 RUNGU_RATE_LIMIT_PER_MIN=600

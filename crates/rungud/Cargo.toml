@@ -36,5 +36,8 @@ sentry = { workspace = true }
 sentry-tracing = { workspace = true }
 sentry-tower = { workspace = true }
 
+[dev-dependencies]
+tower = { workspace = true }
+
 [lints]
 workspace = true

@@ -107,40 +107,12 @@ pub async fn serve(config: Config, pool: sqlx::AnyPool, is_sqlite: bool, listen:
             .allow_headers(Any)
     };
 
-    // ── Rate limiters ───────────────────────────────────────────────────
-    // Two independent per-IP limiters: a strict one for the OAuth flow
-    // (`/auth/{provider}/login|callback` abuse) and a looser one for `/api/*`
-    // plus the session routes (`/auth/me`, `/auth/providers`, `/auth/logout`)
-    // that the SPA hits on ordinary page loads. Both are `0`-able via env to
-    // disable. Each limiter also spawns a pruner task so the IP map can't
-    // grow unbounded.
-    let (api_routes, auth_session_routes) = if config.rate_limit_per_min > 0 {
-        let limiter = RateLimiter::new(config.rate_limit_per_min, Duration::from_secs(60), config.trust_proxy);
-        limiter.spawn_pruner();
-        tracing::info!("API rate limit: {} req/min per IP", config.rate_limit_per_min);
-        (
-            api_routes().layer(from_fn_with_state(limiter.clone(), rate_limit_middleware)),
-            auth_session_routes().layer(from_fn_with_state(limiter, rate_limit_middleware)),
-        )
-    } else {
-        tracing::info!("API rate limit: disabled (RUNGU_RATE_LIMIT_PER_MIN=0)");
-        (api_routes(), auth_session_routes())
-    };
-
-    let auth_flow_routes = if config.auth_rate_limit_per_min > 0 {
-        let limiter = RateLimiter::new(config.auth_rate_limit_per_min, Duration::from_secs(60), config.trust_proxy);
-        limiter.spawn_pruner();
-        tracing::info!("Auth rate limit: {} req/min per IP", config.auth_rate_limit_per_min);
-        auth_flow_routes().layer(from_fn_with_state(limiter, rate_limit_middleware))
-    } else {
-        tracing::info!("Auth rate limit: disabled (RUNGU_AUTH_RATE_LIMIT_PER_MIN=0)");
-        auth_flow_routes()
-    };
+    let routes = rate_limited_routes(config.rate_limit_per_min, config.auth_rate_limit_per_min, config.trust_proxy);
 
     let app = Router::new()
-        .nest("/api", api_routes)
-        .merge(auth_flow_routes)
-        .merge(auth_session_routes)
+        .nest("/api", routes.api)
+        .merge(routes.auth_flow)
+        .merge(routes.auth_session)
         .merge(SwaggerUi::new("/swagger-ui").url("/api-docs/openapi.json", ApiDoc::openapi()))
         .route("/health", get(health_check))
         .merge(crate::embed::router())
@@ -165,6 +137,128 @@ pub async fn serve(config: Config, pool: sqlx::AnyPool, is_sqlite: bool, listen:
     Ok(())
 }
 
+/// Route groups with their rate limiters applied.
+pub(crate) struct RateLimitedRoutes {
+    /// `/api/*` routes (mount with `.nest("/api", ..)`).
+    pub api: Router<AppState>,
+    /// `/auth/me`, `/auth/providers`, `/auth/logout`.
+    pub auth_session: Router<AppState>,
+    /// `/auth/{provider}/login`, `/auth/{provider}/callback`.
+    pub auth_flow: Router<AppState>,
+}
+
+/// Wire the two per-IP limiters onto their route groups.
+///
+/// A strict limiter (`auth_per_min`) guards the OAuth flow, where login and
+/// callback abuse happens. A looser one (`api_per_min`) is shared by `/api/*`
+/// and the session routes the SPA hits on ordinary page loads: behind the
+/// strict limiter, `/auth/me` returned 429 after about 30 page loads a minute
+/// and the UI showed signed-in users as logged out. `0` disables a limiter.
+/// Each limiter spawns a pruner task so its IP map can't grow unbounded.
+pub(crate) fn rate_limited_routes(api_per_min: u32, auth_per_min: u32, trust_proxy: bool) -> RateLimitedRoutes {
+    let (api, auth_session) = if api_per_min > 0 {
+        let limiter = RateLimiter::new(api_per_min, Duration::from_secs(60), trust_proxy);
+        limiter.spawn_pruner();
+        tracing::info!("API rate limit: {api_per_min} req/min per IP");
+        (
+            api_routes().layer(from_fn_with_state(limiter.clone(), rate_limit_middleware)),
+            auth_session_routes().layer(from_fn_with_state(limiter, rate_limit_middleware)),
+        )
+    } else {
+        tracing::info!("API rate limit: disabled (RUNGU_RATE_LIMIT_PER_MIN=0)");
+        (api_routes(), auth_session_routes())
+    };
+
+    let auth_flow = if auth_per_min > 0 {
+        let limiter = RateLimiter::new(auth_per_min, Duration::from_secs(60), trust_proxy);
+        limiter.spawn_pruner();
+        tracing::info!("Auth rate limit: {auth_per_min} req/min per IP");
+        auth_flow_routes().layer(from_fn_with_state(limiter, rate_limit_middleware))
+    } else {
+        tracing::info!("Auth rate limit: disabled (RUNGU_AUTH_RATE_LIMIT_PER_MIN=0)");
+        auth_flow_routes()
+    };
+
+    RateLimitedRoutes { api, auth_session, auth_flow }
+}
+
 async fn health_check() -> &'static str {
     "OK"
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::body::Body;
+    use axum::extract::ConnectInfo;
+    use axum::http::{Request, StatusCode};
+    use tower::ServiceExt;
+
+    async fn test_state() -> AppState {
+        let pool = rungu_core::open_pool("sqlite::memory:").await.unwrap();
+        rungu_core::run_migrations(&pool, "sqlite::memory:").await.unwrap();
+        let config = rungu_auth::AuthConfig {
+            app_secret: "test-secret".to_string(),
+            app_url: "http://localhost:3000".to_string(),
+            secure_cookie: false,
+            admin_emails: vec![],
+            api_key: None,
+            google: None,
+            github: None,
+            keycloak: None,
+        };
+        AppState::new(
+            rungu_core::Store::new_with_kind(pool, true),
+            config,
+            reqwest::Client::new(),
+            std::sync::Arc::from(
+                rungu_core::FsStorage::new(std::env::temp_dir().join("rungud-ratelimit-test")).unwrap(),
+            ),
+            rungu_api::meta::InstanceBranding::default(),
+            std::sync::Arc::new(rungu_api::meta::LicenseStatus::new()),
+            std::sync::Arc::new(None),
+        )
+    }
+
+    async fn status(app: &Router, path: &str) -> StatusCode {
+        let mut req = Request::builder().uri(path).body(Body::empty()).unwrap();
+        // The limiter keys on the peer address, which axum::serve normally injects.
+        req.extensions_mut().insert(ConnectInfo(SocketAddr::from(([10, 0, 0, 1], 4000))));
+        app.clone().oneshot(req).await.unwrap().status()
+    }
+
+    /// Regression: `/auth/me` runs on every page load and must not share the
+    /// strict OAuth budget, or signed-in users appear logged out.
+    #[tokio::test]
+    async fn session_routes_use_the_api_budget_not_the_auth_budget() {
+        let routes = rate_limited_routes(100, 3, false);
+        let app: Router = Router::new()
+            .nest("/api", routes.api)
+            .merge(routes.auth_flow)
+            .merge(routes.auth_session)
+            .with_state(test_state().await);
+
+        // Well past the strict budget of 3: never rate limited (401 = no session).
+        for _ in 0..10 {
+            assert_eq!(status(&app, "/auth/me").await, StatusCode::UNAUTHORIZED);
+            assert_ne!(status(&app, "/auth/providers").await, StatusCode::TOO_MANY_REQUESTS);
+        }
+
+        // The OAuth flow keeps the strict budget: the 4th login is rejected.
+        for _ in 0..3 {
+            assert_ne!(status(&app, "/auth/github/login").await, StatusCode::TOO_MANY_REQUESTS);
+        }
+        assert_eq!(status(&app, "/auth/github/login").await, StatusCode::TOO_MANY_REQUESTS);
+    }
+
+    #[tokio::test]
+    async fn zero_disables_both_limiters() {
+        let routes = rate_limited_routes(0, 0, false);
+        let app: Router =
+            Router::new().merge(routes.auth_flow).merge(routes.auth_session).with_state(test_state().await);
+        for _ in 0..10 {
+            assert_ne!(status(&app, "/auth/github/login").await, StatusCode::TOO_MANY_REQUESTS);
+            assert_ne!(status(&app, "/auth/me").await, StatusCode::TOO_MANY_REQUESTS);
+        }
+    }
 }
