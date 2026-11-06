@@ -113,7 +113,10 @@
         if (key === 'r') {
             if (!user) return;
             const el = document.getElementById('post-reply');
-            if (el instanceof HTMLElement) el.focus();
+            if (el instanceof HTMLElement) {
+                el.focus();
+                e.preventDefault(); // handled: don't type the 'r' into the reply box
+            }
         }
     }
 

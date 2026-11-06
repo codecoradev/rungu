@@ -12,6 +12,7 @@
     import { timeAgo } from '$lib/utils';
     import { toastSuccess } from '$lib/toast.svelte';
     import StatusBadge from '$lib/components/StatusBadge.svelte';
+    import { AlertDialog } from 'bits-ui';
 
     let projects = $state<Project[]>([]);
     let user = $state<CurrentUser | null>(null);
@@ -764,33 +765,52 @@
 {/if}
 
 <!-- ═══ DECLINE CONFIRM MODAL ═══ -->
-{#if declineTarget}
-    <div
-        role="alertdialog"
-        aria-modal="true"
-        aria-label="Confirm decline"
-        class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
-        onclick={(e) => e.target === e.currentTarget && (declineTarget = null)}
-    >
-        <div class="w-full max-w-sm rounded-lg border border-border bg-card p-5 shadow-lg">
-            <h2 class="text-base font-semibold">Decline this post?</h2>
-            <p class="mt-2 text-sm text-muted-foreground">
-                “{declineTarget.title}” will be marked as <strong>declined</strong>.
+<!-- bits-ui AlertDialog: focus moves in (to Cancel, the safe choice), Tab is
+     trapped, Esc closes, focus returns to the Decline button that opened it.
+     An outside click does not dismiss a destructive confirmation. -->
+<AlertDialog.Root
+    open={declineTarget !== null}
+    onOpenChange={(open) => {
+        if (!open) declineTarget = null;
+    }}
+>
+    <AlertDialog.Portal>
+        <AlertDialog.Overlay class="fixed inset-0 z-50 bg-black/60" />
+        <AlertDialog.Content
+            class="fixed left-1/2 top-1/2 z-50 w-[calc(100%-2rem)] max-w-sm -translate-x-1/2 -translate-y-1/2 rounded-lg border border-border bg-card p-5 shadow-lg outline-none"
+            onOpenAutoFocus={(e) => {
+                // Start on the safe choice, so an accidental Enter cancels.
+                e.preventDefault();
+                document.getElementById('decline-cancel')?.focus();
+            }}
+        >
+            <AlertDialog.Title class="text-base font-semibold">Decline this post?</AlertDialog.Title>
+            <AlertDialog.Description class="mt-2 text-sm text-muted-foreground">
+                “{declineTarget?.title}” will be marked as <strong>declined</strong>.
                 The author and voters will see this status on the board.
-            </p>
+            </AlertDialog.Description>
             <div class="mt-4 flex justify-end gap-2">
-                <Button variant="outline" size="sm" onclick={() => (declineTarget = null)}>Cancel</Button>
-                <Button
-                    variant="default"
-                    size="sm"
-                    class="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                    onclick={async () => {
-                        const post = declineTarget;
-                        declineTarget = null;
-                        if (post) await moderate(post, 'declined');
-                    }}
-                >Decline</Button>
+                <AlertDialog.Cancel>
+                    {#snippet child({ props })}
+                        <Button {...props} id="decline-cancel" variant="outline" size="sm" class="max-sm:h-11">Cancel</Button>
+                    {/snippet}
+                </AlertDialog.Cancel>
+                <AlertDialog.Action>
+                    {#snippet child({ props })}
+                        <Button
+                            {...props}
+                            variant="default"
+                            size="sm"
+                            class="bg-destructive text-destructive-foreground hover:bg-destructive/90 max-sm:h-11"
+                            onclick={async () => {
+                                const post = declineTarget;
+                                declineTarget = null;
+                                if (post) await moderate(post, 'declined');
+                            }}
+                        >Decline</Button>
+                    {/snippet}
+                </AlertDialog.Action>
             </div>
-        </div>
-    </div>
-{/if}
+        </AlertDialog.Content>
+    </AlertDialog.Portal>
+</AlertDialog.Root>

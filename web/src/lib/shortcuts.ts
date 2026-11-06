@@ -81,13 +81,18 @@ export function isInputFocused(): boolean {
 /** Selector for elements whose native Enter behaviour must never be hijacked. */
 const INTERACTIVE_SELECTOR = [
     'a[href]',
+    'area[href]',
     'button',
     'summary',
     '[role="button"]',
     '[role="link"]',
     '[role="tab"]',
     '[role="menuitem"]',
+    '[role="menuitemcheckbox"]',
+    '[role="menuitemradio"]',
     '[role="option"]',
+    '[role="treeitem"]',
+    '[role="gridcell"]',
     '[role="checkbox"]',
     '[role="radio"]',
     '[role="switch"]',
