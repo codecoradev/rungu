@@ -5,6 +5,8 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::{Json, Router};
 use rungu_auth::CurrentUser;
+use rungu_core::Actor;
+use rungu_core::ops::{NewWebhook, WebhookChanges};
 use rungu_proto::{CreateWebhookBody, UpdateWebhookBody};
 use serde::Deserialize;
 
@@ -162,25 +164,8 @@ pub async fn create_webhook(
     CurrentUser(user): CurrentUser,
     Json(body): Json<CreateWebhookBody>,
 ) -> Result<(StatusCode, impl IntoResponse), ApiError> {
-    ApiError::require_admin(&user)?;
-    let project =
-        state.store.get_project_by_slug(&slug).await?.ok_or_else(|| ApiError::not_found("Project not found"))?;
-
-    let url = body.url.trim();
-    if url.is_empty() {
-        return Err(ApiError::bad_request("Webhook URL is required"));
-    }
-    if url.len() > 2048 {
-        return Err(ApiError::bad_request("URL must be 2048 characters or less"));
-    }
-
-    crate::webhook::validate_webhook_url(url).map_err(ApiError::bad_request)?;
-
-    let events = body.events.unwrap_or_else(|| "*".to_string());
-    // Generate a random secret if the user didn't provide one.
-    let secret = body.secret.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-
-    let webhook = state.store.create_webhook(&project.id, url, &events, &secret).await?;
+    let input = NewWebhook { url: &body.url, events: body.events.as_deref(), secret: body.secret.as_deref() };
+    let webhook = state.ops.create_webhook(&Actor::from(&user), &slug, input).await?.webhook;
 
     Ok((StatusCode::CREATED, Json(serde_json::json!({ "data": webhook }))))
 }
@@ -244,30 +229,9 @@ pub async fn update_webhook(
     CurrentUser(user): CurrentUser,
     Json(body): Json<UpdateWebhookBody>,
 ) -> Result<impl IntoResponse, ApiError> {
-    ApiError::require_admin(&user)?;
-    let project =
-        state.store.get_project_by_slug(&slug).await?.ok_or_else(|| ApiError::not_found("Project not found"))?;
-
-    if let Some(ref url) = body.url {
-        let url = url.trim();
-        if url.is_empty() {
-            return Err(ApiError::bad_request("Webhook URL cannot be empty"));
-        }
-        crate::webhook::validate_webhook_url(url).map_err(ApiError::bad_request)?;
-    }
-
-    // Verify ownership before updating.
-    let existing = state.store.get_webhook(&id).await?.ok_or_else(|| ApiError::not_found("Webhook not found"))?;
-    if existing.project_id != project.id {
-        return Err(ApiError::not_found("Webhook not found"));
-    }
-
-    let url_ref = body.url.as_deref().map(str::trim);
-    let updated = state
-        .store
-        .update_webhook(&id, url_ref, body.events.as_deref(), body.is_active)
-        .await?
-        .ok_or_else(|| ApiError::not_found("Webhook not found"))?;
+    let changes =
+        WebhookChanges { url: body.url.as_deref(), events: body.events.as_deref(), is_active: body.is_active };
+    let updated = state.ops.update_webhook(&Actor::from(&user), &slug, &id, changes).await?;
 
     Ok(Json(serde_json::json!({ "data": updated })))
 }
@@ -294,16 +258,7 @@ pub async fn delete_webhook(
     Path((slug, id)): Path<(String, String)>,
     CurrentUser(user): CurrentUser,
 ) -> Result<StatusCode, ApiError> {
-    ApiError::require_admin(&user)?;
-    let project =
-        state.store.get_project_by_slug(&slug).await?.ok_or_else(|| ApiError::not_found("Project not found"))?;
-
-    let webhook = state.store.get_webhook(&id).await?.ok_or_else(|| ApiError::not_found("Webhook not found"))?;
-    if webhook.project_id != project.id {
-        return Err(ApiError::not_found("Webhook not found"));
-    }
-
-    state.store.delete_webhook(&id).await?;
+    state.ops.delete_webhook(&Actor::from(&user), &id, Some(&slug)).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 

@@ -5,6 +5,8 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::{Json, Router};
 use rungu_auth::CurrentUser;
+use rungu_core::Actor;
+use rungu_core::ops::{NewProject, ProjectChanges};
 use rungu_proto::{CreateProjectBody, UpdateProjectBody};
 
 use crate::AppState;
@@ -81,34 +83,8 @@ pub async fn create_project(
     CurrentUser(user): CurrentUser,
     Json(body): Json<CreateProjectBody>,
 ) -> Result<(StatusCode, impl IntoResponse), ApiError> {
-    ApiError::require_admin(&user)?;
-
-    let name = body.name.trim();
-    if name.is_empty() {
-        return Err(ApiError::bad_request("Project name is required"));
-    }
-    if name.len() > 100 {
-        return Err(ApiError::bad_request("Project name must be 100 characters or less"));
-    }
-
-    let slug = match body.slug.as_deref() {
-        Some(s) => {
-            let s = s.trim();
-            if s.is_empty() {
-                return Err(ApiError::bad_request("Slug cannot be empty if provided"));
-            }
-            s.to_string()
-        }
-        None => slugify(name),
-    };
-
-    if !is_valid_slug(&slug) {
-        return Err(ApiError::bad_request("Slug must contain only lowercase letters, numbers, and hyphens"));
-    }
-
-    let description = body.description.unwrap_or_default();
-
-    let project = state.store.create_project(name, &slug, &description).await?;
+    let input = NewProject { name: &body.name, slug: body.slug.as_deref(), description: body.description.as_deref() };
+    let project = state.ops.create_project(&Actor::from(&user), input).await?;
 
     Ok((StatusCode::CREATED, Json(serde_json::json!({ "data": project }))))
 }
@@ -160,24 +136,8 @@ pub async fn update_project(
     CurrentUser(user): CurrentUser,
     Json(body): Json<UpdateProjectBody>,
 ) -> Result<impl IntoResponse, ApiError> {
-    ApiError::require_admin(&user)?;
-
-    if !body.has_updates() {
-        return Err(ApiError::bad_request("No fields to update"));
-    }
-
-    // Validate name if provided (same rules as create)
-    if let Some(ref name) = body.name {
-        let name = name.trim();
-        if name.is_empty() {
-            return Err(ApiError::bad_request("Project name cannot be empty"));
-        }
-    }
-
-    let project =
-        state.store.get_project_by_slug(&slug).await?.ok_or_else(|| ApiError::not_found("Project not found"))?;
-
-    let updated = state.store.update_project(&project.id, body.name.as_deref(), body.description.as_deref()).await?;
+    let changes = ProjectChanges { name: body.name.as_deref(), description: body.description.as_deref() };
+    let updated = state.ops.update_project(&Actor::from(&user), &slug, changes).await?;
 
     Ok(Json(serde_json::json!({ "data": updated })))
 }
@@ -203,104 +163,14 @@ pub async fn delete_project(
     Path(slug): Path<String>,
     CurrentUser(user): CurrentUser,
 ) -> Result<StatusCode, ApiError> {
-    ApiError::require_admin(&user)?;
-
-    let project =
-        state.store.get_project_by_slug(&slug).await?.ok_or_else(|| ApiError::not_found("Project not found"))?;
-
-    state.store.delete_project(&project.id).await?;
+    state.ops.delete_project(&Actor::from(&user), &slug).await?;
 
     Ok(StatusCode::NO_CONTENT)
-}
-
-// ── Helpers ────────────────────────────────────────────────────────────
-
-fn slugify(name: &str) -> String {
-    let slug: String =
-        name.trim().to_lowercase().chars().map(|c| if c.is_alphanumeric() && c.is_ascii() { c } else { '-' }).collect();
-
-    let mut result = String::with_capacity(slug.len());
-    let mut prev_hyphen = false;
-    for c in slug.chars() {
-        if c == '-' {
-            if !prev_hyphen && !result.is_empty() {
-                result.push('-');
-            }
-            prev_hyphen = true;
-        } else {
-            result.push(c);
-            prev_hyphen = false;
-        }
-    }
-
-    if result.ends_with('-') {
-        result.pop();
-    }
-
-    result
-}
-
-fn is_valid_slug(slug: &str) -> bool {
-    if slug.is_empty() || slug.len() > 80 {
-        return false;
-    }
-
-    if !slug.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-') {
-        return false;
-    }
-
-    !slug.starts_with('-') && !slug.ends_with('-')
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_slugify_basic() {
-        assert_eq!(slugify("My App"), "my-app");
-        assert_eq!(slugify("Hello World"), "hello-world");
-    }
-
-    #[test]
-    fn test_slugify_special_chars() {
-        assert_eq!(slugify("My App! @#$"), "my-app");
-        assert_eq!(slugify("C++ Project"), "c-project");
-    }
-
-    #[test]
-    fn test_slugify_multiple_spaces() {
-        assert_eq!(slugify("My   Multiple   Spaces"), "my-multiple-spaces");
-    }
-
-    #[test]
-    fn test_slugify_leading_trailing() {
-        assert_eq!(slugify("  Hello  "), "hello");
-        assert_eq!(slugify("---test---"), "test");
-    }
-
-    #[test]
-    fn test_slugify_empty() {
-        assert_eq!(slugify(""), "");
-        assert_eq!(slugify("   "), "");
-    }
-
-    #[test]
-    fn test_slugify_unicode() {
-        assert_eq!(slugify("Café Résumé"), "caf-r-sum");
-    }
-
-    #[test]
-    fn test_is_valid_slug() {
-        assert!(is_valid_slug("my-app"));
-        assert!(is_valid_slug("myapp"));
-        assert!(is_valid_slug("my-app-123"));
-        assert!(!is_valid_slug(""));
-        assert!(!is_valid_slug("-myapp"));
-        assert!(!is_valid_slug("myapp-"));
-        assert!(!is_valid_slug("MyApp"));
-        assert!(!is_valid_slug("my app"));
-    }
 
     #[test]
     fn test_update_body_has_updates() {

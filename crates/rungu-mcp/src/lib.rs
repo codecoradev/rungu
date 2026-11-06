@@ -28,7 +28,7 @@
 use std::io::{BufRead, Write};
 
 use anyhow::Result;
-use rungu_core::ops::{NewPost, PostChanges, parse_category, parse_sort};
+use rungu_core::ops::{NewPost, NewProject, NewWebhook, PostChanges, parse_category, parse_sort};
 use rungu_core::{Actor, OpError, Operations, Store};
 use rungu_proto::*;
 use serde_json::{Value, json};
@@ -103,11 +103,11 @@ async fn handle_request(method: &str, params: &Value, ops: &Operations) -> Resul
         "get_trending" => get_trending(params, store).await,
         "get_analytics" => get_analytics(params, store).await,
         "get_top_posts" => get_top_posts(params, store).await,
-        "create_project" => create_project(params, store).await,
-        "delete_project" => delete_project(params, store).await,
+        "create_project" => create_project(params, ops).await,
+        "delete_project" => delete_project(params, ops).await,
         "list_webhooks" => list_webhooks(params, store).await,
-        "create_webhook" => create_webhook(params, store).await,
-        "delete_webhook" => delete_webhook(params, store).await,
+        "create_webhook" => create_webhook(params, ops).await,
+        "delete_webhook" => delete_webhook(params, ops).await,
         "list_attachments" => list_attachments(params, store).await,
         "delete_post" => delete_post(params, ops).await,
         "update_post_category" => update_post_category(params, ops).await,
@@ -449,27 +449,25 @@ async fn get_top_posts(params: &Value, store: &Store) -> Result<Value, String> {
     Ok(json!({ "data": rows }))
 }
 
-/// Create a project (admin parity — mirrors REST POST /api/projects).
-async fn create_project(params: &Value, store: &Store) -> Result<Value, String> {
-    let name = get_str(params, "name")?;
-    let slug = get_optional_str(params, "slug").unwrap_or("");
-    let description = get_optional_str(params, "description").unwrap_or("");
-    let slug = if slug.is_empty() { name.to_lowercase().replace(' ', "-") } else { slug.to_string() };
-
-    let project =
-        store.create_project(name, &slug, description).await.map_err(|e| format!("Failed to create project: {e}"))?;
+/// Create a project (admin parity — same rules as REST POST /api/projects).
+async fn create_project(params: &Value, ops: &Operations) -> Result<Value, String> {
+    let actor = mcp_actor(ops.store()).await?;
+    let input = NewProject {
+        name: get_str(params, "name")?,
+        // An empty slug means "derive it from the name", as before.
+        slug: get_optional_str(params, "slug").filter(|s| !s.is_empty()),
+        description: get_optional_str(params, "description"),
+    };
+    let project = ops.create_project(&actor, input).await.map_err(op_err)?;
     Ok(json!({ "data": project }))
 }
 
-/// Delete a project and everything in it (admin parity — irreversible).
-async fn delete_project(params: &Value, store: &Store) -> Result<Value, String> {
+/// Delete a project and everything in it, attachment files included
+/// (admin parity — irreversible).
+async fn delete_project(params: &Value, ops: &Operations) -> Result<Value, String> {
+    let actor = mcp_actor(ops.store()).await?;
     let slug = get_str(params, "slug")?;
-    let project = store
-        .get_project_by_slug(slug)
-        .await
-        .map_err(|e| format!("Failed to get project: {e}"))?
-        .ok_or_else(|| format!("Project not found: {slug}"))?;
-    store.delete_project(&project.id).await.map_err(|e| format!("Failed to delete project: {e}"))?;
+    let project = ops.delete_project(&actor, slug).await.map_err(op_err)?;
     Ok(json!({ "deleted": true, "id": project.id, "slug": slug }))
 }
 
@@ -485,33 +483,28 @@ async fn list_webhooks(params: &Value, store: &Store) -> Result<Value, String> {
     Ok(json!({ "data": webhooks, "total": webhooks.len() }))
 }
 
-/// Create a webhook subscription (admin parity). Auto-generates a signing
-/// secret when `secret` is omitted; the secret is returned exactly once here.
-async fn create_webhook(params: &Value, store: &Store) -> Result<Value, String> {
+/// Create a webhook subscription (admin parity — same URL rules as REST).
+/// Auto-generates a signing secret when `secret` is omitted; the secret is
+/// returned exactly once here.
+async fn create_webhook(params: &Value, ops: &Operations) -> Result<Value, String> {
+    let actor = mcp_actor(ops.store()).await?;
     let slug = get_str(params, "slug")?;
-    let url = get_str(params, "url")?;
-    let events = get_optional_str(params, "events").unwrap_or("*");
-    let secret = match get_optional_str(params, "secret") {
-        Some(s) if !s.is_empty() => s.to_string(),
-        _ => uuid::Uuid::new_v4().to_string(),
+    let input = NewWebhook {
+        url: get_str(params, "url")?,
+        events: get_optional_str(params, "events"),
+        secret: get_optional_str(params, "secret"),
     };
-
-    let project = store
-        .get_project_by_slug(slug)
-        .await
-        .map_err(|e| format!("Failed to get project: {e}"))?
-        .ok_or_else(|| format!("Project not found: {slug}"))?;
-    let webhook = store
-        .create_webhook(&project.id, url, events, &secret)
-        .await
-        .map_err(|e| format!("Failed to create webhook: {e}"))?;
-    Ok(json!({ "data": webhook, "signing_secret": secret }))
+    let created = ops.create_webhook(&actor, slug, input).await.map_err(op_err)?;
+    Ok(json!({ "data": created.webhook, "signing_secret": created.secret }))
 }
 
-/// Delete a webhook (admin parity).
-async fn delete_webhook(params: &Value, store: &Store) -> Result<Value, String> {
+/// Delete a webhook (admin parity). An unknown id is an error; with the
+/// optional `slug`, the webhook must also belong to that project.
+async fn delete_webhook(params: &Value, ops: &Operations) -> Result<Value, String> {
+    let actor = mcp_actor(ops.store()).await?;
     let id = get_str(params, "id")?;
-    store.delete_webhook(id).await.map_err(|e| format!("Failed to delete webhook: {e}"))?;
+    let slug = get_optional_str(params, "slug").filter(|s| !s.is_empty());
+    ops.delete_webhook(&actor, id, slug).await.map_err(op_err)?;
     Ok(json!({ "deleted": true, "id": id }))
 }
 
@@ -677,6 +670,30 @@ mod tests {
     async fn call(ops: &Operations, method: &str, params: Value) -> Value {
         let input = json!({ "jsonrpc": "2.0", "method": method, "params": params, "id": 1 }).to_string();
         serde_json::from_str(&handle_message(&input, ops).await).unwrap()
+    }
+
+    /// #246: the admin tools now go through `Operations`, so they enforce the
+    /// same rules as REST instead of their own weaker copies.
+    #[tokio::test]
+    async fn admin_tools_share_the_rest_rules() {
+        let ops = test_ops().await;
+
+        let bad_slug = call(&ops, "create_project", json!({ "name": "Board", "slug": "Has Spaces" })).await;
+        assert!(bad_slug["error"]["message"].as_str().unwrap().contains("lowercase letters"));
+        let made = call(&ops, "create_project", json!({ "name": "My Board!" })).await;
+        assert_eq!(made["result"]["data"]["slug"], "my-board");
+        let dup = call(&ops, "create_project", json!({ "name": "Again", "slug": "my-board" })).await;
+        assert!(dup["error"]["message"].as_str().unwrap().contains("already exists"));
+
+        let private = call(&ops, "create_webhook", json!({ "slug": "my-board", "url": "http://example.com/h" })).await;
+        assert!(private["error"]["message"].as_str().unwrap().contains("HTTPS"));
+        let hook = call(&ops, "create_webhook", json!({ "slug": "my-board", "url": "https://example.com/h" })).await;
+        assert!(hook["result"]["signing_secret"].as_str().is_some_and(|s| !s.is_empty()));
+
+        let missing = call(&ops, "delete_webhook", json!({ "id": "no-such-webhook" })).await;
+        assert!(missing["error"]["message"].as_str().unwrap().contains("not found"));
+        let id = hook["result"]["data"]["id"].clone();
+        assert_eq!(call(&ops, "delete_webhook", json!({ "id": id })).await["result"]["deleted"], true);
     }
 
     #[tokio::test]

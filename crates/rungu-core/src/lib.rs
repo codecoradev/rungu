@@ -10,6 +10,7 @@ pub mod events;
 pub mod ops;
 pub mod storage;
 pub mod store;
+pub mod validation;
 
 pub use events::{DomainEvent, EventBus, EventSink, RecordingSink};
 pub use ops::{Actor, OpError, OpResult, Operations};

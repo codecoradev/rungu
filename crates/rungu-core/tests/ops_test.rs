@@ -6,7 +6,7 @@
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 
-use rungu_core::ops::{NewPost, PostChanges};
+use rungu_core::ops::{NewAttachment, NewPost, NewProject, NewWebhook, PostChanges, ProjectChanges, WebhookChanges};
 use rungu_core::{
     Actor, DomainEvent, EventBus, OpError, Operations, RecordingSink, Storage, Store, open_pool, run_migrations,
 };
@@ -274,4 +274,190 @@ async fn delete_attachment_removes_file_and_row() {
     f.ops.delete_attachment(&f.owner, &att.id).await.unwrap();
     assert!(!f.storage.contains(&path));
     assert!(f.store().get_attachment(&att.id).await.unwrap().is_none());
+}
+
+// ── Projects ────────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn create_project_is_admin_only_and_applies_slug_rules() {
+    let f = Fixture::new().await;
+    let named = |name| NewProject { name, ..Default::default() };
+
+    assert!(matches!(f.ops.create_project(&f.owner, named("Mobile App")).await, Err(OpError::Forbidden(_))));
+
+    let p = f.ops.create_project(&f.admin, named("  Mobile App! ")).await.unwrap();
+    assert_eq!((p.name.as_str(), p.slug.as_str()), ("Mobile App!", "mobile-app"));
+
+    // The rules every transport used to re-implement (MCP built slugs with
+    // lower().replace(' ', "-") and skipped validation).
+    let invalid = [
+        NewProject { name: "  ", ..Default::default() },
+        NewProject { name: &"x".repeat(101), ..Default::default() },
+        NewProject { name: "Ok", slug: Some("   "), ..Default::default() },
+        NewProject { name: "Ok", slug: Some("Has Spaces"), ..Default::default() },
+        NewProject { name: "!!!", ..Default::default() }, // slugifies to ""
+    ];
+    for input in invalid {
+        assert!(matches!(f.ops.create_project(&f.admin, input).await, Err(OpError::Invalid(_))), "{input:?}");
+    }
+
+    let dup = f.ops.create_project(&f.admin, NewProject { name: "Again", slug: Some("acme"), ..Default::default() });
+    assert!(matches!(dup.await, Err(OpError::Conflict(_))), "duplicate slug is a conflict, not a 500");
+}
+
+#[tokio::test]
+async fn update_project_validates_and_requires_admin() {
+    let f = Fixture::new().await;
+    let rename = ProjectChanges { name: Some("Acme Board"), description: None };
+
+    assert!(matches!(f.ops.update_project(&f.owner, "acme", rename).await, Err(OpError::Forbidden(_))));
+    assert!(matches!(f.ops.update_project(&f.admin, "nope", rename).await, Err(OpError::NotFound(_))));
+    assert!(matches!(
+        f.ops.update_project(&f.admin, "acme", ProjectChanges::default()).await,
+        Err(OpError::Invalid(_))
+    ));
+    let blank = ProjectChanges { name: Some(" "), description: None };
+    assert!(matches!(f.ops.update_project(&f.admin, "acme", blank).await, Err(OpError::Invalid(_))));
+
+    assert_eq!(f.ops.update_project(&f.admin, "acme", rename).await.unwrap().name, "Acme Board");
+}
+
+#[tokio::test]
+async fn delete_project_removes_attachment_files_of_every_post() {
+    let f = Fixture::new().await;
+    let mut paths = Vec::new();
+    for title in ["One", "Two"] {
+        let id = f.post(title).await;
+        let path = f.storage.save(&format!("{title}.png"), vec![1]).await.unwrap();
+        f.store().create_attachment(&id, "s.png", "image/png", 1, &path, &f.owner.id).await.unwrap();
+        paths.push(path);
+    }
+
+    assert!(matches!(f.ops.delete_project(&f.owner, "acme").await, Err(OpError::Forbidden(_))));
+    assert!(paths.iter().all(|p| f.storage.contains(p)));
+
+    assert_eq!(f.ops.delete_project(&f.admin, "acme").await.unwrap().slug, "acme");
+    assert!(f.store().get_project_by_slug("acme").await.unwrap().is_none());
+    assert!(paths.iter().all(|p| !f.storage.contains(p)), "the cascade removes rows; ops must remove the files");
+    assert!(matches!(f.ops.delete_project(&f.admin, "acme").await, Err(OpError::NotFound(_))));
+}
+
+// ── Webhooks ────────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn create_webhook_validates_the_url_and_generates_a_secret() {
+    let f = Fixture::new().await;
+    let hook = |url| NewWebhook { url, ..Default::default() };
+
+    assert!(matches!(
+        f.ops.create_webhook(&f.owner, "acme", hook("https://example.com/h")).await,
+        Err(OpError::Forbidden(_))
+    ));
+    assert!(matches!(
+        f.ops.create_webhook(&f.admin, "nope", hook("https://example.com/h")).await,
+        Err(OpError::NotFound(_))
+    ));
+    let long = format!("https://example.com/{}", "a".repeat(2048));
+    for url in ["", "http://example.com/h", "ftp://example.com", "https://169.254.169.254/x", long.as_str()] {
+        assert!(matches!(f.ops.create_webhook(&f.admin, "acme", hook(url)).await, Err(OpError::Invalid(_))), "{url}");
+    }
+
+    let created = f.ops.create_webhook(&f.admin, "acme", hook(" https://example.com/h ")).await.unwrap();
+    assert_eq!(created.webhook.url, "https://example.com/h");
+    assert!(!created.secret.is_empty(), "a secret is generated when none is given");
+    // A supplied secret is used exactly as given; receivers sign with it.
+    let given = NewWebhook { url: "https://example.com/g", events: Some("post.created"), secret: Some(" s3cret") };
+    assert_eq!(f.ops.create_webhook(&f.admin, "acme", given).await.unwrap().secret, " s3cret");
+    let blank_events = NewWebhook { url: "https://example.com/b", events: Some("  "), secret: None };
+    assert!(matches!(f.ops.create_webhook(&f.admin, "acme", blank_events).await, Err(OpError::Invalid(_))));
+}
+
+#[tokio::test]
+async fn create_project_ignores_a_stale_slug_cache() {
+    let f = Fixture::new().await;
+    // Warm the slug cache, then delete the row the way another process (e.g.
+    // `rungu mcp`) would: straight in the database, without this cache seeing it.
+    assert!(f.store().get_project_by_slug("acme").await.unwrap().is_some());
+    sqlx::query("DELETE FROM projects WHERE slug = 'acme'").execute(f.store().pool()).await.unwrap();
+
+    let again = NewProject { name: "Acme", slug: Some("acme"), ..Default::default() };
+    let p = f.ops.create_project(&f.admin, again).await.expect("a stale cache entry must not cause a false conflict");
+    assert_eq!(p.slug, "acme");
+}
+
+#[tokio::test]
+async fn update_project_checks_input_before_existence() {
+    let f = Fixture::new().await;
+    // Admin-only, so the old REST order is kept: an empty body is a 400 even
+    // for an unknown slug.
+    assert!(matches!(
+        f.ops.update_project(&f.admin, "nope", ProjectChanges::default()).await,
+        Err(OpError::Invalid(_))
+    ));
+}
+
+#[tokio::test]
+async fn webhooks_of_another_project_read_as_not_found() {
+    let f = Fixture::new().await;
+    f.ops.create_project(&f.admin, NewProject { name: "Other", ..Default::default() }).await.unwrap();
+    let hook = NewWebhook { url: "https://example.com/h", ..Default::default() };
+    let id = f.ops.create_webhook(&f.admin, "acme", hook).await.unwrap().webhook.id;
+
+    let pause = WebhookChanges { is_active: Some(false), ..Default::default() };
+    assert!(matches!(f.ops.update_webhook(&f.admin, "other", &id, pause).await, Err(OpError::NotFound(_))));
+    assert!(matches!(f.ops.delete_webhook(&f.admin, &id, Some("other")).await, Err(OpError::NotFound(_))));
+
+    let bad_url = WebhookChanges { url: Some("http://example.com"), ..Default::default() };
+    assert!(matches!(f.ops.update_webhook(&f.admin, "acme", &id, bad_url).await, Err(OpError::Invalid(_))));
+    assert!(!f.ops.update_webhook(&f.admin, "acme", &id, pause).await.unwrap().is_active);
+}
+
+#[tokio::test]
+async fn delete_webhook_requires_an_existing_webhook() {
+    let f = Fixture::new().await;
+    let hook = NewWebhook { url: "https://example.com/h", ..Default::default() };
+    let id = f.ops.create_webhook(&f.admin, "acme", hook).await.unwrap().webhook.id;
+
+    // MCP addresses webhooks by id only: an unknown id must be an error, not
+    // a silent success.
+    assert!(matches!(f.ops.delete_webhook(&f.admin, "missing", None).await, Err(OpError::NotFound(_))));
+    assert!(matches!(f.ops.delete_webhook(&f.owner, &id, None).await, Err(OpError::Forbidden(_))));
+    f.ops.delete_webhook(&f.admin, &id, None).await.unwrap();
+    assert!(f.store().get_webhook(&id).await.unwrap().is_none());
+}
+
+// ── Attachment upload ───────────────────────────────────────────────────
+
+/// Smallest byte string `verify_image` accepts as a PNG.
+fn png() -> Vec<u8> {
+    let mut data = vec![0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
+    data.extend_from_slice(&[0; 16]);
+    data
+}
+
+#[tokio::test]
+async fn upload_attachment_checks_owner_and_image_then_stores_file_and_row() {
+    let f = Fixture::new().await;
+    let id = f.post("Needs a screenshot").await;
+    let upload = |data| NewAttachment { filename: "shot.png", content_type: "image/png", data };
+
+    assert!(matches!(f.ops.check_can_upload(&f.stranger, &id).await, Err(OpError::Forbidden(_))));
+    assert!(matches!(f.ops.upload_attachment(&f.stranger, &id, upload(png())).await, Err(OpError::Forbidden(_))));
+    assert!(matches!(f.ops.upload_attachment(&f.owner, "missing", upload(png())).await, Err(OpError::NotFound(_))));
+    assert!(matches!(f.ops.upload_attachment(&f.owner, &id, upload(vec![])).await, Err(OpError::Invalid(_))));
+    assert!(matches!(
+        f.ops.upload_attachment(&f.owner, &id, upload(b"not an image".to_vec())).await,
+        Err(OpError::Invalid(_))
+    ));
+    let spoofed = NewAttachment { filename: "x.jpg", content_type: "image/jpeg", data: png() };
+    assert!(matches!(f.ops.upload_attachment(&f.owner, &id, spoofed).await, Err(OpError::Invalid(_))));
+
+    let attachment = f.ops.upload_attachment(&f.owner, &id, upload(png())).await.unwrap();
+    assert_eq!((attachment.post_id.as_str(), attachment.mime.as_str()), (id.as_str(), "image/png"));
+    let (_, path) = f.store().get_attachment(&attachment.id).await.unwrap().unwrap();
+    assert!(f.storage.contains(&path));
+
+    // Admins may attach to anyone's post.
+    f.ops.upload_attachment(&f.admin, &id, upload(png())).await.unwrap();
+    assert_eq!(f.store().list_attachments(&id).await.unwrap().len(), 2);
 }

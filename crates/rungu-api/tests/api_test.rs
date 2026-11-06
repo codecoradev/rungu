@@ -127,6 +127,33 @@ async fn test_create_project_requires_admin() {
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 }
 
+#[tokio::test]
+async fn test_create_project_rules_and_duplicate_slug_conflict() {
+    let (app, store) = setup_app().await;
+    let admin = store.find_or_create_user("admin@test.com", None, None, &[]).await.unwrap();
+    let token = make_token(
+        &CurrentUser { id: admin.id, email: admin.email, role: rungu_proto::UserRole::Admin },
+        "test-secret",
+    );
+    let post_project = |body: &'static str| {
+        Request::builder()
+            .method("POST")
+            .uri("/projects")
+            .header("cookie", format!("session={token}"))
+            .header("content-type", "application/json")
+            .body(Body::from(body))
+            .unwrap()
+    };
+
+    let created = app.clone().oneshot(post_project(r#"{"name":"New Board"}"#)).await.unwrap();
+    assert_eq!(created.status(), StatusCode::CREATED);
+    let bad = app.clone().oneshot(post_project(r#"{"name":"X","slug":"Bad Slug"}"#)).await.unwrap();
+    assert_eq!(bad.status(), StatusCode::BAD_REQUEST);
+    // A taken slug used to surface as a 500 from the UNIQUE constraint.
+    let dup = app.oneshot(post_project(r#"{"name":"Again","slug":"test-app"}"#)).await.unwrap();
+    assert_eq!(dup.status(), StatusCode::CONFLICT);
+}
+
 // ── Posts ───────────────────────────────────────────────────────────────
 
 #[tokio::test]

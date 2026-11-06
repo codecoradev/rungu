@@ -78,37 +78,8 @@ async fn resolve_safe_addr(host: &str) -> Option<std::net::SocketAddr> {
     }
 }
 
-/// SSRF protection — block requests to private/reserved IP ranges and non-HTTPS schemes.
-pub fn validate_webhook_url(raw: &str) -> Result<(), String> {
-    let parsed = url::Url::parse(raw).map_err(|e| format!("Invalid URL: {e}"))?;
-
-    match parsed.scheme() {
-        "https" => {}
-        "http" => {
-            // Allow http only for localhost (dev/testing)
-            let host = parsed.host_str().unwrap_or("");
-            if host != "localhost" && host != "127.0.0.1" {
-                return Err("Only HTTPS URLs are allowed (HTTP only for localhost)".into());
-            }
-        }
-        _ => return Err("URL must be HTTP or HTTPS".into()),
-    }
-
-    let host = parsed.host_str().unwrap_or("");
-    if host.is_empty() {
-        return Err("URL must have a valid hostname".into());
-    }
-
-    // Block obvious internal/private hostnames
-    let blocked = ["metadata.google.internal", "169.254.169.254", "0.0.0.0", "::1", "[::1]"];
-    for b in &blocked {
-        if host == *b {
-            return Err(format!("Blocked host: {b}"));
-        }
-    }
-
-    Ok(())
-}
+/// Write-time webhook URL check; lives in core so every transport shares it.
+pub use rungu_core::validation::validate_webhook_url;
 
 /// Compute HMAC-SHA256 signature of the payload using the webhook secret.
 pub fn sign_payload(payload: &str, secret: &str) -> String {
@@ -395,34 +366,6 @@ async fn deliver_with_retry(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_validate_https_url() {
-        assert!(validate_webhook_url("https://example.com/webhook").is_ok());
-    }
-
-    #[test]
-    fn test_validate_http_localhost() {
-        assert!(validate_webhook_url("http://localhost:3000/webhook").is_ok());
-        assert!(validate_webhook_url("http://127.0.0.1:3000/webhook").is_ok());
-    }
-
-    #[test]
-    fn test_reject_http_external() {
-        assert!(validate_webhook_url("http://example.com/webhook").is_err());
-    }
-
-    #[test]
-    fn test_reject_non_http() {
-        assert!(validate_webhook_url("ftp://example.com/webhook").is_err());
-        assert!(validate_webhook_url("file:///etc/passwd").is_err());
-    }
-
-    #[test]
-    fn test_reject_blocked_hosts() {
-        assert!(validate_webhook_url("http://169.254.169.254/latest/meta-data").is_err());
-        assert!(validate_webhook_url("https://metadata.google.internal").is_err());
-    }
 
     #[test]
     fn test_is_public_ip_blocks_private_ranges() {

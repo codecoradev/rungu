@@ -11,27 +11,11 @@
 
 ### Changed
 
-- **Better "similar posts" matching** (post detail and the new duplicate
-  check) — filler words like "please" and "support" are ignored, up to four
-  keywords are used, and results are ranked by how many keywords they share
-  (title matches count double) before votes.
-- **Admin Decline confirmation is an accessible alert dialog** — focus
-  starts on Cancel, Tab stays inside, Esc closes it, and focus returns to
-  the Decline button. Outside clicks no longer dismiss it.
-
-### Fixed
-
-- **Keyboard shortcuts only swallow a key when they act** — Enter with no
-  post focused, or `c` while signed out, now keeps its normal behaviour.
-- Enter keeps its native action on more control types (image-map links,
-  menu checkbox/radio items, tree items, grid cells).
-- `docs/production-deploy.md` describes which routes each rate limiter
-  covers, and which one to raise when users see 429s.
-
-## [Unreleased]
-
-### Changed
-
+- **Project, webhook and attachment-upload writes go through the shared
+  `Operations` module** (#246), so REST, MCP stdio and MCP over HTTP share
+  one implementation and one set of tests. Slug and webhook URL rules moved
+  to `rungu_core::validation`. `delete_webhook` over MCP accepts an optional
+  `slug`.
 - **One board navigation everywhere** — Roadmap and Changelog now show the
   same Feedback / Roadmap / Changelog tabs as the board, inside the normal
   page width (they had their own wider container and doubled padding). The
@@ -50,18 +34,32 @@
 - **Roadmap cards drop the status badge** that repeated the column title.
 - **Signed-out visitors get a "Login to post" button** next to the board
   title on desktop (it was a small link in the sidebar).
+- **Better "similar posts" matching** (post detail and the duplicate check)
+  — filler words like "please" and "support" are ignored, up to four
+  keywords are used, and results are ranked by how many keywords they share
+  (title matches count double) before votes.
+- **Admin Decline confirmation is an accessible alert dialog** — focus
+  starts on Cancel, Tab stays inside, Esc closes it, and focus returns to
+  the Decline button. Outside clicks no longer dismiss it.
 - New Post dialog no longer draws a card inside its own panel; category
   buttons expose `aria-pressed`. Sidebar filter cards lost the empty gap
   under their headings. Home board cards in a row share one height.
 
-### Removed
-
-- Unused `VoteButton.svelte` (the old star vote button).
-
-## [Unreleased]
-
 ### Fixed
 
+- **MCP admin tools enforce the same rules as the REST API** (#246).
+  `create_project` validates names and slugs (it built slugs with a bare
+  lowercase-and-replace and skipped validation), `create_webhook` applies
+  the webhook URL guard and length limit, and `delete_webhook` returns
+  not-found for an unknown id instead of reporting success.
+- **Deleting a project removes its attachment files** from the configured
+  storage backend. The database cascade only removed the rows.
+- **Creating a project with a slug that's already taken returns 409**
+  (`A project with slug '…' already exists`) instead of a 500.
+- Renaming a project enforces the 100-character name limit, as creating one
+  already did. Webhook updates enforce the 2048-character URL limit.
+- Creating a webhook with a blank `events` value is rejected instead of
+  being stored as a webhook that matches nothing.
 - **Signed-in users no longer appear logged out while browsing** — `/auth/me`,
   `/auth/providers` and `/auth/logout` moved from the strict auth limiter
   (`RUNGU_AUTH_RATE_LIMIT_PER_MIN`, 30/min) to the general API limiter.
@@ -72,6 +70,10 @@
   shortcut ("open focused post") swallowed the key everywhere, so keyboard
   users could not open a post or switch tabs. It now applies only when no
   link, button or tab has focus.
+- **Keyboard shortcuts only swallow a key when they act** — Enter with no
+  post focused, or `c` while signed out, now keeps its normal behaviour.
+  Enter also keeps its native action on more control types (image-map
+  links, menu checkbox/radio items, tree items, grid cells).
 - **New Post and keyboard-help dialogs manage focus** — built on the bits-ui
   Dialog: focus moves into the dialog (the title field for New Post), Tab
   stays inside, Esc or a backdrop click closes it, and focus returns to the
@@ -79,6 +81,12 @@
 - **Mobile board toolbar sticks to the top of the screen** — it used a
   `top-14` offset under a nav that does not stick, so scrolled posts showed
   through a gap above it.
+- `docs/production-deploy.md` describes which routes each rate limiter
+  covers, and which one to raise when users see 429s.
+
+### Removed
+
+- Unused `VoteButton.svelte` (the old star vote button).
 
 ## [0.7.0] - 2026-10-29
 

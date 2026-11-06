@@ -5,7 +5,9 @@ use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::{Json, Router};
 use rungu_auth::CurrentUser;
-use rungu_proto::{AttachmentResponse, UserRole};
+use rungu_core::Actor;
+use rungu_core::ops::NewAttachment;
+use rungu_proto::AttachmentResponse;
 use utoipa::ToSchema;
 
 use crate::AppState;
@@ -51,18 +53,9 @@ pub async fn upload_attachment(
     CurrentUser(user): CurrentUser,
     mut multipart: Multipart,
 ) -> Result<impl IntoResponse, ApiError> {
-    // Verify post exists
-    let post = state
-        .store
-        .get_post(&post_id, None)
-        .await
-        .map_err(|_| ApiError::internal_default())?
-        .ok_or_else(|| ApiError::not_found("Post not found"))?;
-
-    // Only post author or admin can upload
-    if post.post.created_by != user.id && user.role != UserRole::Admin {
-        return Err(ApiError::forbidden("Only the post author or admin can upload attachments"));
-    }
+    let actor = Actor::from(&user);
+    // Reject before reading the body, so a refused upload is never buffered.
+    state.ops.check_can_upload(&actor, &post_id).await?;
 
     // Process multipart — find the "file" field
     loop {
@@ -78,51 +71,19 @@ pub async fn upload_attachment(
         let filename = field.file_name().unwrap_or("upload").to_string();
         let content_type = field.content_type().unwrap_or("application/octet-stream").to_string();
 
-        // Read field data with manual size limit enforcement
+        // Stream with a size cap so an oversized body is cut off early; the
+        // rest (empty check, image verification, storage, row) is core's job.
         let mut data = Vec::new();
-        let mut total = 0usize;
         let mut field = field;
         while let Some(chunk) = field.chunk().await.map_err(|_| ApiError::bad_request("Failed to read upload"))? {
-            total += chunk.len();
-            if total > rungu_core::MAX_UPLOAD_SIZE {
+            if data.len() + chunk.len() > rungu_core::MAX_UPLOAD_SIZE {
                 return Err(ApiError::payload_too_large_default());
             }
             data.extend_from_slice(&chunk);
         }
-        let data: Vec<u8> = data;
 
-        if data.is_empty() {
-            return Err(ApiError::bad_request("Empty file"));
-        }
-
-        // Verify image — magic byte check
-        let verified_mime =
-            rungu_core::verify_image(&data, &content_type).map_err(|e| ApiError::bad_request(e.to_string()))?;
-
-        // Generate storage key
-        let attachment_id = uuid::Uuid::new_v4().to_string();
-        let key = rungu_core::storage_key(&attachment_id, &verified_mime);
-
-        // Save to storage
-        state.storage.save(&key, data.to_vec()).await.map_err(|_| ApiError::internal_default())?;
-
-        // Save metadata to DB. If this fails, remove the just-written file so
-        // it doesn't leak as an orphan on disk (defense against partial-failure
-        // disk growth).
-        let attachment = match state
-            .store
-            .create_attachment(&post_id, &filename, &verified_mime, data.len() as i64, &key, &user.id)
-            .await
-        {
-            Ok(a) => a,
-            Err(e) => {
-                tracing::warn!(error = %e, key = %key, "DB insert failed; cleaning up orphaned attachment file");
-                if let Err(cleanup_err) = state.storage.delete(&key).await {
-                    tracing::warn!(error = %cleanup_err, key = %key, "Failed to clean up orphaned attachment file");
-                }
-                return Err(ApiError::internal_default());
-            }
-        };
+        let upload = NewAttachment { filename: &filename, content_type: &content_type, data };
+        let attachment = state.ops.upload_attachment(&actor, &post_id, upload).await?;
 
         let attachment_id = attachment.id.clone();
         let response = AttachmentResponse {

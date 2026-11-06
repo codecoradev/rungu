@@ -40,6 +40,10 @@ impl ApiError {
         Self { status: StatusCode::FORBIDDEN, message: msg.into() }
     }
 
+    pub fn conflict(msg: impl Into<String>) -> Self {
+        Self { status: StatusCode::CONFLICT, message: msg.into() }
+    }
+
     pub fn internal(msg: impl Into<String>) -> Self {
         Self { status: StatusCode::INTERNAL_SERVER_ERROR, message: msg.into() }
     }
@@ -70,6 +74,7 @@ impl From<rungu_core::OpError> for ApiError {
             OpError::NotFound(msg) => Self::not_found(msg),
             OpError::Invalid(msg) => Self::bad_request(msg),
             OpError::Forbidden(msg) => Self::forbidden(msg),
+            OpError::Conflict(msg) => Self::conflict(msg),
             OpError::Internal(e) => e.into(),
         }
     }
