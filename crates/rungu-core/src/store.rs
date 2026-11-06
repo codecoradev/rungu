@@ -1284,6 +1284,20 @@ impl Store {
     }
 
     /// Get a single attachment by ID (returns storage_path too).
+    /// Storage paths of every attachment on every post in a project, so the
+    /// files can be removed when the project is deleted (the FK cascade only
+    /// removes the rows).
+    pub async fn list_project_attachment_paths(&self, project_id: &str) -> Result<Vec<String>> {
+        let rows = sqlx::query(
+            "SELECT a.storage_path FROM post_attachments a JOIN posts p ON a.post_id = p.id WHERE p.project_id = ?",
+        )
+        .bind(project_id)
+        .fetch_all(&self.pool)
+        .await
+        .context("Failed to list project attachment paths")?;
+        Ok(rows.iter().map(|r| r.get("storage_path")).collect())
+    }
+
     pub async fn get_attachment(&self, attachment_id: &str) -> Result<Option<(rungu_proto::Attachment, String)>> {
         let row = sqlx::query(
             "SELECT id, post_id, filename, mime, size, storage_path, created_by, created_at \

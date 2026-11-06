@@ -2,6 +2,30 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **MCP admin tools enforce the same rules as the REST API** (#246).
+  `create_project` now validates names and slugs (it built slugs with a bare
+  lowercase-and-replace and skipped validation), `create_webhook` applies
+  the webhook URL guard and length limit, and `delete_webhook` returns
+  not-found for an unknown id instead of reporting success.
+- **Deleting a project removes its attachment files** from storage, over
+  REST and MCP. The database cascade only removed the rows.
+- **Creating a project with a slug that's already taken returns 409**
+  (`A project with slug '…' already exists`) instead of a 500.
+- Renaming a project enforces the 100-character name limit, as creating one
+  already did.
+
+### Changed
+
+- Project create/update/delete, webhook create/update/delete and attachment
+  upload now go through the shared `Operations` module, so REST, MCP stdio
+  and MCP over HTTP share one implementation and one set of tests. Slug and
+  webhook URL rules moved to `rungu_core::validation`. `delete_webhook` over
+  MCP accepts an optional `slug`.
+
+## [Unreleased]
+
 ### Added
 
 - **Duplicate check while writing a post** — after a pause in typing, the
