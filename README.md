@@ -16,7 +16,7 @@ Lightweight, self-hosted feedback board. Collect feature requests, bug reports, 
 - **Full-text search** — FTS5-powered search across all posts
 - **Dark mode** — light/dark/system theme toggle
 - **Keyboard shortcuts** — full board navigation without a mouse
-- **MCP server** — 15 AI agent tools for Claude Code, Cursor, Windsurf
+- **MCP server** — 26 AI agent tools for Claude Code, Cursor, Windsurf
 - **REST API** — full CRUD for posts, votes, comments, attachments
 - **Dual database** — SQLite (default) or PostgreSQL via `DATABASE_URL`
 - **Single binary** — embedded SPA, Docker ready

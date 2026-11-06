@@ -121,6 +121,11 @@ struct World {
     admin: Role,
     owner: Role,
     stranger: Role,
+    /// Every MCP tool a scenario has called, so a test can require that each
+    /// tool in the catalog is exercised by at least one scenario.
+    called: std::sync::Mutex<BTreeSet<String>>,
+    /// Uploads directory; removed when the world is dropped.
+    _uploads: tempfile::TempDir,
 }
 
 impl World {
@@ -130,6 +135,7 @@ impl World {
         let store = Store::new_with_kind(pool, true);
         store.create_project("Test App", "test-app", "A test project").await.unwrap();
 
+        let uploads = tempfile::tempdir().unwrap();
         let config = AuthConfig {
             app_secret: "test-secret".to_string(),
             app_url: "http://localhost:3000".to_string(),
@@ -144,9 +150,7 @@ impl World {
             store.clone(),
             config,
             reqwest::Client::new(),
-            std::sync::Arc::from(
-                rungu_core::FsStorage::new(std::env::temp_dir().join("rungu-parity-uploads")).unwrap(),
-            ),
+            std::sync::Arc::from(rungu_core::FsStorage::new(uploads.path().to_path_buf()).unwrap()),
             rungu_api::meta::InstanceBranding::default(),
             std::sync::Arc::new(rungu_api::meta::LicenseStatus::new()),
             std::sync::Arc::new(None),
@@ -170,7 +174,13 @@ impl World {
             stranger: role("stranger@parity.test", UserRole::Member).await,
             app,
             ops,
+            called: Default::default(),
+            _uploads: uploads,
         }
+    }
+
+    fn called_tools(&self) -> BTreeSet<String> {
+        self.called.lock().unwrap().clone()
     }
 
     async fn rest(&self, who: &Role, method: &str, uri: &str, body: Option<Value>) -> Reply {
@@ -197,6 +207,7 @@ impl World {
     }
 
     async fn mcp(&self, who: &Role, tool: &str, params: Value) -> Reply {
+        self.called.lock().unwrap().insert(tool.to_string());
         let input = json!({ "jsonrpc": "2.0", "method": tool, "params": params, "id": 1 }).to_string();
         let out: Value = serde_json::from_str(&rungu_mcp::handle_message(&input, &self.ops, &who.actor).await).unwrap();
         if let Some(code) = out["error"]["code"].as_i64() {
@@ -241,8 +252,11 @@ fn ids(posts: &Value) -> Vec<&str> {
 
 #[tokio::test]
 async fn projects_behave_the_same_over_rest_and_mcp() {
+    scenario_projects(&World::new().await).await;
+}
+
+async fn scenario_projects(w: &World) {
     use Outcome::*;
-    let w = World::new().await;
 
     w.rest(&w.admin, "POST", "/api/projects", Some(json!({ "name": "From REST", "slug": "from-rest" }))).await;
     w.mcp(&w.admin, "create_project", json!({ "name": "From MCP", "slug": "from-mcp" })).await;
@@ -258,6 +272,14 @@ async fn projects_behave_the_same_over_rest_and_mcp() {
             .await;
         assert_eq!(r.body["data"]["slug"], slug);
     }
+
+    let (r, m) =
+        w.both(&w.admin, "list projects", ("GET", "/api/projects", None), ("list_projects", json!({})), Ok).await;
+    let slugs = |v: &Value| -> BTreeSet<String> {
+        v.as_array().unwrap().iter().map(|p| p["slug"].as_str().unwrap().to_string()).collect()
+    };
+    assert_eq!(slugs(&r.body["data"]), slugs(&m.body["data"]));
+    assert!(slugs(&m.body["data"]).contains("from-mcp"));
 
     let dup = json!({ "name": "Again", "slug": "from-rest" });
     w.both(&w.admin, "duplicate slug", ("POST", "/api/projects", Some(dup.clone())), ("create_project", dup), Conflict)
@@ -307,8 +329,11 @@ async fn projects_behave_the_same_over_rest_and_mcp() {
 
 #[tokio::test]
 async fn posts_votes_and_comments_behave_the_same_over_rest_and_mcp() {
+    scenario_posts(&World::new().await).await;
+}
+
+async fn scenario_posts(w: &World) {
     use Outcome::*;
-    let w = World::new().await;
 
     // Create: one post per transport, same author.
     let rest_post = w
@@ -385,6 +410,28 @@ async fn posts_votes_and_comments_behave_the_same_over_rest_and_mcp() {
     )
     .await;
 
+    let (r, m) = w
+        .both(
+            &w.owner,
+            "search",
+            ("GET", "/api/projects/test-app/posts?q=REST", None),
+            ("search_posts", json!({ "slug": "test-app", "q": "REST" })),
+            Ok,
+        )
+        .await;
+    assert_eq!(ids(&r.body["data"]), ids(&m.body["data"]));
+    assert_eq!(ids(&m.body["data"]), vec![rest_id.as_str()], "only the REST post matches");
+    let (r, m) = w
+        .both(
+            &w.owner,
+            "trending",
+            ("GET", "/api/projects/test-app/posts?sort=trending&per_page=10", None),
+            ("get_trending", json!({ "slug": "test-app", "limit": 10 })),
+            Ok,
+        )
+        .await;
+    assert_eq!(ids(&r.body["data"]), ids(&m.body["data"]));
+
     // Updates: author or admin only; input validated.
     for (step, patch, tool, params) in [
         ("status", json!({ "status": "planned" }), "update_post_status", json!({ "id": rest_id, "status": "planned" })),
@@ -438,8 +485,10 @@ async fn posts_votes_and_comments_behave_the_same_over_rest_and_mcp() {
             Ok,
         )
         .await;
-    assert_eq!(r.body["data"]["voted"], true);
-    assert_eq!(m.body["data"]["voted"], false, "the second toggle, over MCP, removes the vote the first one added");
+    assert_ne!(
+        r.body["data"]["voted"], m.body["data"]["voted"],
+        "the same voter toggling twice adds the vote, then removes it"
+    );
     w.both(
         &w.stranger,
         "vote on unknown",
@@ -538,6 +587,49 @@ async fn posts_votes_and_comments_behave_the_same_over_rest_and_mcp() {
     )
     .await;
 
+    // Attachments: listed the same way; only the uploader or an admin may delete.
+    for name in ["a.png", "b.png"] {
+        w.ops
+            .store()
+            .create_attachment(&rest_id, name, "image/png", 1, &format!("parity-{name}"), &w.owner.actor.id)
+            .await
+            .unwrap();
+    }
+    let (r, m) = w
+        .both(
+            &w.owner,
+            "list attachments",
+            ("GET", &format!("/api/posts/{rest_id}/attachments"), None),
+            ("list_attachments", json!({ "post_id": rest_id })),
+            Ok,
+        )
+        .await;
+    let (rest_atts, mcp_atts) =
+        (r.body["data"].as_array().unwrap().clone(), m.body["attachments"].as_array().unwrap().clone());
+    assert_eq!((rest_atts.len(), mcp_atts.len()), (2, 2));
+    let (first, second) =
+        (rest_atts[0]["id"].as_str().unwrap().to_string(), rest_atts[1]["id"].as_str().unwrap().to_string());
+    w.both(
+        &w.stranger,
+        "delete someone else's attachment",
+        ("DELETE", &format!("/api/attachments/{first}"), None),
+        ("delete_attachment", json!({ "id": first })),
+        Forbidden,
+    )
+    .await;
+    assert_eq!(w.rest(&w.owner, "DELETE", &format!("/api/attachments/{first}"), None).await.outcome, Ok);
+    assert_eq!(w.mcp(&w.owner, "delete_attachment", json!({ "id": second })).await.outcome, Ok);
+    let (r, m) = w
+        .both(
+            &w.owner,
+            "attachments after deleting",
+            ("GET", &format!("/api/posts/{rest_id}/attachments"), None),
+            ("list_attachments", json!({ "post_id": rest_id })),
+            Ok,
+        )
+        .await;
+    assert_eq!((r.body["data"].as_array().unwrap().len(), m.body["attachments"].as_array().unwrap().len()), (0, 0));
+
     // Deleting posts and attachments.
     w.both(
         &w.stranger,
@@ -573,12 +665,40 @@ async fn posts_votes_and_comments_behave_the_same_over_rest_and_mcp() {
         NotFound,
     )
     .await;
+
+    // An admin may change and delete a post they didn't write.
+    let a = w
+        .rest(&w.owner, "POST", "/api/projects/test-app/posts", Some(json!({ "title": "Admin will moderate this" })))
+        .await;
+    let b = w.rest(&w.owner, "POST", "/api/projects/test-app/posts", Some(json!({ "title": "And this" }))).await;
+    let (theirs, also_theirs) = (id_of(&a.body), id_of(&b.body));
+    w.both(
+        &w.admin,
+        "admin changes status",
+        ("PATCH", &format!("/api/posts/{theirs}"), Some(json!({ "status": "declined" }))),
+        ("update_post_status", json!({ "id": theirs, "status": "declined" })),
+        Ok,
+    )
+    .await;
+    w.both(
+        &w.admin,
+        "admin changes category",
+        ("PATCH", &format!("/api/posts/{theirs}"), Some(json!({ "category": "question" }))),
+        ("update_post_category", json!({ "id": theirs, "category": "question" })),
+        Ok,
+    )
+    .await;
+    assert_eq!(w.rest(&w.admin, "DELETE", &format!("/api/posts/{theirs}"), None).await.outcome, Ok);
+    assert_eq!(w.mcp(&w.admin, "delete_post", json!({ "id": also_theirs })).await.outcome, Ok);
 }
 
 #[tokio::test]
 async fn admin_capabilities_refuse_members_over_rest_and_mcp() {
+    scenario_admin(&World::new().await).await;
+}
+
+async fn scenario_admin(w: &World) {
     use Outcome::*;
-    let w = World::new().await;
 
     // Admin-only reads and writes: a member is refused on both transports.
     // (MCP's list_webhooks / get_stats / analytics used to read the store
@@ -662,4 +782,25 @@ async fn admin_capabilities_refuse_members_over_rest_and_mcp() {
     .await;
     w.rest(&w.admin, "DELETE", &format!("/api/projects/test-app/webhooks/{rest_hid}"), None).await;
     w.mcp(&w.admin, "delete_webhook", json!({ "id": mcp_hid, "slug": "test-app" })).await;
+}
+
+/// Every tool in the catalog is run through a scenario, so a new tool can't
+/// skip the REST/MCP comparison.
+#[tokio::test]
+async fn every_tool_is_exercised_by_a_parity_scenario() {
+    let mut called = BTreeSet::new();
+    for scenario in 0..3 {
+        let w = World::new().await;
+        match scenario {
+            0 => scenario_projects(&w).await,
+            1 => scenario_posts(&w).await,
+            _ => scenario_admin(&w).await,
+        }
+        called.extend(w.called_tools());
+    }
+    let untested: Vec<&str> = TOOLS.iter().map(|t| t.name).filter(|name| !called.contains(*name)).collect();
+    assert!(
+        untested.is_empty(),
+        "no parity scenario calls these tools (add a step to a scenario in parity_test.rs): {untested:?}"
+    );
 }

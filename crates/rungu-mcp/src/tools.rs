@@ -166,6 +166,8 @@ impl Tool {
             "annotations": {
                 "readOnlyHint": self.effect == Effect::Read,
                 "destructiveHint": self.effect == Effect::Destructive,
+                // Every tool only touches this Rungu instance.
+                "openWorldHint": false,
             },
         })
     }
@@ -556,6 +558,7 @@ mod tests {
         assert_eq!(trending["annotations"]["readOnlyHint"], true);
         let delete = tools.iter().find(|t| t["name"] == "delete_project").unwrap();
         assert_eq!(delete["annotations"]["destructiveHint"], true);
+        assert!(tools.iter().all(|t| t["annotations"]["openWorldHint"] == false));
     }
 
     #[test]
@@ -591,15 +594,17 @@ mod tests {
             ("docs/integrations/mcp.md", mcp_doc),
             ("docs/development/architecture.md", include_str!("../../../docs/development/architecture.md")),
         ];
+        let digits = |w: &str| !w.is_empty() && w.chars().all(|c| c.is_ascii_digit());
         for (file, text) in counted {
             for line in text.lines() {
                 let words: Vec<&str> = line.split_whitespace().collect();
-                for pair in words.windows(2) {
-                    if pair[1].starts_with("tools")
-                        && pair[0].chars().all(|c| c.is_ascii_digit())
-                        && !pair[0].is_empty()
-                    {
-                        assert_eq!(pair[0], n, "{file} says \"{} tools\" but there are {n}: {line}", pair[0]);
+                for (i, word) in words.iter().enumerate() {
+                    if !word.starts_with("tools") {
+                        continue;
+                    }
+                    // "26 tools", "26 AI agent tools": a number up to three words before.
+                    for count in words[i.saturating_sub(3)..i].iter().filter(|w| digits(w)) {
+                        assert_eq!(*count, n, "{file} says \"{count} ... tools\" but there are {n}: {line}");
                     }
                 }
             }

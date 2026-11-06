@@ -58,7 +58,7 @@ Axum route handlers. Mutations decode the request, call `state.ops`, and map `Op
 
 ### rungu-mcp
 
-MCP tools for AI agents: 26 tools declared once in `TOOLS` (`tools.rs`), one transport-independent dispatcher (`handle_message(input, ops, actor)`). Two transports use it: stdio (`rungu mcp`, a local trusted subprocess running as the built-in `mcp@rungu.local` admin) and `POST /mcp` (in `rungu-api`, Bearer `RUNGU_API_KEY`, acting as the `ai-agent` identity). The transport picks the actor; mutating tools call the shared `Operations` and read tools call `BoardQuery`, so REST and MCP apply the same rules. Failures return JSON-RPC errors with a code per kind. See [MCP trust boundary](../integrations/mcp.md#trust-boundary--security).
+MCP tools for AI agents: 26 tools declared once in `TOOLS` (`tools.rs`), one transport-independent dispatcher (`handle_message(input, ops, actor)`). Two transports use it: stdio (`rungu mcp`, a local trusted subprocess running as the built-in `mcp@rungu.local` admin) and `POST /mcp` (in `rungu-api`, Bearer `RUNGU_API_KEY`, acting as the `ai-agent` identity). The transport picks the actor; mutating tools call the shared `Operations`, board reads call `BoardQuery`, and the admin-only reads (stats, analytics, webhooks) read the store after the admin check, so REST and MCP apply the same rules. Failures return JSON-RPC errors with a code per kind. See [MCP trust boundary](../integrations/mcp.md#trust-boundary--security).
 
 ### rungud
 
@@ -106,11 +106,18 @@ A capability is something the board can do (create a post, read the roadmap, del
    - Test it at that interface in `crates/rungu-core/tests/` (`ops_test.rs`, `query_test.rs`). These tests cover REST and MCP at once.
 2. **Add the REST route.** An Axum handler that decodes the request, calls the method above, and encodes the result, with its `#[utoipa::path]` (include `security(...)` if the route needs a login) and an entry in `openapi.rs`. `OpError` already maps to HTTP statuses.
 3. **Add the MCP tool**, or decide it is REST-only.
-   - In `crates/rungu-mcp/src/tools.rs`, add one `Tool` to `TOOLS`: name, summary, parameters, `Access`, `Effect`, the REST route it mirrors, and the handler. The handler decodes parameters, calls the same method as the REST handler, and encodes the result. `tools/list`, dispatch and the admin check all come from that entry.
+   - Write the handler function in `crates/rungu-mcp/src/lib.rs`: it decodes parameters, calls the same method as the REST handler, and encodes the result. Then add one `Tool` to `TOOLS` in `tools.rs` (name, summary, parameters, `Access`, `Effect`, the REST route it mirrors, `read!` or `write!` for the handler) and add the function to the `use crate::{…}` list at the top of that file. `tools/list`, dispatch and the admin check all come from that entry.
    - If the endpoint should not be a tool (a file upload, a browser login, an email link), add it to `REST_ONLY` with the reason instead.
 4. **Document it:** a row in the tools table of `docs/integrations/mcp.md`, and a line in `CHANGELOG.md`.
 
-CI checks that you did all of this. `rungu-api/tests/parity_test.rs` fails if an OpenAPI operation has neither a tool nor a `REST_ONLY` entry, if a tool's declared `Access` disagrees with the route's `security`, or if REST and MCP end a scenario differently (ok, invalid, forbidden, not found, conflict). `rungu-mcp`'s tests fail if the docs miss a tool or state the wrong tool count.
+CI checks most of this. `rungu-api/tests/parity_test.rs` fails if:
+
+- an OpenAPI operation has neither a tool nor a `REST_ONLY` entry;
+- a tool is declared public but its route needs a login, or the other way round;
+- a tool is not called by any parity scenario, so add a step to one of the scenarios in that file: it runs the capability through the REST router and through MCP and requires the same outcome (ok, invalid, forbidden, not found, conflict) and the same data;
+- REST and MCP end a step differently.
+
+`rungu-mcp`'s tests fail if the docs miss a tool or state the wrong tool count. What CI cannot see is the finer access level: that a tool declared `Member` rather than `Admin` matches its route. The scenarios cover that for the tools they run, so include a refused case (a user who isn't allowed) for any new write.
 
 ## Deployment
 

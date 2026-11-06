@@ -5,8 +5,8 @@
 ### Added
 
 - **MCP `tools/list`** (#249) returns every tool with its description,
-  parameter schema and `readOnlyHint` / `destructiveHint` annotations,
-  generated from the tool catalog.
+  parameter schema and `readOnlyHint` / `destructiveHint` / `openWorldHint`
+  annotations, generated from the tool catalog.
 - **REST and MCP parity checks** (#249). A new `parity_test` runs the same
   scenarios through the REST router and through MCP on one database and
   requires the same outcome (ok, invalid, forbidden, not found, conflict),
@@ -100,6 +100,8 @@
   for them; it matters once MCP acts as other users.
 - The OpenAPI document marks `DELETE /api/attachments/{id}` as requiring a
   session, as the handler already did.
+- The README said the MCP server has 15 tools; it has 26. A test now checks
+  every "N tools" mention in the README and docs.
 - `GET /api/posts/{id}/similar` for an unknown post returns 404 instead of
   a 500 (#247).
 - **MCP admin tools enforce the same rules as the REST API** (#246).
