@@ -9,8 +9,8 @@
   accepts `Authorization: Bearer <access token>` from that issuer, so a product
   backend can act as the signed-in person. It reuses the `/mcp` verification
   (JWKS, `iss`, `aud`, `exp`, verified email, no `cnf`, reserved emails
-  refused) with its own audience, so a token for one is not valid for the
-  other. These requests always run as `member`, never admin, and
+  refused) with its own audience, so a token minted for one is not valid for
+  the other (a token that names both audiences works on both). These requests always run as `member`, never admin, and
   `RUNGU_MCP_OAUTH_ALLOW_UNVERIFIED_EMAIL` does not apply. Bearer order: the
   API key, then `rgk_` (reserved, refused), then a three-part JWT, else 401.
   Off unless the new variable is set. See `docs/integrations/api.md`.
