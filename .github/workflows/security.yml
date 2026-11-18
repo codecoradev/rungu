@@ -41,7 +41,22 @@ jobs:
         with:
           bun-version: '1.4.4'
       - run: bun install --frozen-lockfile
-      - run: bun audit --audit-level=moderate
+      # Accepted risk, tracked in #281. Review by 2027-02-18, or earlier when
+      # SvelteKit 3 is adopted or picomatch ships a fix.
+      #
+      # None of these is reachable in the shipped product: the SPA is built with
+      # adapter-static and embedded in the Rust binary, so no SvelteKit server
+      # runs in production, and the code uses no remote functions, form actions,
+      # server routes or hooks.
+      #   GHSA-3r8g-jcqq-3p5j  SvelteKit remote `form` parsing (server only)
+      #   GHSA-6cf5-gc4q-fm3x  SvelteKit `query.batch` (remote functions, server only)
+      #   GHSA-fc5q-39xc-vjpf  picomatch ReDoS (build and test tooling only)
+      # Re-evaluate if the app starts using SSR or remote functions.
+      - run: >-
+          bun audit --audit-level=moderate
+          --ignore=GHSA-3r8g-jcqq-3p5j
+          --ignore=GHSA-6cf5-gc4q-fm3x
+          --ignore=GHSA-fc5q-39xc-vjpf
 
   trivy-fs:
     name: Trivy Filesystem
