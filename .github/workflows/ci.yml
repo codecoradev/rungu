@@ -114,6 +114,12 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           cora-api-key: ${{ secrets.CORA_API_KEY }}
           cora-base-url: ${{ secrets.CORA_BASE_URL }}
+          # Without a model, cora falls back to its built-in default, which the
+          # gateway may not serve. Set the repository secret or variable
+          # CORA_MODEL to the gateway's model id.
+          cora-model: ${{ secrets.CORA_MODEL || vars.CORA_MODEL }}
+          # Pinned so a new cora release cannot change review behaviour unseen.
+          cora-version: v0.21.1
           base-branch: develop
           severity: major
           upload-sarif: "true"
