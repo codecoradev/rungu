@@ -139,6 +139,12 @@
 
 ### Fixed
 
+- **Web dependency advisories, part 1** (#281). `@sveltejs/kit` 2.70.4 and
+  `@sveltejs/adapter-static` 3.0.11 fix three advisories (route resolution and
+  `reroute` in SvelteKit, prerendered paths in the Vercel config). Three
+  remain and have no fix on SvelteKit 2: two remote-functions issues that
+  SvelteKit 3.1.1 fixes, and a `picomatch` ReDoS with no patched release. Bun
+  Audit stays red until they are resolved or accepted explicitly.
 - The OpenAPI spec (and Swagger UI at `/swagger-ui`) reported the version as
   `0.2.1`, hard-coded; it now follows the crate version. A test keeps them in
   step.
