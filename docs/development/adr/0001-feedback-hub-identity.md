@@ -55,11 +55,11 @@ A wrong value of the chosen kind is a 401 and is not retried as another kind. Co
 ## Path B
 
 - The token is a JWT verified against the issuer's JWKS: signature, `iss`, `aud`, `exp` and `nbf`; RS and ES algorithms only; DPoP-bound and opaque tokens refused. This is the check `/mcp` performs.
-- The audience is a separate setting for the REST API. A token issued for `/mcp` is not valid for REST and the other way round. Issuer auth for REST is **opt-in**: it is enabled only when the issuer and this REST audience are both set.
+- The audience is a separate setting for the REST API, `RUNGU_API_RESOURCE_URL`. A token whose audience is only `/mcp` is not valid for REST and the other way round. A token that names both resources is valid on both, so the issuer must mint one audience per token. Issuer auth for REST is **opt-in**: it is enabled only when the issuer and this REST audience are both set, and the value must be an https URL without query, fragment or credentials.
 - Email comes from the token or, if the token has none, from `userinfo`. `email_verified: true` is required. REST does **not** inherit the `/mcp` opt-out for issuers that omit the claim.
-- The request runs as `member`. The stored role is not changed.
+- The user is resolved as for web login, so `ADMIN_EMAILS` still decides the stored role. The request itself runs as `member`.
 - A token is valid for every project, because the audience names Rungu, not a product. The product that holds it can act as that user anywhere in Rungu as a member. This is per-user trust and is accepted; an optional allowed-client list is an open item.
-- Revocation: a JWT stays valid until `exp`. When the token has no email, Rungu asks `userinfo` at most every 60 seconds, so a banned user is refused within about a minute. When the token carries an email claim, it is valid until `exp`. Operators should keep access tokens short (one hour or less). Introspection is an optional hardening and an open item.
+- Revocation: a JWT stays valid until `exp`. When the token has no email, Rungu asks `userinfo` at most every 60 seconds, so a banned user is refused within about a minute. The remembered identity is shared with `/mcp`. When the token carries an email claim, it is valid until `exp`. Operators should keep access tokens short (one hour or less). Introspection is an optional hardening and an open item.
 
 ## Path C
 
@@ -96,7 +96,7 @@ Each rule has a test.
 | Stolen web session after a ban or logout at the issuer | Back-channel logout and a per-user session version (#275). |
 | A banned user's issuer token on REST | Within about 60 seconds when `userinfo` is used; until `exp` when the token carries an email. Short token lifetimes are required; introspection is optional. |
 | A user's token used by another product's backend | Accepted per-user trust, capped at `member`, optional allowed-client list as an open item. |
-| Token for one resource used on another | Separate audiences for `/mcp` and REST, tested both ways. |
+| Token for one resource used on another | Separate audiences for `/mcp` and REST, tested both ways. A token that names both is valid on both, so the issuer must mint one audience per token. |
 | A role change hidden by the 60-second actor cache | Documented. Role changes through `ADMIN_EMAILS` apply on the next resolution. |
 | A freed email address reissued to someone else | Aliases do not authenticate (rule 6), and an email change is applied only for a verified email. |
 
@@ -125,7 +125,6 @@ Each item names the constraint its decision must meet.
 
 | Item | Decided in | Constraint |
 |---|---|---|
-| Name of the REST audience setting | #272 | Explicit opt-in, https, no query or fragment; a bad value is a startup error |
 | Optional allowed-client list per project for path B (`azp`) | follow-up | Off by default; enforced in the same verifier |
 | Introspection for path B | follow-up | Optional; short cache; must not be required for startup |
 | Meaning of the `read` scope | #273 | A key never reaches admin routes; public reads need no key |
