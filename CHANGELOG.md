@@ -70,6 +70,11 @@
 
 ### Changed
 
+- **Bun Audit ignores three unreachable advisories** (#281). The web audit step
+  skips GHSA-3r8g-jcqq-3p5j, GHSA-6cf5-gc4q-fm3x and GHSA-fc5q-39xc-vjpf. The
+  SvelteKit ones affect only a running SvelteKit server and the picomatch one
+  only build tooling, and the shipped SPA is static. The reasoning and a review
+  date (2027-02-18) are in `security.yml`.
 - **Rust 1.94 and sqlx 0.9** (#282). The minimum Rust version is now 1.94
   (it was 1.88). `sqlx` 0.9.1 needs it, and it is the first `sqlx` whose
   SQLite driver can use a `libsqlite3-sys` with the fix for RUSTSEC-2026-0459
