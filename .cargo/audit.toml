@@ -1,0 +1,6 @@
+[advisories]
+ignore = [
+    "RUSTSEC-2026-0367", # zip 3.0.0 transitive via utoipa-swagger-ui (build-dep); fix needs zip>=9 (major upstream bump); tracked #229; review 2027-04-22
+    "RUSTSEC-2026-0368", # zip 3.0.0 transitive via utoipa-swagger-ui (build-dep); fix needs zip>=9 (major upstream bump); tracked #229; review 2027-04-22
+    "RUSTSEC-2026-0369", # zip 3.0.0 transitive via utoipa-swagger-ui (build-dep); fix needs zip>=9 (major upstream bump); tracked #229; review 2027-04-22
+]

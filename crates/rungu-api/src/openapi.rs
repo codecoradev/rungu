@@ -44,6 +44,10 @@ use utoipa::OpenApi;
         crate::attachment_routes::get_attachment_file,
         crate::attachment_routes::delete_attachment,
         // Webhooks
+        crate::notification_routes::get_preferences,
+        crate::notification_routes::set_preferences,
+        crate::notification_routes::unsubscribe_page,
+        crate::notification_routes::unsubscribe,
         crate::webhook_routes::list_webhooks,
         crate::webhook_routes::create_webhook,
         crate::webhook_routes::get_webhook,
@@ -98,6 +102,7 @@ use utoipa::OpenApi;
         (name = "comments", description = "Comment endpoints"),
         (name = "attachments", description = "Image attachment endpoints"),
         (name = "webhooks", description = "Webhook subscription and delivery endpoints"),
+        (name = "notifications", description = "Email notification preferences and unsubscribe"),
         (name = "meta", description = "Public instance branding metadata"),
         (name = "auth", description = "Authentication endpoints (OAuth2)"),
     ),

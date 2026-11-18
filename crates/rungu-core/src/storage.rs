@@ -145,6 +145,26 @@ impl Storage for FsStorage {
     }
 }
 
+/// Storage that holds nothing: saves are refused, deletes are no-ops.
+/// Fallback for processes that can still run without a usable upload
+/// directory (`rungu mcp` started from an unrelated working directory).
+pub struct NoopStorage;
+
+#[async_trait::async_trait]
+impl Storage for NoopStorage {
+    async fn save(&self, _key: &str, _data: Vec<u8>) -> Result<String> {
+        bail!("Attachment storage is not configured for this process")
+    }
+
+    async fn load(&self, _path: &str) -> Result<Vec<u8>> {
+        bail!("Attachment storage is not configured for this process")
+    }
+
+    async fn delete(&self, _path: &str) -> Result<()> {
+        Ok(())
+    }
+}
+
 /// Create the appropriate storage backend from environment variables.
 pub fn create_storage() -> Result<Box<dyn Storage>> {
     let driver = std::env::var("STORAGE_DRIVER").unwrap_or_else(|_| "fs".to_string());

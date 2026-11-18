@@ -12,6 +12,17 @@ Rungu's web UI uses a semantic token system defined in `web/src/app.css`. All v0
 
 Primitives (raw OKLCH values) live **only** inside the token definitions in `app.css` — never in components.
 
+## Text-on-color tokens
+
+Hue tokens (`--color-primary`, `--color-status-*`) are tuned for fills, dots, and tints. Used as small text they fail WCAG AA, so text gets its own token:
+
+| Token | Light | Dark | Use for |
+|-------|-------|------|---------|
+| `--color-primary-text` (`text-primary-text`) | = `--color-primary` (5.6:1) | `oklch(0.7 0.15 250)` (≥ 6:1) | Links, active filter labels, voted count. Never `text-primary`. |
+| `--color-status-*-fg` (`text-status-open-fg`, …) | L 0.49–0.54, C 0.16 (≥ 4.6:1 on the /10 tint) | = the status hue (≥ 6:1) | Status badge text. The plain status token stays for the dot and tint. |
+
+`--color-primary` itself stays as is: it is the button fill under white text (5.6:1 light, 4.5:1 dark).
+
 ## Board component tokens (#199)
 
 ### Card-list row (used by the post list)
@@ -30,7 +41,7 @@ Primitives (raw OKLCH values) live **only** inside the token definitions in `app
 | `--vote-rail-width` | `3.5rem` | Rail column width (56px) |
 | `--vote-target-min` | `2.75rem` | Minimum tap target, 44px HIG minimum |
 | `--vote-count-size` | `1.125rem` | Vote count font size (18px semibold) |
-| `--vote-voted-bg` / `--vote-voted-fg` / `--vote-voted-border` | primary tints | Voted state |
+| `--vote-voted-bg` / `--vote-voted-fg` / `--vote-voted-border` | primary tints; fg = `--color-primary-text` | Voted state |
 | `--vote-hover-bg` | neutral tint | Hover state |
 | `--vote-rail-divider-color` | `var(--color-border)` | Vertical divider between rail and content |
 

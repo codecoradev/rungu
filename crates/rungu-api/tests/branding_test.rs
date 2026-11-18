@@ -30,17 +30,15 @@ async fn setup_branded_app(branding: InstanceBranding, license: LicenseStatus) -
         keycloak: None,
     };
 
-    let state = AppState {
+    let state = AppState::new(
         store,
         config,
-        http_client: reqwest::Client::new(),
-        storage: std::sync::Arc::from(
-            rungu_core::FsStorage::new(std::env::temp_dir().join("rungu-test-branding")).unwrap(),
-        ),
+        reqwest::Client::new(),
+        std::sync::Arc::from(rungu_core::FsStorage::new(std::env::temp_dir().join("rungu-test-branding")).unwrap()),
         branding,
-        license: std::sync::Arc::new(license),
-        agent_user_id: std::sync::Arc::new(None),
-    };
+        std::sync::Arc::new(license),
+        std::sync::Arc::new(None),
+    );
     axum::Router::new().merge(api_routes().with_state(state))
 }
 

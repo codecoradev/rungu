@@ -1,17 +1,20 @@
 <script lang="ts">
     import { api, ApiError } from '$lib/api/client';
     import { toastError } from '$lib/toast.svelte';
-    import { cn } from '$lib/utils';
+    import { cn, loginHref } from '$lib/utils';
     import ChevronUp from '@lucide/svelte/icons/chevron-up';
 
     let {
         postId,
+        postTitle = '',
         voted = false,
         count = 0,
         disabled = false,
         onvote,
     }: {
         postId: string;
+        /** Names the post in the accessible label, so a list of rails is distinguishable. */
+        postTitle?: string;
         voted?: boolean;
         count?: number;
         disabled?: boolean;
@@ -19,6 +22,13 @@
     } = $props();
 
     let loading = $state(false);
+
+    // Toggle-button pattern: the name stays fixed and `aria-pressed` carries
+    // the state. The count is part of the name — aria-label hides the
+    // visible text, so it must be repeated here.
+    const label = $derived(
+        `Upvote${postTitle ? `: ${postTitle}` : ''}, ${count} ${count === 1 ? 'vote' : 'votes'}`,
+    );
 
     async function toggle() {
         if (disabled || loading) return;
@@ -45,7 +55,7 @@
             const isAuth = e instanceof ApiError && e.status === 401;
             toastError(isAuth ? 'Login to vote' : 'Failed to vote', {
                 action: isAuth
-                    ? { label: 'Login →', href: `/login?redirect=${encodeURIComponent(location.pathname)}` }
+                    ? { label: 'Login →', href: loginHref(location.pathname + location.search) }
                     : undefined,
             });
         } finally {
@@ -64,7 +74,7 @@
     onclick={toggle}
     disabled={disabled}
     aria-pressed={voted}
-    aria-label={voted ? 'Remove vote' : 'Vote'}
+    aria-label={label}
     class={cn(
         'group flex w-[var(--vote-rail-width)] shrink-0 flex-col items-center justify-center gap-0.5 rounded-lg border outline-none transition-colors',
         'min-h-[var(--vote-target-min)]',

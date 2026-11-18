@@ -120,8 +120,89 @@ pub fn sign_payload(payload: &str, secret: &str) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
+/// Delivers domain events to the project's webhook subscriptions.
+pub struct WebhookSink {
+    store: std::sync::Arc<Store>,
+    http: reqwest::Client,
+}
+
+impl WebhookSink {
+    pub fn new(store: Store, http: reqwest::Client) -> Self {
+        Self { store: std::sync::Arc::new(store), http }
+    }
+}
+
+impl rungu_core::EventSink for WebhookSink {
+    fn publish(&self, event: &rungu_core::DomainEvent) {
+        if let Some((event_type, payload)) = webhook_payload(event) {
+            dispatch_event(self.store.clone(), self.http.clone(), event.project_id().to_string(), event_type, payload);
+        }
+    }
+}
+
+/// The public webhook contract: which domain events are delivered, and the
+/// exact JSON receivers get. Events with no subscribable type return `None`.
+///
+/// Payload shapes are frozen — receivers parse them — including the
+/// official-response one that predates the `{event, data}` envelope.
+pub fn webhook_payload(event: &rungu_core::DomainEvent) -> Option<(WebhookEventType, serde_json::Value)> {
+    use rungu_core::DomainEvent as E;
+    use serde_json::json;
+    match event {
+        E::PostCreated { post, .. } => Some((
+            WebhookEventType::PostCreated,
+            json!({
+                "event": "post.created",
+                "data": {
+                    "id": post.id,
+                    "title": post.title,
+                    "project_id": post.project_id,
+                    "category": post.category,
+                }
+            }),
+        )),
+        E::PostStatusChanged { post, old_status, new_status, .. } => Some((
+            WebhookEventType::PostStatusChanged,
+            json!({
+                "event": "post.status_changed",
+                "data": {
+                    "id": post.id,
+                    "title": post.title,
+                    "project_id": post.project_id,
+                    "old_status": old_status,
+                    "new_status": new_status,
+                }
+            }),
+        )),
+        E::CommentCreated { comment, project_id, post_title, .. } => Some((
+            WebhookEventType::CommentCreated,
+            json!({
+                "event": "comment.created",
+                "data": {
+                    "id": comment.id,
+                    "post_id": comment.post_id,
+                    "post_title": post_title,
+                    "project_id": project_id,
+                }
+            }),
+        )),
+        E::OfficialResponseChanged { post_id, comment_id, previous_comment_id, .. } => Some((
+            WebhookEventType::OfficialResponseChanged,
+            json!({
+                "event": "post.official_response_changed",
+                "post_id": post_id,
+                "comment_id": comment_id,
+                "previous_comment_id": previous_comment_id,
+            }),
+        )),
+        E::PostCategoryChanged { .. } | E::PostDeleted { .. } | E::CommentDeleted { .. } | E::VoteToggled { .. } => {
+            None
+        }
+    }
+}
+
 /// Dispatch a webhook event to all matching subscriptions.
-/// Non-blocking — fires in a tokio::spawn so the caller is never blocked.
+/// Non-blocking — runs on a tracked background task (see [`crate::background`]).
 pub fn dispatch_event(
     store: std::sync::Arc<Store>,
     http: reqwest::Client,
@@ -129,7 +210,7 @@ pub fn dispatch_event(
     event_type: WebhookEventType,
     payload: serde_json::Value,
 ) {
-    tokio::spawn(async move {
+    crate::background::spawn(async move {
         let event_str = event_type.as_str();
         let payload_str = serde_json::to_string(&payload).unwrap_or_default();
 
@@ -380,6 +461,90 @@ mod tests {
         let pub_pin = resolve_safe_addr("1.1.1.1").await;
         assert!(pub_pin.is_some());
         assert_eq!(pub_pin.unwrap().ip(), "1.1.1.1".parse::<std::net::IpAddr>().unwrap());
+    }
+
+    fn sample_post() -> rungu_proto::Post {
+        rungu_proto::Post {
+            id: "p1".into(),
+            project_id: "proj".into(),
+            title: "Dark mode".into(),
+            description: String::new(),
+            status: rungu_proto::PostStatus::Open,
+            category: rungu_proto::PostCategory::Feature,
+            vote_count: 0,
+            comment_count: 0,
+            created_by: "u1".into(),
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        }
+    }
+
+    /// Payload shapes are a public contract — these must not drift.
+    #[test]
+    fn test_webhook_payload_contract() {
+        use rungu_core::DomainEvent as E;
+        use serde_json::json;
+        let actor_id = "u2".to_string();
+
+        let (t, p) = webhook_payload(&E::PostCreated { post: sample_post(), actor_id: actor_id.clone() }).unwrap();
+        assert_eq!(t.as_str(), "post.created");
+        assert_eq!(
+            p,
+            json!({"event": "post.created", "data": {"id": "p1", "title": "Dark mode", "project_id": "proj", "category": "feature"}})
+        );
+
+        let (t, p) = webhook_payload(&E::PostStatusChanged {
+            post: sample_post(),
+            old_status: rungu_proto::PostStatus::Open,
+            new_status: rungu_proto::PostStatus::InProgress,
+            actor_id: actor_id.clone(),
+        })
+        .unwrap();
+        assert_eq!(t.as_str(), "post.status_changed");
+        assert_eq!(
+            p,
+            json!({"event": "post.status_changed", "data": {
+                "id": "p1", "title": "Dark mode", "project_id": "proj", "old_status": "open", "new_status": "in_progress"
+            }})
+        );
+
+        let comment = rungu_proto::Comment {
+            id: "c1".into(),
+            post_id: "p1".into(),
+            parent_id: None,
+            content: "+1".into(),
+            created_by: "u2".into(),
+            created_at: chrono::Utc::now(),
+        };
+        let (t, p) = webhook_payload(&E::CommentCreated {
+            comment,
+            project_id: "proj".into(),
+            post_title: "Dark mode".into(),
+            actor_id: actor_id.clone(),
+        })
+        .unwrap();
+        assert_eq!(t.as_str(), "comment.created");
+        assert_eq!(
+            p,
+            json!({"event": "comment.created", "data": {"id": "c1", "post_id": "p1", "post_title": "Dark mode", "project_id": "proj"}})
+        );
+
+        let (t, p) = webhook_payload(&E::OfficialResponseChanged {
+            post_id: "p1".into(),
+            project_id: "proj".into(),
+            comment_id: Some("c1".into()),
+            previous_comment_id: None,
+            actor_id: actor_id.clone(),
+        })
+        .unwrap();
+        assert_eq!(t.as_str(), "post.official_response_changed");
+        assert_eq!(
+            p,
+            json!({"event": "post.official_response_changed", "post_id": "p1", "comment_id": "c1", "previous_comment_id": null})
+        );
+
+        // No subscribable webhook type yet — must not be delivered.
+        assert!(webhook_payload(&E::PostDeleted { post: sample_post(), actor_id }).is_none());
     }
 
     #[test]

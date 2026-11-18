@@ -2,6 +2,7 @@
     import '../app.css';
     import { onMount } from 'svelte';
     import { page } from '$app/state';
+    import { loginHref } from '$lib/utils';
     import { api } from '$lib/api/client';
     import type { CurrentUser } from '$lib/api/types';
     import { branding } from '$lib/branding.svelte';
@@ -134,7 +135,7 @@
                     <span
                         aria-hidden="true"
                         title={user.email}
-                        class="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-sm font-semibold text-primary sm:hidden"
+                        class="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-sm font-semibold text-primary-text sm:hidden"
                     >
                         {user.email.charAt(0).toUpperCase()}
                     </span>
@@ -148,7 +149,7 @@
                     {/if}
                     <Button variant="outline" size="sm" class="max-sm:h-11" onclick={handleLogout}>Logout</Button>
                 {:else}
-                    <Button size="sm" class="max-sm:h-11" href="/login">Login</Button>
+                    <Button size="sm" class="max-sm:h-11" href={loginHref(page.url.pathname + page.url.search)}>Login</Button>
                 {/if}
             </div>
         </div>

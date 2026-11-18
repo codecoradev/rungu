@@ -85,14 +85,20 @@ In Claude Code:
 
 ## Transport
 
-The MCP server uses **stdio** transport (stdin/stdout). No HTTP server needed — it runs as a subprocess of the AI agent.
+The MCP server uses **stdio** transport (stdin/stdout). No HTTP server needed — it runs as a subprocess of the AI agent. Only JSON-RPC is written to stdout; logs go to stderr.
+
+Mutating tools fire the same webhooks and analytics as the web app. When stdin closes, `rungu mcp` waits up to 45 seconds for in-flight webhook deliveries before exiting.
+
+### Attachment files
+
+`delete_post` and `delete_attachment` also delete the attachment files, so the MCP process needs the **same `RUNGU_STORAGE_DIR` as the server** (pass it in the client's `env` block). If the directory can't be used — for example the client starts `rungu mcp` from a read-only working directory and the default `./uploads` can't be created — the server logs a warning and still starts, but attachment files are left on disk.
 
 ## Trust Boundary & Security
 
 The MCP server intentionally has **no authentication**. This is safe only because of a strict trust assumption:
 
 - **The MCP subprocess inherits the privileges of whatever launches it.** Any agent, editor plugin, or script that can spawn `rungu mcp` can read and mutate the entire SQLite database.
-- **There is no row-level authorization.** `create_post`, `update_post_status`, `update_post_category`, `delete_post`, `vote_post`, `add_comment`, `delete_comment`, and `delete_attachment` execute as a built-in MCP user with full write access.
+- **There is no row-level authorization.** `create_post`, `update_post_status`, `update_post_category`, `delete_post`, `vote_post`, `add_comment`, `delete_comment`, and `delete_attachment` execute as a built-in MCP user with full write access. They go through the same domain operations as the REST API, so input validation, attachment-file cleanup, webhooks, and analytics apply identically — but the admin role means ownership checks always pass.
 
 ### Safe deployments
 

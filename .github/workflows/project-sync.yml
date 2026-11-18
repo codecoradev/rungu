@@ -23,7 +23,7 @@ jobs:
           GH_TOKEN: ${{ secrets.PROJECT_BOARD_TOKEN }}
           PROJECT_NODE_ID: ${{ secrets.PROJECT_NODE_ID }}
           STATUS_FIELD_ID: PVTSSF_lADOEUV_vs4BahYpzhVYcGc
-          DONE_OPTION_ID: 98236657
+          DONE_OPTION_ID: 35897fb3
         run: |
           set -e
 

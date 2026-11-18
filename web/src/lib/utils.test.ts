@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { cn, timeAgo, formatDate, sanitizeHref } from '$lib/utils';
+import { cn, timeAgo, formatDate, sanitizeHref, loginHref } from '$lib/utils';
 
 describe('cn utility', () => {
     it('merges class names', () => {
@@ -117,5 +117,18 @@ describe('sanitizeHref', () => {
         expect(sanitizeHref('java\tscript:alert(1)')).toBeUndefined();
         expect(sanitizeHref('java\nscript:alert(1)')).toBeUndefined();
         expect(sanitizeHref('  \t https://ok.com')).toBe('https://ok.com');
+    });
+});
+
+describe('loginHref', () => {
+    it('returns to the current page, query included', () => {
+        expect(loginHref('/board/acme/post/p1')).toBe('/login?redirect=%2Fboard%2Facme%2Fpost%2Fp1');
+        expect(loginHref('/board/acme?sort=trending')).toBe('/login?redirect=%2Fboard%2Facme%3Fsort%3Dtrending');
+    });
+
+    it('skips the redirect for home and the login page itself', () => {
+        expect(loginHref('/')).toBe('/login');
+        expect(loginHref('')).toBe('/login');
+        expect(loginHref('/login?redirect=%2Fx')).toBe('/login');
     });
 });

@@ -33,18 +33,9 @@ cargo run -- --db rungu.db serve --listen 0.0.0.0:3000
 2. Create feature branch
 3. PR to `develop` (not `main`)
 
-## CLA
+## License
 
-All contributions (code, docs, tests, configuration) require a signed
-Contributor License Agreement before a pull request can be merged:
-
-- 📋 **Individual?** → [Sign the Individual CLA](https://codecoradev.github.io/cla/?type=individual)
-- 🏢 **Contributing on behalf of a company?** → [Sign the Corporate CLA](https://codecoradev.github.io/cla/?type=corporate)
-
-The CLA is a license agreement, not a copyright assignment — you keep
-ownership of your work. Signing takes a couple of minutes and is stored
-in the [codecoradev/.github](https://github.com/codecoradev/.github)
-repository; a bot checks it automatically on every pull request.
+Contributions are licensed to the project under the Apache-2.0 license (inbound = outbound). No additional agreement is required.
 
 ## Contributions are unpaid
 

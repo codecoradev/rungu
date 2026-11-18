@@ -6,10 +6,13 @@ pub mod admin_routes;
 pub mod analytics;
 pub mod attachment_routes;
 pub mod auth_routes;
+pub mod background;
 pub mod comment_routes;
+pub mod email;
 pub mod error;
 pub mod mcp_http;
 pub mod meta;
+pub mod notification_routes;
 pub mod oauth;
 pub mod openapi;
 pub mod post_routes;
@@ -18,14 +21,39 @@ pub mod vote_routes;
 pub mod webhook;
 pub mod webhook_routes;
 
+use std::sync::Arc;
+
 use axum::Router;
 use axum::extract::FromRef;
-use rungu_core::Store;
+use rungu_core::{EventBus, Operations, Storage, Store};
+
+/// The production event subscribers: webhooks, analytics counters, and —
+/// when SMTP is configured — email notifications. Shared by the HTTP server
+/// and the stdio MCP process.
+pub fn default_event_bus(
+    store: &Store,
+    http_client: &reqwest::Client,
+    auth: &rungu_auth::AuthConfig,
+    email: email::EmailConfig,
+) -> EventBus {
+    let mut sinks: Vec<Arc<dyn rungu_core::EventSink>> = vec![
+        Arc::new(webhook::WebhookSink::new(store.clone(), http_client.clone())),
+        Arc::new(analytics::AnalyticsSink::new(store.clone())),
+    ];
+    if let Some(sink) = email::EmailSink::new(store.clone(), email, &auth.app_url, &auth.app_secret) {
+        sinks.push(Arc::new(sink));
+    }
+    EventBus::new(sinks)
+}
 
 /// Shared application state for API handlers.
 #[derive(Clone)]
 pub struct AppState {
+    /// Read paths query the store directly; it shares its project cache
+    /// with `ops`.
     pub store: Store,
+    /// Every mutation goes through here (REST and `/mcp` alike).
+    pub ops: Operations,
     pub config: rungu_auth::AuthConfig,
     /// Reused HTTP client for outbound calls (OAuth token exchange, userinfo fetch).
     ///
@@ -43,6 +71,31 @@ pub struct AppState {
     /// Extractors forge the agent identity with this id so `created_by`
     /// FKs point at a real user row.
     pub agent_user_id: std::sync::Arc<Option<String>>,
+}
+
+impl AppState {
+    /// Build state with the production event subscribers wired into `ops`.
+    /// Email notifications start disabled; see [`AppState::with_email`].
+    pub fn new(
+        store: Store,
+        config: rungu_auth::AuthConfig,
+        http_client: reqwest::Client,
+        storage: Arc<dyn Storage>,
+        branding: crate::meta::InstanceBranding,
+        license: Arc<crate::meta::LicenseStatus>,
+        agent_user_id: Arc<Option<String>>,
+    ) -> Self {
+        let events = default_event_bus(&store, &http_client, &config, email::EmailConfig::Disabled);
+        let ops = Operations::new(store.clone(), storage.clone(), events);
+        Self { store, ops, config, http_client, storage, branding, license, agent_user_id }
+    }
+
+    /// Subscribe email notifications (#73) with the given SMTP configuration.
+    pub fn with_email(mut self, email: email::EmailConfig) -> Self {
+        let events = default_event_bus(&self.store, &self.http_client, &self.config, email);
+        self.ops = Operations::new(self.store.clone(), self.storage.clone(), events);
+        self
+    }
 }
 
 impl FromRef<AppState> for rungu_auth::AuthConfig {
@@ -73,5 +126,6 @@ pub fn api_routes() -> Router<AppState> {
         .merge(attachment_routes::router())
         .merge(webhook_routes::router())
         .merge(admin_routes::router())
+        .merge(notification_routes::router())
         .merge(crate::meta::meta_routes())
 }

@@ -15,11 +15,11 @@
     // Soft-tinted pill per status — one consistent treatment instead of a mix of
     // badge variants. Colors come from the --color-status-* tokens (app.css).
     const badgeClass: Record<PostStatus, string> = {
-        open: 'bg-status-open/10 text-status-open',
-        planned: 'bg-status-planned/10 text-status-planned',
-        in_progress: 'bg-status-in-progress/10 text-status-in-progress',
-        done: 'bg-status-done/10 text-status-done',
-        declined: 'bg-status-declined/10 text-status-declined',
+        open: 'bg-status-open/10 text-status-open-fg',
+        planned: 'bg-status-planned/10 text-status-planned-fg',
+        in_progress: 'bg-status-in-progress/10 text-status-in-progress-fg',
+        done: 'bg-status-done/10 text-status-done-fg',
+        declined: 'bg-status-declined/10 text-status-declined-fg',
     };
 
     const dotColors: Record<PostStatus, string> = {
