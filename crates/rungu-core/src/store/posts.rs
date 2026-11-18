@@ -102,7 +102,7 @@ impl Store {
 
         // Count query (same WHERE, no LIMIT/OFFSET)
         let count_sql = format!("SELECT COUNT(*) FROM posts p {search_join} WHERE {where_sql}{search_where}");
-        let total: i64 = bind_filters!(sqlx::query_scalar::<_, i64>(&count_sql))
+        let total: i64 = bind_filters!(sqlx::query_scalar::<_, i64>(assembled_sql(count_sql)))
             .fetch_one(&self.pool)
             .await
             .context("Failed to count posts")?;
@@ -118,7 +118,7 @@ impl Store {
              LIMIT ? OFFSET ?"
         );
 
-        let query = bind_filters!(sqlx::query(&sql)).bind(params.limit).bind(params.offset);
+        let query = bind_filters!(sqlx::query(assembled_sql(sql))).bind(params.limit).bind(params.offset);
 
         let rows = query.fetch_all(&self.pool).await.context("Failed to list posts")?;
         let mut posts: Vec<PostDetail> = rows.iter().map(map_post_detail).collect();
@@ -128,19 +128,19 @@ impl Store {
         // which left the board unable to show which posts the current user had
         // voted on. A naive per-row lookup would be N+1; instead we do one
         // indexed query over the `votes` (user_id, post_id) primary key.
-        if let Some(uid) = params.user_id {
-            if !posts.is_empty() {
-                let placeholders = std::iter::repeat_n("?", posts.len()).collect::<Vec<_>>().join(",");
-                let sql = format!("SELECT post_id FROM votes WHERE user_id = ? AND post_id IN ({placeholders})");
-                let mut q = sqlx::query_scalar::<_, String>(&sql).bind(uid);
-                for p in &posts {
-                    q = q.bind(&p.post.id);
-                }
-                let voted_ids: std::collections::HashSet<String> =
-                    q.fetch_all(&self.pool).await.context("Failed to look up votes")?.into_iter().collect();
-                for p in posts.iter_mut() {
-                    p.user_voted = voted_ids.contains(&p.post.id);
-                }
+        if let Some(uid) = params.user_id
+            && !posts.is_empty()
+        {
+            let placeholders = std::iter::repeat_n("?", posts.len()).collect::<Vec<_>>().join(",");
+            let sql = format!("SELECT post_id FROM votes WHERE user_id = ? AND post_id IN ({placeholders})");
+            let mut q = sqlx::query_scalar::<_, String>(assembled_sql(sql)).bind(uid);
+            for p in &posts {
+                q = q.bind(&p.post.id);
+            }
+            let voted_ids: std::collections::HashSet<String> =
+                q.fetch_all(&self.pool).await.context("Failed to look up votes")?.into_iter().collect();
+            for p in posts.iter_mut() {
+                p.user_voted = voted_ids.contains(&p.post.id);
             }
         }
 
@@ -168,7 +168,7 @@ impl Store {
              LEFT JOIN projects pr ON p.project_id = pr.id \
              WHERE {where_sql}"
         );
-        let mut count_q = sqlx::query_scalar::<_, i64>(&count_sql);
+        let mut count_q = sqlx::query_scalar::<_, i64>(assembled_sql(count_sql));
         if let Some(s) = params.status {
             count_q = count_q.bind(status_to_str(s));
         }
@@ -187,7 +187,7 @@ impl Store {
              ORDER BY p.created_at DESC \
              LIMIT ? OFFSET ?"
         );
-        let mut q = sqlx::query(&sql);
+        let mut q = sqlx::query(assembled_sql(sql));
         if let Some(s) = params.status {
             q = q.bind(status_to_str(s));
         }

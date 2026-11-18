@@ -7,6 +7,19 @@ use chrono::{DateTime, Utc};
 use rungu_proto::*;
 use sqlx::{AnyPool, Row, any::AnyRow};
 
+/// Mark SQL that is assembled at run time as audited (sqlx 0.9 refuses a
+/// dynamic string otherwise).
+///
+/// The rule for every caller: the string may only contain fixed fragments
+/// chosen by the code itself (`match` arms, literal conditions, `LIKE` or
+/// `ILIKE`, an `ORDER BY` picked from an enum) and `?` placeholders whose
+/// number comes from a count. Every value that came from a request goes
+/// through `.bind(..)`, never into the string. Grep for `assembled_sql` to
+/// review all such places.
+fn assembled_sql(sql: String) -> sqlx::AssertSqlSafe<String> {
+    sqlx::AssertSqlSafe(sql)
+}
+
 /// Parse a timestamp string from the DB (with fallback).
 fn parse_ts(s: &str) -> DateTime<Utc> {
     DateTime::parse_from_rfc3339(s)
