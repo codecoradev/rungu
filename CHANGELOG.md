@@ -4,6 +4,12 @@
 
 ### Added
 
+- **ADR 0001: feedback hub identity and integration** (#271, epic #270). Records
+  how several products send feedback into one Rungu instance: email as the
+  identity, four ways to act as a user (web login, issuer token, widget,
+  per-project integration key), and the rule that an identity asserted by an
+  integration never gets admin rights or a reserved identity. See
+  `docs/development/adr/0001-feedback-hub-identity.md`.
 - **Generic OpenID Connect login** (#267). `OIDC_ISSUER`, `OIDC_CLIENT_ID`
   and `OIDC_CLIENT_SECRET` (and an optional `OIDC_NAME` label) add a login
   button for any OIDC issuer, such as Gatehouse. Endpoints come from the

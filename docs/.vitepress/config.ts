@@ -66,6 +66,7 @@ export default defineConfig({
         items: [
           { text: 'Architecture', link: '/development/architecture' },
           { text: 'Design Tokens', link: '/development/design-tokens' },
+          { text: 'ADR 0001: Feedback hub identity', link: '/development/adr/0001-feedback-hub-identity' },
           { text: 'Contributing', link: '/development/contributing' },
           { text: 'Roadmap', link: '/development/roadmap' },
         ],
