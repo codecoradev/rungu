@@ -155,7 +155,7 @@ rungu healthcheck
 rungu mcp
 ```
 
-See [CLI Reference](https://rungu.pages.dev/cli-reference) for full options.
+See the [CLI reference](docs/cli-reference.md) for full options.
 
 ## MCP Tools
 

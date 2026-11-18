@@ -124,6 +124,10 @@
 
 ### Fixed
 
+- **README linked the CLI reference on a Pages domain we do not own** (#232).
+  `rungu.pages.dev` was never ours (the docs project was renamed to
+  `rungu-docs` in 0.1.1 because the name was taken) and now serves spam. The
+  link points to `docs/cli-reference.md` in the repository instead.
 - The OpenAPI spec (and Swagger UI at `/swagger-ui`) reported the version as
   `0.2.1`, hard-coded; it now follows the crate version. A test keeps them in
   step.
