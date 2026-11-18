@@ -70,6 +70,11 @@
 
 ### Changed
 
+- **Cora review CI pins its model and version.** The workflow passes
+  `cora-model` (from the `CORA_MODEL` secret or variable) and pins
+  `cora-version` to v0.21.1. Without a model, cora fell back to a default the
+  LLM gateway did not serve and the review ended with `401 Insufficient
+  balance`.
 - **Rust 1.94 and sqlx 0.9** (#282). The minimum Rust version is now 1.94
   (it was 1.88). `sqlx` 0.9.1 needs it, and it is the first `sqlx` whose
   SQLite driver can use a `libsqlite3-sys` with the fix for RUSTSEC-2026-0459
