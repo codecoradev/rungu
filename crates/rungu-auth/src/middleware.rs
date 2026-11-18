@@ -9,6 +9,12 @@
 //! `ai-agent` admin user (`agent@rungu.local`). The key is compared in
 //! constant time; a presented-but-wrong key is an immediate 401.
 //!
+//! Issuer tokens (#272): when the host provides an [`IssuerAuth`], a Bearer
+//! that is not the API key may be an access token from the configured issuer
+//! and then acts as the person it names (see [`authenticate_bearer`] for the
+//! dispatch order). Cookies are consulted only when there is no
+//! `Authorization` header.
+//!
 //! ## State requirement
 //!
 //! These extractors are generic over any state `S` where
@@ -24,6 +30,7 @@ use rungu_proto::CurrentUser as CurrentUserData;
 use sha2::{Digest, Sha256};
 use tracing::warn;
 
+use crate::bearer::{AuthRejection, BearerFailure, IssuerAuth};
 use crate::config::AuthConfig;
 use crate::session::validate_jwt;
 
@@ -101,6 +108,55 @@ fn agent_identity(agent_user_id: Option<&str>) -> CurrentUserData {
 #[derive(Debug, Clone, Default)]
 pub struct AgentUserId(pub Option<String>);
 
+/// Prefix reserved for integration keys (#273, not built yet). Such a token is
+/// refused for now and never tried as an issuer token.
+const INTEGRATION_KEY_PREFIX: &str = "rgk_";
+
+/// Judge a presented Bearer. The first category that claims it decides, and a
+/// wrong value in that category is a 401, never a retry as another one:
+///
+/// 1. exactly `RUNGU_API_KEY` (constant time);
+/// 2. `rgk_` prefix: reserved for integration keys, refused for now;
+/// 3. three dot-separated segments: an issuer token, when issuer auth is on;
+/// 4. anything else: refused.
+///
+/// A wrong key never falls through to cookies; the caller returns whatever
+/// this returns.
+async fn authenticate_bearer(
+    config: &AuthConfig,
+    agent_id: &AgentUserId,
+    issuer: &IssuerAuth,
+    bearer: &str,
+) -> Result<CurrentUserData, AuthRejection> {
+    if api_key_matches(config, bearer) {
+        return Ok(agent_identity(agent_id.0.as_deref()));
+    }
+    let refused = |why: &str| {
+        warn!(why, "Rejected request with invalid Bearer credential");
+        match issuer.0.as_deref() {
+            Some(verifier) => AuthRejection::invalid_token(verifier.challenge()),
+            None => AuthRejection::unauthorized(),
+        }
+    };
+    if bearer.starts_with(INTEGRATION_KEY_PREFIX) {
+        return Err(refused("integration_key_not_supported"));
+    }
+    let Some(verifier) = issuer.0.as_deref() else {
+        return Err(refused("invalid_api_key"));
+    };
+    if bearer.split('.').count() != 3 {
+        return Err(refused("not_a_jwt"));
+    }
+    match verifier.verify(bearer).await {
+        Ok(user) => Ok(user),
+        Err(BearerFailure::Unavailable) => {
+            warn!("Issuer token could not be verified: issuer_unavailable");
+            Err(AuthRejection::unavailable())
+        }
+        Err(BearerFailure::Invalid(reason)) => Err(refused(reason)),
+    }
+}
+
 /// Extract a Bearer token from the `Authorization` header, if any.
 fn extract_bearer(parts: &Parts) -> Option<String> {
     let header = parts.headers.get(axum::http::header::AUTHORIZATION)?;
@@ -127,30 +183,29 @@ where
     S: Send + Sync,
     AuthConfig: FromRef<S>,
     AgentUserId: FromRef<S>,
+    IssuerAuth: FromRef<S>,
 {
-    type Rejection = axum::http::StatusCode;
+    type Rejection = AuthRejection;
 
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
         let config = AuthConfig::from_ref(state);
         let agent_id = AgentUserId::from_ref(state);
 
-        // Machine access (#189). A presented-but-wrong key is an immediate
-        // 401 — never fall through to cookie auth (prevents confusion attacks).
+        // Machine access (#189). A presented Bearer decides the request: a
+        // wrong key (or a refused issuer token) is a 401 — never fall through
+        // to cookie auth (prevents confusion attacks).
         if let Some(bearer) = extract_bearer(parts) {
-            if api_key_matches(&config, &bearer) {
-                return Ok(CurrentUser(agent_identity(agent_id.0.as_deref())));
-            }
-            warn!("Rejected request with invalid API key");
-            return Err(axum::http::StatusCode::UNAUTHORIZED);
+            let issuer = IssuerAuth::from_ref(state);
+            return authenticate_bearer(&config, &agent_id, &issuer, &bearer).await.map(CurrentUser);
         }
 
-        let token = extract_session_token(parts).ok_or(axum::http::StatusCode::UNAUTHORIZED)?;
+        let token = extract_session_token(parts).ok_or_else(AuthRejection::unauthorized)?;
 
         match validate_jwt(&token, &config.app_secret) {
             Ok(user) => Ok(CurrentUser(user)),
             Err(e) => {
                 warn!(error = %e, "Invalid or expired JWT session token");
-                Err(axum::http::StatusCode::UNAUTHORIZED)
+                Err(AuthRejection::unauthorized())
             }
         }
     }
@@ -170,6 +225,7 @@ where
     S: Send + Sync,
     AuthConfig: FromRef<S>,
     AgentUserId: FromRef<S>,
+    IssuerAuth: FromRef<S>,
 {
     type Rejection = std::convert::Infallible;
 
@@ -178,11 +234,10 @@ where
         let agent_id = AgentUserId::from_ref(state);
 
         if let Some(bearer) = extract_bearer(parts) {
-            if api_key_matches(&config, &bearer) {
-                return Ok(Self { user: Some(agent_identity(agent_id.0.as_deref())) });
-            }
-            warn!("Rejected optional-auth request with invalid API key");
-            return Ok(Self { user: None });
+            // A refused Bearer reads as anonymous here, never as the cookie user.
+            let issuer = IssuerAuth::from_ref(state);
+            let user = authenticate_bearer(&config, &agent_id, &issuer, &bearer).await.ok();
+            return Ok(Self { user });
         }
 
         let Some(token) = extract_session_token(parts) else {
@@ -233,6 +288,12 @@ mod tests {
     impl FromRef<TestState> for AgentUserId {
         fn from_ref(_state: &TestState) -> Self {
             AgentUserId(None)
+        }
+    }
+
+    impl FromRef<TestState> for IssuerAuth {
+        fn from_ref(_state: &TestState) -> Self {
+            IssuerAuth::default()
         }
     }
 
