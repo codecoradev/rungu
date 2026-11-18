@@ -236,6 +236,9 @@ impl McpOAuth {
         if url.query().is_some() || url.fragment().is_some() {
             return Err("RUNGU_API_RESOURCE_URL must not have a query or fragment".into());
         }
+        if !url.username().is_empty() || url.password().is_some() {
+            return Err("RUNGU_API_RESOURCE_URL must not contain credentials".into());
+        }
         if resource == self.resource() || url == self.resource {
             return Err("RUNGU_API_RESOURCE_URL must differ from RUNGU_MCP_RESOURCE_URL".into());
         }
@@ -438,10 +441,12 @@ impl McpOAuth {
     /// issuer that lets people type any address and omits the claim would
     /// have let them claim an admin's. Issuers that verify at signup but
     /// don't emit the claim opt in with `RUNGU_MCP_OAUTH_ALLOW_UNVERIFIED_EMAIL`.
-    fn check_verified(verified: Option<bool>, allow_missing: bool) -> Result<(), Reject> {
+    /// `Ok(true)` when the claim was missing and that was tolerated, so the
+    /// caller knows the identity it resolves is only leniently verified.
+    fn check_verified(verified: Option<bool>, allow_missing: bool) -> Result<bool, Reject> {
         match verified {
-            Some(true) => Ok(()),
-            None if allow_missing => Ok(()),
+            Some(true) => Ok(false),
+            None if allow_missing => Ok(true),
             _ => Err(Reject::UnverifiedEmail),
         }
     }
@@ -510,8 +515,9 @@ impl McpOAuth {
 
         // A claim the token itself makes about its email is judged on every
         // request, before any cached identity is considered.
+        let mut lenient_used = false;
         if claims.email.is_some() {
-            Self::check_verified(claims.email_verified, allow_missing_verified)?;
+            lenient_used |= Self::check_verified(claims.email_verified, allow_missing_verified)?;
         }
         let claimed_email = claims.email.as_deref().map(|e| e.trim().to_lowercase());
         if let Some(hit) = self.cache.lock().await.actors.get(&sub)
@@ -533,7 +539,8 @@ impl McpOAuth {
                     return Err(Reject::Invalid("userinfo_subject_mismatch"));
                 }
                 let email = info.get("email").and_then(Value::as_str).ok_or(Reject::NoEmail)?.to_string();
-                Self::check_verified(info.get("email_verified").and_then(Value::as_bool), allow_missing_verified)?;
+                lenient_used |=
+                    Self::check_verified(info.get("email_verified").and_then(Value::as_bool), allow_missing_verified)?;
                 (email, info.get("name").and_then(Value::as_str).map(str::to_string))
             }
         };
@@ -561,12 +568,7 @@ impl McpOAuth {
         }
         cache.actors.insert(
             sub,
-            CachedActor {
-                at: Instant::now(),
-                actor: actor.clone(),
-                email: email.clone(),
-                lenient: allow_missing_verified,
-            },
+            CachedActor { at: Instant::now(), actor: actor.clone(), email: email.clone(), lenient: lenient_used },
         );
         Ok((actor, email))
     }

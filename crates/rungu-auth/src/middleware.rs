@@ -400,4 +400,43 @@ mod tests {
         assert!(result.is_ok());
         assert!(result.unwrap().user.is_none());
     }
+
+    /// A stand-in issuer verifier that counts how often it is consulted.
+    struct CountingVerifier(std::sync::Arc<std::sync::atomic::AtomicUsize>);
+
+    impl crate::bearer::BearerVerifier for CountingVerifier {
+        fn verify<'a>(&'a self, _token: &'a str) -> crate::bearer::VerifyFuture<'a> {
+            self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Box::pin(async { Err(BearerFailure::Invalid("stub")) })
+        }
+
+        fn challenge(&self) -> String {
+            "Bearer error=\"invalid_token\"".to_string()
+        }
+    }
+
+    #[tokio::test]
+    async fn an_integration_key_prefix_never_reaches_the_issuer_verifier() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let calls = std::sync::Arc::new(AtomicUsize::new(0));
+        let issuer = IssuerAuth(Some(std::sync::Arc::new(CountingVerifier(calls.clone()))));
+        let config = test_config();
+        let agent = AgentUserId(None);
+        let refused = |r: Result<CurrentUserData, AuthRejection>| r.unwrap_err().status();
+
+        // Three segments: without the `rgk_` rule this would be judged as a JWT.
+        let r = authenticate_bearer(&config, &agent, &issuer, "rgk_a.b.c").await;
+        assert_eq!(refused(r), axum::http::StatusCode::UNAUTHORIZED);
+        assert_eq!(calls.load(Ordering::SeqCst), 0, "an rgk_ value is never tried as an issuer token");
+
+        // A plain three-segment value is the verifier's to judge, once.
+        let r = authenticate_bearer(&config, &agent, &issuer, "a.b.c").await;
+        assert_eq!(refused(r), axum::http::StatusCode::UNAUTHORIZED);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+
+        // Not a JWT at all: refused without asking.
+        let r = authenticate_bearer(&config, &agent, &issuer, "opaque-value").await;
+        assert_eq!(refused(r), axum::http::StatusCode::UNAUTHORIZED);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
 }

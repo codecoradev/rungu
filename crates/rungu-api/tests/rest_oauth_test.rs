@@ -136,7 +136,9 @@ async fn audiences_are_separate_for_rest_and_mcp() {
     assert_eq!(mcp_list(&app, &for_rest).await.status, StatusCode::UNAUTHORIZED);
     assert_eq!(create_post(&app, &for_rest).await.status, StatusCode::CREATED);
 
-    // A token naming both is fine for both; any other audience for neither.
+    // A token naming both resources works on both (separation relies on the
+    // issuer minting one audience per token, as the docs say); any other
+    // audience works on neither.
     let mut both = good_claims(&issuer);
     both["aud"] = json!([RESOURCE, API_RESOURCE, format!("{}/userinfo", issuer.url)]);
     let both = sign(&issuer, both);
@@ -299,6 +301,32 @@ async fn the_api_key_and_cookies_keep_working_and_a_wrong_key_never_falls_throug
     assert_eq!(r.status, StatusCode::UNAUTHORIZED);
 }
 
+#[tokio::test]
+async fn a_refused_bearer_is_anonymous_on_an_optional_route_even_with_a_valid_cookie() {
+    let issuer = start_issuer().await;
+    let (app, store) = app_with(Some(&issuer.url), api_opts()).await;
+    let bob = user(&store, "bob@example.test").await;
+    let jwt = rungu_auth::session::issue_jwt(
+        &CurrentUser { id: bob.id.clone(), email: bob.email.clone(), role: bob.role },
+        "test-secret",
+    )
+    .unwrap();
+    let cookie = format!("session={jwt}");
+    let made = rest(&app, "POST", "/projects/test-app/posts", &[("cookie", &cookie)], json!({ "title": "Mine" })).await;
+    assert_eq!(made.status, StatusCode::CREATED, "{}", made.json);
+    let uri = format!("/posts/{}", made.json["data"]["id"].as_str().unwrap());
+
+    // The cookie alone: the author may edit.
+    let r = rest(&app, "GET", &uri, &[("cookie", &cookie)], Value::Null).await;
+    assert_eq!(r.json["data"]["permissions"]["can_edit"], true, "{}", r.json);
+
+    // A forged issuer token next to the same cookie: anonymous, not the cookie user.
+    let forged = format!("Bearer {}", api_token(&test_issuer_forger(&issuer), "s", "x@example.test"));
+    let r = rest(&app, "GET", &uri, &[("authorization", &forged), ("cookie", &cookie)], Value::Null).await;
+    assert_eq!(r.status, StatusCode::OK);
+    assert_eq!(r.json["data"]["permissions"]["can_edit"], false, "{}", r.json);
+}
+
 /// An issuer handle that signs with a key the real one doesn't know.
 fn test_issuer_forger(real: &Issuer) -> Issuer {
     Issuer {
@@ -361,6 +389,7 @@ fn the_rest_resource_is_validated_at_startup() {
     assert!(with("http://rungu.example/api").unwrap().contains("https"));
     assert!(with("https://rungu.example/api?x=1").unwrap().contains("query"));
     assert!(with("https://rungu.example/api#frag").unwrap().contains("fragment"));
+    assert!(with("https://user:pw@rungu.example/api").unwrap().contains("credentials"));
     assert!(with("https://rungu.example/mcp").unwrap().contains("differ"));
     assert!(with("https://rungu.example/api").is_none());
     assert!(with("http://localhost:3000/api").is_none(), "loopback may be http, as for /mcp");
