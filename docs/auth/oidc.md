@@ -37,6 +37,10 @@ If `OIDC_ISSUER` is set, `OIDC_CLIENT_ID` and `OIDC_CLIENT_SECRET` are required,
 
 The same Gatehouse can authenticate remote MCP clients such as Claude connectors: see [MCP](../integrations/mcp.md#connect-from-claude-oauth). Both use the same email-based identity, so a person is one Rungu user in the browser and over MCP.
 
+## Using the same issuer for the REST API
+
+Set `RUNGU_API_RESOURCE_URL` as well and a product backend can call `/api` with the user's access token from this issuer. The audience is a separate value from the `/mcp` one, requests run as `member` whatever `ADMIN_EMAILS` says, and the email must be verified. See [REST API](../integrations/api.md#issuer-access-tokens).
+
 ## Not covered yet
 
 Refresh tokens, RP-initiated logout and back-channel logout. Signing out of Rungu ends the Rungu session only.

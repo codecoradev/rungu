@@ -4,6 +4,16 @@
 
 ### Added
 
+- **Issuer access tokens on the REST API** (#272). With
+  `RUNGU_MCP_OAUTH_ISSUER` and the new `RUNGU_API_RESOURCE_URL` set, `/api`
+  accepts `Authorization: Bearer <access token>` from that issuer, so a product
+  backend can act as the signed-in person. It reuses the `/mcp` verification
+  (JWKS, `iss`, `aud`, `exp`, verified email, no `cnf`, reserved emails
+  refused) with its own audience, so a token for one is not valid for the
+  other. These requests always run as `member`, never admin, and
+  `RUNGU_MCP_OAUTH_ALLOW_UNVERIFIED_EMAIL` does not apply. Bearer order: the
+  API key, then `rgk_` (reserved, refused), then a three-part JWT, else 401.
+  Off unless the new variable is set. See `docs/integrations/api.md`.
 - **Generic OpenID Connect login** (#267). `OIDC_ISSUER`, `OIDC_CLIENT_ID`
   and `OIDC_CLIENT_SECRET` (and an optional `OIDC_NAME` label) add a login
   button for any OIDC issuer, such as Gatehouse. Endpoints come from the
