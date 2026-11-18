@@ -335,6 +335,7 @@ async fn an_unreachable_issuer_is_a_503_not_a_reason_to_log_in_again() {
         key,
         jwks_hits: Arc::new(AtomicUsize::new(0)),
         revoked: Arc::new(AtomicBool::new(false)),
+        unmarked: Arc::new(AtomicBool::new(false)),
     };
     let token = good_token(&fake);
     let r = mcp_call(&app, &token, "tools/list", json!({})).await;

@@ -217,11 +217,38 @@ async fn the_mcp_unverified_email_opt_out_is_not_inherited_by_rest() {
 }
 
 #[tokio::test]
+async fn an_identity_resolved_under_the_mcp_opt_out_does_not_serve_rest() {
+    // The issuer never emits email_verified, and the operator opted /mcp in.
+    // The access token carries no email, so the person is resolved through
+    // userinfo and cached by subject. That cache is shared with REST, which
+    // must still apply its own, stricter rule.
+    let issuer = start_issuer().await;
+    issuer.unmarked.store(true, Ordering::SeqCst);
+    let opts = Opts { allow_unverified_email: true, ..api_opts() };
+    let (app, _) = app_with(Some(&issuer.url), opts).await;
+
+    // /mcp, opted in: accepted, and the identity is cached.
+    assert_eq!(mcp_list(&app, &good_token_for(&issuer, RESOURCE)).await.status, StatusCode::OK);
+    // REST, same person, inside the cache lifetime: refused all the same.
+    let r = create_post(&app, &good_token_for(&issuer, API_RESOURCE)).await;
+    assert_eq!(r.status, StatusCode::UNAUTHORIZED, "REST must not reuse an identity that /mcp accepted leniently");
+    // The other way round is fine: a strictly resolved identity may serve /mcp.
+    issuer.unmarked.store(false, Ordering::SeqCst);
+    assert_eq!(create_post(&app, &good_token_for(&issuer, API_RESOURCE)).await.status, StatusCode::CREATED);
+    assert_eq!(mcp_list(&app, &good_token_for(&issuer, RESOURCE)).await.status, StatusCode::OK);
+}
+
+#[tokio::test]
 async fn an_unreachable_issuer_is_a_503() {
     let url = "http://127.0.0.1:9";
     let (app, _) = app_with(Some(url), api_opts()).await;
-    let fake =
-        Issuer { url: url.into(), key: test_key("k1"), jwks_hits: Default::default(), revoked: Default::default() };
+    let fake = Issuer {
+        url: url.into(),
+        key: test_key("k1"),
+        jwks_hits: Default::default(),
+        revoked: Default::default(),
+        unmarked: Default::default(),
+    };
     let r = create_post(&app, &api_token(&fake, "s1", "x@example.test")).await;
     assert_eq!(r.status, StatusCode::SERVICE_UNAVAILABLE);
     assert!(r.headers.get("www-authenticate").is_none(), "no challenge: the token isn't at fault");
@@ -274,7 +301,13 @@ async fn the_api_key_and_cookies_keep_working_and_a_wrong_key_never_falls_throug
 
 /// An issuer handle that signs with a key the real one doesn't know.
 fn test_issuer_forger(real: &Issuer) -> Issuer {
-    Issuer { url: real.url.clone(), key: test_key("k1"), jwks_hits: Default::default(), revoked: Default::default() }
+    Issuer {
+        url: real.url.clone(),
+        key: test_key("k1"),
+        jwks_hits: Default::default(),
+        revoked: Default::default(),
+        unmarked: Default::default(),
+    }
 }
 
 #[tokio::test]

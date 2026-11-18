@@ -51,6 +51,8 @@ pub struct Issuer {
     pub jwks_hits: Arc<AtomicUsize>,
     /// While set, userinfo answers 401 (a banned person / revoked token).
     pub revoked: Arc<AtomicBool>,
+    /// While set, userinfo leaves out `email_verified` (an issuer that never emits it).
+    pub unmarked: Arc<AtomicBool>,
 }
 
 /// Start the fake issuer. Its userinfo knows one person per token `sub`.
@@ -63,6 +65,8 @@ pub async fn start_issuer() -> Issuer {
     let hits = jwks_hits.clone();
     let revoked = Arc::new(AtomicBool::new(false));
     let userinfo_revoked = revoked.clone();
+    let unmarked = Arc::new(AtomicBool::new(false));
+    let userinfo_unmarked = unmarked.clone();
     let metadata = json!({
         "issuer": url,
         "jwks_uri": format!("{url}/jwks"),
@@ -85,12 +89,16 @@ pub async fn start_issuer() -> Issuer {
                 if headers.get("authorization").is_none() || userinfo_revoked.load(Ordering::SeqCst) {
                     return (StatusCode::UNAUTHORIZED, axum::Json(json!({}))).into_response_pair();
                 }
-                (StatusCode::OK, axum::Json(json!({ "sub": "user-1", "email": "Alice@Example.test", "email_verified": true, "name": "Alice" })))
-                    .into_response_pair()
+                let mut info =
+                    json!({ "sub": "user-1", "email": "Alice@Example.test", "email_verified": true, "name": "Alice" });
+                if userinfo_unmarked.load(Ordering::SeqCst) {
+                    info.as_object_mut().map(|o| o.remove("email_verified"));
+                }
+                (StatusCode::OK, axum::Json(info)).into_response_pair()
             }),
         );
     tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
-    Issuer { url, key, jwks_hits, revoked }
+    Issuer { url, key, jwks_hits, revoked, unmarked }
 }
 
 pub trait IntoPair {

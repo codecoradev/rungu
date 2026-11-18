@@ -98,6 +98,17 @@ struct Discovery {
     raw: Value,
 }
 
+/// A person the verifier already resolved for a subject.
+struct CachedActor {
+    at: Instant,
+    actor: Actor,
+    email: String,
+    /// Resolved while a missing `email_verified` claim was tolerated (the
+    /// `/mcp` opt-out). Such an entry must never serve a request that
+    /// requires the claim, such as REST; a strict entry serves both.
+    lenient: bool,
+}
+
 #[derive(Default)]
 struct Cache {
     discovery: Option<(Instant, Discovery)>,
@@ -107,7 +118,7 @@ struct Cache {
     /// When the JWKS was last *attempted* (success or not).
     jwks_fetched: Option<Instant>,
     /// Resolved actor per subject, with the email it was resolved for.
-    actors: HashMap<String, (Instant, Actor, String)>,
+    actors: HashMap<String, CachedActor>,
 }
 
 /// An OAuth issuer Rungu trusts for `/mcp`.
@@ -503,11 +514,12 @@ impl McpOAuth {
             Self::check_verified(claims.email_verified, allow_missing_verified)?;
         }
         let claimed_email = claims.email.as_deref().map(|e| e.trim().to_lowercase());
-        if let Some((at, actor, email)) = self.cache.lock().await.actors.get(&sub)
-            && at.elapsed() < ACTOR_TTL
-            && claimed_email.as_ref().is_none_or(|e| e == email)
+        if let Some(hit) = self.cache.lock().await.actors.get(&sub)
+            && hit.at.elapsed() < ACTOR_TTL
+            && (allow_missing_verified || !hit.lenient)
+            && claimed_email.as_ref().is_none_or(|e| *e == hit.email)
         {
-            return Ok((actor.clone(), email.clone()));
+            return Ok((hit.actor.clone(), hit.email.clone()));
         }
 
         // Some access tokens carry no email: ask the issuer who this is.
@@ -542,12 +554,20 @@ impl McpOAuth {
 
         let mut cache = self.cache.lock().await;
         if cache.actors.len() >= MAX_CACHED_ACTORS {
-            cache.actors.retain(|_, (at, _, _)| at.elapsed() < ACTOR_TTL);
+            cache.actors.retain(|_, c| c.at.elapsed() < ACTOR_TTL);
             if cache.actors.len() >= MAX_CACHED_ACTORS {
                 cache.actors.clear();
             }
         }
-        cache.actors.insert(sub, (Instant::now(), actor.clone(), email.clone()));
+        cache.actors.insert(
+            sub,
+            CachedActor {
+                at: Instant::now(),
+                actor: actor.clone(),
+                email: email.clone(),
+                lenient: allow_missing_verified,
+            },
+        );
         Ok((actor, email))
     }
 }
