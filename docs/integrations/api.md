@@ -26,6 +26,49 @@ All mutating endpoints require authentication via session cookie (set by OAuth l
 Cookie: session=<JWT token>
 ```
 
+Servers can send `Authorization: Bearer <credential>` instead, see below.
+
+### Bearer credentials
+
+A request that carries a `Bearer` credential (`Authorization: Bearer <value>` with a non-empty value) is judged by that credential alone and never falls back to a cookie. A header with another scheme, or an empty value, is ignored and the cookie is considered. The first category that fits decides, and a wrong value is a `401`; it is never retried as another category:
+
+1. **The API key**: exactly `RUNGU_API_KEY` (constant-time comparison). Acts as the `ai-agent` admin.
+2. **`rgk_` prefix**: reserved for integration keys, which Rungu does not support yet. Always `401`; the issuer is never consulted.
+3. **Three dot-separated segments**: an issuer access token (below), when issuer tokens are enabled for REST. Otherwise `401`.
+4. **Anything else**: `401`.
+
+With neither `RUNGU_API_RESOURCE_URL` nor an issuer configured, only step 1 can succeed and nothing else changes for you.
+
+### Issuer access tokens
+
+A product backend can call the API with the user's own access token from your OpenID Connect issuer, so Rungu knows who the person is without trusting the product's word for it. Enable it with `RUNGU_MCP_OAUTH_ISSUER` and `RUNGU_API_RESOURCE_URL` (see [Configuration](../configuration.md)).
+
+```
+curl -X POST https://rungu.example.com/api/projects/my-app/posts \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"title": "Dark mode"}'
+```
+
+The token must be a JWT from the issuer (for example `https://identity.example.com`) that:
+
+- is signed with an RS256/384/512 or ES256/384 key from the issuer's JWKS, with `iss` equal to the issuer, `exp` and `nbf` honoured, and a `sub`;
+- has `aud` containing exactly `RUNGU_API_RESOURCE_URL`. **This is a different value from the `/mcp` audience** (`RUNGU_MCP_RESOURCE_URL`): a token whose audience is only `/mcp` is refused here, and one whose audience is only the REST resource is refused on `/mcp`. A token that names both resources is accepted on both, so ask the issuer for a token with a single audience (the RFC 8707 `resource` parameter) and do not request both resources for one client;
+- names a verified email, either as the `email` claim or through the issuer's `userinfo` endpoint, with `email_verified: true`. A missing claim is refused;
+- is not sender-constrained (no `cnf`: DPoP and mTLS-bound tokens are refused) and not opaque.
+
+The person is found or created by email exactly as for a web login, so `ADMIN_EMAILS` still decides the **stored** role, and `last_login` is updated whenever the identity is resolved again (at most every 60 seconds). **Role of the request:** requests made with an issuer token always run as `member`, even when the email is in `ADMIN_EMAILS` and even if the stored user is an admin. The token is forwarded through third-party backends and is not bound to a project, so it never carries admin rights. Admin actions need the web session or `RUNGU_API_KEY`. Rows the person creates are authored by their user id. Rungu remembers who a token subject is for 60 seconds, shared with `/mcp`; a token the issuer has revoked can keep working for up to that long when it carries no `email` claim, because `userinfo` is not asked again while the identity is remembered.
+
+The built-in `agent@rungu.local` and `mcp@rungu.local` identities can never be claimed this way.
+
+| Status | When |
+|--------|------|
+| `401` with `WWW-Authenticate: Bearer error="invalid_token"` | Bad signature, wrong issuer, wrong audience (including a `/mcp` token), expired or not yet valid, opaque or sender-constrained token, unverified or reserved email, or a token the issuer refuses at `userinfo`. With issuer tokens enabled this also covers a malformed Bearer, an `rgk_` value and a wrong API key |
+| `503` | The issuer's keys, metadata or `userinfo` could not be fetched. Keep the token and retry |
+| `401` (no challenge) | Issuer tokens are not enabled for REST (any Bearer that is not the API key) |
+
+Rungu does not publish RFC 9728 protected-resource metadata for the REST resource, so the challenge carries no `resource_metadata` link.
+
 ## Endpoints
 
 ### Projects
