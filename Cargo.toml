@@ -14,7 +14,7 @@ version = "0.7.0"
 edition = "2024"
 license = "Apache-2.0"
 repository = "https://github.com/codecoradev/rungu"
-rust-version = "1.88"
+rust-version = "1.94"
 
 # Workspace-wide lint config. `uninlined_format_args` is a style preference
 # (format!("...", x) vs format!("...{x}")); we allow it to avoid churn across
