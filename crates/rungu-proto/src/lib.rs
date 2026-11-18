@@ -10,9 +10,10 @@ use utoipa::ToSchema;
 // ── Enums ────────────────────────────────────────────────────────────────
 
 /// Post status lifecycle.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum PostStatus {
+    #[default]
     Open,
     Planned,
     InProgress,
@@ -20,40 +21,24 @@ pub enum PostStatus {
     Declined,
 }
 
-impl Default for PostStatus {
-    fn default() -> Self {
-        Self::Open
-    }
-}
-
 /// Post category type.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum PostCategory {
+    #[default]
     Feedback,
     Bug,
     Feature,
     Question,
 }
 
-impl Default for PostCategory {
-    fn default() -> Self {
-        Self::Feedback
-    }
-}
-
 /// User role.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum UserRole {
     Admin,
+    #[default]
     Member,
-}
-
-impl Default for UserRole {
-    fn default() -> Self {
-        Self::Member
-    }
 }
 
 /// OAuth provider name.
@@ -248,9 +233,10 @@ pub struct ListResponse<T> {
 }
 
 /// Sort options for posts.
-#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[derive(Default, Debug, Clone, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum PostSort {
+    #[default]
     Newest,
     Oldest,
     MostVotes,
@@ -259,12 +245,6 @@ pub enum PostSort {
     /// Vote velocity over the last 7 days (analytics `vote` events), tie-broken
     /// by total votes (#203). Falls back to vote totals for posts without data.
     Trending,
-}
-
-impl Default for PostSort {
-    fn default() -> Self {
-        Self::Newest
-    }
 }
 
 /// Query params for listing posts.

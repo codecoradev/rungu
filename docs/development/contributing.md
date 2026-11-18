@@ -6,7 +6,7 @@ Thanks for your interest in contributing to Rungu!
 
 ```bash
 # Prerequisites
-rustup (Rust 1.88+)
+rustup (Rust 1.94+)
 Node.js 22+
 
 # Clone

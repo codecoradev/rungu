@@ -29,7 +29,7 @@ Rungu is a lightweight, self-hosted feedback board written in Rust with an embed
 
 ## Rust Style
 
-- Edition 2024, MSRV 1.88
+- Edition 2024, MSRV 1.94
 - `thiserror` for library errors, `anyhow` for application errors
 - `tracing` for all logging (no `println!` in library code)
 - No `unwrap()` in production code — use `?` or explicit error handling

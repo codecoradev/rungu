@@ -4,6 +4,12 @@
 
 ### Added
 
+- **ADR 0001: feedback hub identity and integration** (#271, epic #270). Records
+  how several products send feedback into one Rungu instance: email as the
+  identity, four ways to act as a user (web login, issuer token, widget,
+  per-project integration key), and the rule that an identity asserted by an
+  integration never gets admin rights or a reserved identity. See
+  `docs/development/adr/0001-feedback-hub-identity.md`.
 - **Generic OpenID Connect login** (#267). `OIDC_ISSUER`, `OIDC_CLIENT_ID`
   and `OIDC_CLIENT_SECRET` (and an optional `OIDC_NAME` label) add a login
   button for any OIDC issuer, such as Gatehouse. Endpoints come from the
@@ -54,6 +60,15 @@
 
 ### Changed
 
+- **Rust 1.94 and sqlx 0.9** (#282). The minimum Rust version is now 1.94
+  (it was 1.88). `sqlx` 0.9.1 needs it, and it is the first `sqlx` whose
+  SQLite driver can use a `libsqlite3-sys` with the fix for RUSTSEC-2026-0459
+  (the bundled SQLite C library, 0.30.1 to 0.40.0), which Cargo Audit
+  reported. The pinned toolchain, the CI toolchain and the Docker build image
+  follow. `sqlx` 0.9 wants run-time SQL marked as audited: that is done in one
+  helper, `assembled_sql`, used only where the string is built from fixed
+  fragments and `?` placeholders (every request value is still bound), and
+  the migrations are now plain constants. Two Clippy 1.94 lints are fixed.
 - **MCP tools are declared once** (#249). Name, summary, parameters, access
   level, effect, the REST route they mirror and the handler live in one
   `Tool` entry in `rungu-mcp`. Dispatch looks tools up there, so there is no
@@ -124,6 +139,12 @@
 
 ### Fixed
 
+- **Web dependency advisories, part 1** (#281). `@sveltejs/kit` 2.70.4 and
+  `@sveltejs/adapter-static` 3.0.11 fix three advisories (route resolution and
+  `reroute` in SvelteKit, prerendered paths in the Vercel config). Three
+  remain and have no fix on SvelteKit 2: two remote-functions issues that
+  SvelteKit 3.1.1 fixes, and a `picomatch` ReDoS with no patched release. Bun
+  Audit stays red until they are resolved or accepted explicitly.
 - **README linked the CLI reference on a Pages domain we do not own** (#232).
   `rungu.pages.dev` was never ours (the docs project was renamed to
   `rungu-docs` in 0.1.1 because the name was taken) and now serves spam. The
