@@ -79,6 +79,9 @@ pub async fn serve(config: Config, pool: sqlx::AnyPool, is_sqlite: bool, listen:
     .map_err(|e| anyhow::anyhow!(e))?;
     if let Some(oauth) = &mcp.oauth {
         info!("MCP OAuth: accepting tokens from {} for {}", oauth.issuer(), oauth.resource());
+        if let Some(api) = oauth.api_resource() {
+            info!("REST API: accepting issuer tokens from {} for {}", oauth.issuer(), api);
+        }
     }
 
     let oidc = rungu_api::oidc_login::OidcLogin::from_env(&config.auth.app_url, http_client.clone())

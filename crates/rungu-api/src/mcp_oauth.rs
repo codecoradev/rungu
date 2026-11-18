@@ -117,7 +117,11 @@ pub struct McpOAuth {
     http: reqwest::Client,
     admin_emails: Vec<String>,
     /// Accept a token whose email carries no `email_verified` claim at all.
+    /// Applies to `/mcp` only; REST always requires `email_verified: true`.
     allow_unverified_email: bool,
+    /// The audience of REST access tokens (`RUNGU_API_RESOURCE_URL`), compared
+    /// exactly. `None` = the REST API takes no issuer tokens.
+    api_resource: Option<String>,
     cache: Mutex<Cache>,
     /// Serialises issuer refreshes so a burst of requests fetches once.
     refresh: Mutex<()>,
@@ -133,7 +137,8 @@ pub struct McpSettings {
 
 impl McpSettings {
     /// Read `RUNGU_MCP_OAUTH_ISSUER`, `RUNGU_MCP_RESOURCE_URL` (default
-    /// `<APP_URL>/mcp`) and `RUNGU_MCP_ALLOWED_ORIGINS`. A bad value is a
+    /// `<APP_URL>/mcp`), `RUNGU_API_RESOURCE_URL` (no default: REST accepts
+    /// issuer tokens only when it is set) and `RUNGU_MCP_ALLOWED_ORIGINS`. A bad value is a
     /// startup error: running with a half-configured issuer would silently
     /// fall back to API-key-only.
     pub fn from_env(app_url: &str, admin_emails: &[String], http: reqwest::Client) -> Result<Self, String> {
@@ -152,9 +157,17 @@ impl McpSettings {
                     var("RUNGU_MCP_RESOURCE_URL").unwrap_or_else(|| format!("{}/mcp", app_url.trim_end_matches('/')));
                 let mut oauth = McpOAuth::new(&issuer, &resource, admin_emails.to_vec(), http)?;
                 oauth.allow_unverified_email = flag("RUNGU_MCP_OAUTH_ALLOW_UNVERIFIED_EMAIL");
+                if let Some(api) = var("RUNGU_API_RESOURCE_URL") {
+                    oauth = oauth.with_api_resource(&api)?;
+                }
                 Some(Arc::new(oauth))
             }
         };
+        if oauth.is_none() && var("RUNGU_API_RESOURCE_URL").is_some() {
+            return Err(
+                "RUNGU_API_RESOURCE_URL needs RUNGU_MCP_OAUTH_ISSUER (the issuer whose tokens it accepts)".into()
+            );
+        }
         Ok(Self { oauth, extra_origins })
     }
 
@@ -188,9 +201,45 @@ impl McpOAuth {
             http,
             admin_emails,
             allow_unverified_email: false,
+            api_resource: None,
             cache: Mutex::default(),
             refresh: Mutex::default(),
         })
+    }
+
+    /// Accept a `/mcp` token whose email has no `email_verified` claim at all
+    /// (`RUNGU_MCP_OAUTH_ALLOW_UNVERIFIED_EMAIL`). Never applies to REST.
+    pub fn allowing_unverified_email(mut self) -> Self {
+        self.allow_unverified_email = true;
+        self
+    }
+
+    /// Also accept issuer tokens on the REST API, for `resource` as the token
+    /// audience. It must be an https URL (loopback excepted) without query or
+    /// fragment, and differ from the `/mcp` URL so a token minted for one
+    /// transport is never valid for the other.
+    pub fn with_api_resource(mut self, resource: &str) -> Result<Self, String> {
+        let resource = resource.trim();
+        let url = Url::parse(resource).map_err(|e| format!("RUNGU_API_RESOURCE_URL is not a URL: {e}"))?;
+        require_https(&url, "RUNGU_API_RESOURCE_URL")?;
+        if url.query().is_some() || url.fragment().is_some() {
+            return Err("RUNGU_API_RESOURCE_URL must not have a query or fragment".into());
+        }
+        if resource == self.resource() || url == self.resource {
+            return Err("RUNGU_API_RESOURCE_URL must differ from RUNGU_MCP_RESOURCE_URL".into());
+        }
+        self.api_resource = Some(resource.to_string());
+        Ok(self)
+    }
+
+    /// The audience REST tokens must carry, when REST issuer auth is on.
+    pub fn api_resource(&self) -> Option<&str> {
+        self.api_resource.as_deref()
+    }
+
+    /// The `WWW-Authenticate` value for a REST token that was refused.
+    pub fn api_challenge(&self) -> String {
+        "Bearer error=\"invalid_token\"".to_string()
     }
 
     pub fn issuer(&self) -> &str {
@@ -378,16 +427,40 @@ impl McpOAuth {
     /// issuer that lets people type any address and omits the claim would
     /// have let them claim an admin's. Issuers that verify at signup but
     /// don't emit the claim opt in with `RUNGU_MCP_OAUTH_ALLOW_UNVERIFIED_EMAIL`.
-    fn check_verified(&self, verified: Option<bool>) -> Result<(), Reject> {
+    fn check_verified(verified: Option<bool>, allow_missing: bool) -> Result<(), Reject> {
         match verified {
             Some(true) => Ok(()),
-            None if self.allow_unverified_email => Ok(()),
+            None if allow_missing => Ok(()),
             _ => Err(Reject::UnverifiedEmail),
         }
     }
 
-    /// Verify an access token and resolve the Rungu user behind it.
+    /// Verify an access token for `/mcp` and resolve the Rungu user behind it.
     pub async fn authenticate(&self, token: &str, store: &Store) -> Result<Actor, Reject> {
+        let (actor, _email) = self.verify(token, self.resource.as_str(), self.allow_unverified_email, store).await?;
+        Ok(actor)
+    }
+
+    /// Verify an access token for the REST API: the same checks and caches,
+    /// but for the REST audience, and `email_verified: true` is always
+    /// required (the `/mcp` opt-out is not inherited). Returns the user's
+    /// actor and email; capping the role is the caller's job.
+    pub async fn authenticate_api(&self, token: &str, store: &Store) -> Result<(Actor, String), Reject> {
+        let audience = self.api_resource.as_deref().ok_or(Reject::Invalid("rest_issuer_auth_disabled"))?;
+        self.verify(token, audience, false, store).await
+    }
+
+    /// One verifier for every transport: `audience` is the only value a token
+    /// must carry that differs between them. The actor cache is shared, which
+    /// is safe because the token is verified in full on every request and the
+    /// cache only remembers who a verified subject is.
+    async fn verify(
+        &self,
+        token: &str,
+        audience: &str,
+        allow_missing_verified: bool,
+        store: &Store,
+    ) -> Result<(Actor, String), Reject> {
         if token.split('.').count() != 3 {
             return Err(Reject::Opaque);
         }
@@ -400,7 +473,7 @@ impl McpOAuth {
         let mut validation = Validation::new(header.alg);
         // Some issuers (Auth0) put a trailing slash in `iss`; accept either form.
         validation.set_issuer(&[self.issuer.as_str(), &format!("{}/", self.issuer)]);
-        validation.set_audience(&[self.resource()]);
+        validation.set_audience(&[audience]);
         validation.set_required_spec_claims(&["exp", "sub", "iss", "aud"]);
         validation.validate_nbf = true;
         validation.leeway = 30;
@@ -427,17 +500,17 @@ impl McpOAuth {
         // A claim the token itself makes about its email is judged on every
         // request, before any cached identity is considered.
         if claims.email.is_some() {
-            self.check_verified(claims.email_verified)?;
+            Self::check_verified(claims.email_verified, allow_missing_verified)?;
         }
         let claimed_email = claims.email.as_deref().map(|e| e.trim().to_lowercase());
         if let Some((at, actor, email)) = self.cache.lock().await.actors.get(&sub)
             && at.elapsed() < ACTOR_TTL
             && claimed_email.as_ref().is_none_or(|e| e == email)
         {
-            return Ok(actor.clone());
+            return Ok((actor.clone(), email.clone()));
         }
 
-        // Gatehouse access tokens carry no email: ask the issuer who this is.
+        // Some access tokens carry no email: ask the issuer who this is.
         let (email, name) = match claims.email {
             Some(email) => (email, claims.name),
             None => {
@@ -448,7 +521,7 @@ impl McpOAuth {
                     return Err(Reject::Invalid("userinfo_subject_mismatch"));
                 }
                 let email = info.get("email").and_then(Value::as_str).ok_or(Reject::NoEmail)?.to_string();
-                self.check_verified(info.get("email_verified").and_then(Value::as_bool))?;
+                Self::check_verified(info.get("email_verified").and_then(Value::as_bool), allow_missing_verified)?;
                 (email, info.get("name").and_then(Value::as_str).map(str::to_string))
             }
         };
@@ -474,8 +547,8 @@ impl McpOAuth {
                 cache.actors.clear();
             }
         }
-        cache.actors.insert(sub, (Instant::now(), actor.clone(), email));
-        Ok(actor)
+        cache.actors.insert(sub, (Instant::now(), actor.clone(), email.clone()));
+        Ok((actor, email))
     }
 }
 

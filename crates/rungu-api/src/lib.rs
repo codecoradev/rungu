@@ -19,6 +19,7 @@ pub mod oidc_login;
 pub mod openapi;
 pub mod post_routes;
 pub mod project_routes;
+pub mod rest_oauth;
 pub mod vote_routes;
 pub mod webhook;
 pub mod webhook_routes;
@@ -76,6 +77,9 @@ pub struct AppState {
     /// OAuth issuer and extra origins for `/mcp` (off by default; see
     /// [`AppState::with_mcp`]).
     pub mcp: mcp_oauth::McpSettings,
+    /// Issuer tokens on the REST API (#272), derived from `mcp`; off unless
+    /// `RUNGU_API_RESOURCE_URL` is set. Extractors read it via `FromRef`.
+    pub issuer_auth: rungu_auth::IssuerAuth,
     /// Generic OIDC login provider (Gatehouse), off unless `OIDC_ISSUER` is set.
     pub oidc: Option<Arc<oidc_login::OidcLogin>>,
 }
@@ -104,12 +108,14 @@ impl AppState {
             license,
             agent_user_id,
             mcp: Default::default(),
+            issuer_auth: Default::default(),
             oidc: None,
         }
     }
 
     /// Enable OAuth access and extra browser origins for `/mcp` (#253).
     pub fn with_mcp(mut self, mcp: mcp_oauth::McpSettings) -> Self {
+        self.issuer_auth = rest_oauth::RestBearer::auth(mcp.oauth.as_ref(), &self.store);
         self.mcp = mcp;
         self
     }
@@ -137,6 +143,12 @@ impl FromRef<AppState> for rungu_auth::AuthConfig {
 impl FromRef<AppState> for rungu_auth::middleware::AgentUserId {
     fn from_ref(state: &AppState) -> Self {
         rungu_auth::middleware::AgentUserId((*state.agent_user_id).clone())
+    }
+}
+
+impl FromRef<AppState> for rungu_auth::IssuerAuth {
+    fn from_ref(state: &AppState) -> Self {
+        state.issuer_auth.clone()
     }
 }
 
