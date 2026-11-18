@@ -138,7 +138,7 @@ impl Store {
                  ORDER BY ({score}) DESC, p.vote_count DESC, p.created_at DESC LIMIT ?"
             );
             // Post ids are UUIDs, never empty, so "" excludes nothing.
-            let mut q = sqlx::query(&sql).bind(project_id).bind(exclude_id.unwrap_or(""));
+            let mut q = sqlx::query(assembled_sql(sql)).bind(project_id).bind(exclude_id.unwrap_or(""));
             // Placeholders in SQL order: WHERE pairs, then ORDER BY pairs.
             for _pass in 0..2 {
                 for t in &tokens {
@@ -290,13 +290,13 @@ impl Store {
             .context("Failed to delete comment")?;
 
         // Decrement comment_count if a row was deleted
-        if result.rows_affected() > 0 {
-            if let Some(pid) = post_id {
-                sqlx::query("UPDATE posts SET comment_count = MAX(0, comment_count - 1) WHERE id = ?")
-                    .bind(pid)
-                    .execute(&mut *tx)
-                    .await?;
-            }
+        if result.rows_affected() > 0
+            && let Some(pid) = post_id
+        {
+            sqlx::query("UPDATE posts SET comment_count = MAX(0, comment_count - 1) WHERE id = ?")
+                .bind(pid)
+                .execute(&mut *tx)
+                .await?;
         }
 
         tx.commit().await.context("Failed to commit comment deletion")?;

@@ -101,7 +101,7 @@ pub async fn run_migrations(pool: &AnyPool, database_url: &str) -> Result<()> {
         ]
     };
 
-    for sql in &migrations {
+    for sql in migrations {
         sqlx::query(sql).execute(pool).await.context("Failed to run migration")?;
     }
     Ok(())
