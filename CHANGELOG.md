@@ -54,6 +54,15 @@
 
 ### Changed
 
+- **Rust 1.94 and sqlx 0.9** (#282). The minimum Rust version is now 1.94
+  (it was 1.88). `sqlx` 0.9.1 needs it, and it is the first `sqlx` whose
+  SQLite driver can use a `libsqlite3-sys` with the fix for RUSTSEC-2026-0459
+  (the bundled SQLite C library, 0.30.1 to 0.40.0), which Cargo Audit
+  reported. The pinned toolchain, the CI toolchain and the Docker build image
+  follow. `sqlx` 0.9 wants run-time SQL marked as audited: that is done in one
+  helper, `assembled_sql`, used only where the string is built from fixed
+  fragments and `?` placeholders (every request value is still bound), and
+  the migrations are now plain constants. Two Clippy 1.94 lints are fixed.
 - **MCP tools are declared once** (#249). Name, summary, parameters, access
   level, effect, the REST route they mirror and the handler live in one
   `Tool` entry in `rungu-mcp`. Dispatch looks tools up there, so there is no
